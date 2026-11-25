@@ -15,6 +15,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/llm.py` | `call()`, the only way to call Claude; records each call's cost |
 | `app/budget.py` | The monthly AI budget: `GET` and `PUT /budget` |
 | `app/drafts.py` | Copilot drafts for a card and the user's edits: `POST /cards/{id}/drafts`, `PATCH /drafts/{id}` |
+| `app/reads.py` | The match read: inferences about a match, the user's corrections, card photos and the protected-trait opt-in |
 | `app/voice.py` | Questionnaire, style profile and similar past chats: routes under `/voice` |
 | `app/bios.py` | Bio and prompt rewrites per dating app: routes under `/bios` |
 | `app/preferences.py` | What the user wants, versioned: routes under `/preferences`, `current_preferences()` |
@@ -151,12 +152,14 @@ from app import llm
 result = llm.call(db, user.id, "draft", system="...", prompt="...")  # result.text, result.model, result.input_tokens, result.output_tokens
 ```
 
+- To show Claude images, pass `images=[...]`, a list of `https` URLs that Claude fetches.
+
 - The model is read from `ANTHROPIC_MODEL` (default `claude-fable-5-2`) and the key from `ANTHROPIC_API_KEY`. Compose passes both to the API and worker.
 - Every call inserts one row in `llm_calls`: `purpose` (the third argument, naming the feature), `model`, both token counts and `cost_usd`. The row is written in its own transaction, so it is kept when the calling job fails. `llm.spend(db, user_id)` is the user's total for the current calendar month (UTC) in USD.
 - **AI budget:** each user has a hard monthly cap, `users.ai_budget_usd`, default 50 USD. `GET /budget` returns `{"spend_usd", "cap_usd", "paused"}` and `PUT /budget` with `{"cap_usd": 20}` sets the cap (routes in `app/budget.py`). While the month's spend is at the cap, `call()` raises `llm.BudgetReached` without calling Claude (a route answers `402`; a job retries and then fails), and the worker skips autopilot jobs with the reason `AI budget reached`. The call that reaches the cap sends the user a push. The budget pause is computed, not a row in `autopilot_pauses`: a new month or a higher cap lifts it, `POST /autopilot/resume` does not, and it is not shown by `GET /autopilot/pause`. Pauses set for other reasons are untouched. Spend can pass the cap by the cost of calls already in flight.
 - Cost is tokens times the per-model price in `llm.PRICES` (USD per million tokens). The prices are copied by hand: confirm them against Anthropic's price list. A model missing from the table is charged at the default model's price.
 - A refusal raises `RuntimeError`. Server-side fallback models are not configured.
-- Tests never reach the API: the autouse `llm` fixture in `tests/conftest.py` replaces `complete()` with a stub. Set `llm.reply` to choose the text and read `llm.prompts` to see what was sent.
+- Tests never reach the API: the autouse `llm` fixture in `tests/conftest.py` replaces `complete()` with a stub. Set `llm.reply` to choose the text and read `llm.prompts`, `llm.systems` and `llm.images` to see what was sent.
 
 ## Voice
 
@@ -197,7 +200,7 @@ Routes are in `app/drafts.py`; the table is `drafts` (one row per draft).
 
 - A draft is `{"id", "card_id", "kind", "status", "original", "edited"}`. `original` is Claude's text and never changes; `edited` is `null` until the user edits. The text to use is `edited` if set, else `original`.
 - `status` is `pending` until the user approves or dismisses the draft (see "Review queue"). Nothing sends a draft yet: in copilot the user copies it.
-- The prompt holds the style profile, the card's app, name and notes, the conversation, and `similar_chats()` as examples.
+- The prompt holds the style profile, the card's app, name and notes, the match read (its `tone` sets the draft's tone), the conversation, and `similar_chats()` as examples.
 - The write route returns `409` until the style profile is written, and `502` if Claude's reply is empty.
 - A draft also has `guardrail` and `hot_lead`, the results of its Jev checks (see below).
 
@@ -243,6 +246,26 @@ All in `app/review.py`. A pending draft waits in the queue until the user approv
 - `is_hot_lead(db, card_id)` is the only definition of a hot lead. So far: the match sent a message within the last hour, or Jev's hot-lead triage flagged a pending draft of the card (`drafts.hot_lead`). Add date-coordination and handover signals there.
 - `POST /cards/{id}/drafts` calls `notify_if_hot()`, which sends one push at once for a hot lead and nothing otherwise. Call it wherever else an item joins the queue.
 - Approving sends nothing yet. `hand_on_approved_draft(db, user_id, draft)` is called once per approved draft and does nothing: sending through a connector goes there.
+
+## Match read
+
+Routes are in `app/reads.py`; the tables are `inferences` (one row per card and kind) and `card_photos`. Both are keyed by card, and deleting a card deletes its rows.
+
+| Route | Does |
+| --- | --- |
+| `POST /cards/{id}/read` | Have Claude read the match from the notes, the conversation and the card's photos, and store the inferences. |
+| `GET /cards/{id}/read` | The card's inferences. Empty until a read is made. |
+| `PATCH /inferences/{id}` | Store the user's correction. Body: `{"corrected": "..."}`. |
+| `POST /cards/{id}/photos` | Attach a photo of the match by `https` URL. Body: `{"url": "..."}`. Connectors and screenshot import can insert into `card_photos` directly. |
+| `GET` and `PUT /settings/protected-trait-guesses` | Read or set the opt-in. Body: `{"enabled": true}`. Off by default. |
+
+- An inference is `{"id", "card_id", "kind", "value", "evidence", "confidence", "corrected"}`. `kind` is `texting_style`, `interests`, `values`, `photos` or `tone`; `confidence` is 0 to 1. `value` is Claude's; the value to use is `corrected` if set, else `value`.
+- A new read replaces the uncorrected inferences. A corrected one keeps its correction and gets Claude's new `value` next to it.
+- `_allowed()` checks every inference Claude replies before it is stored, and drops it when: a field is missing, the evidence is empty or the confidence is outside 0 to 1; it is about anyone but the match (`about` is not `match`); it targets an insecurity; its kind is not listed above; or it guesses a protected trait (ethnicity, religion, health, sexuality, politics) and the user has not opted in. The `about`, `protected_trait` and `targets_insecurity` labels are Claude's own, so a mislabelled inference under an allowed kind gets through.
+- With the opt-in on, a protected trait may also be its own kind (`religion` and so on). Opting out hides stored protected-trait inferences from the read and from drafts; it does not delete them.
+- With no photos on the card the read is from text only.
+- Other server code reads the card's read with `read_lines(db, user_id, card_id)`.
+- The read route returns `502` if Claude's reply is not a JSON list; the last read is kept.
 
 ## Preferences
 
