@@ -62,9 +62,9 @@ CHECKS: dict[str, str] = {
         " workplace."
     ),
     "sensitive": "The sentence is about a sensitive or explicit topic: sex, health, trauma or politics, or is hostile.",
-    # Hot-lead triage, on drafts.
     # Swipe pre-filter, on a candidate's bio. `{subject}` is one of the user's dealbreakers.
     "dealbreaker": 'The sentence shows that its writer fits this dealbreaker: "{subject}".',
+    # Hot-lead triage, on drafts.
     "hot_lead": "The sentence shows the chat is about to turn into a date, so a reply should go out right away.",
 }
 
