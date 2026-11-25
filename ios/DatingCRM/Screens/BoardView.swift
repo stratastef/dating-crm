@@ -40,6 +40,7 @@ struct BoardView: View {
                 NavigationLink("Swipe") { SwipeView(client: client) }
                 NavigationLink("Dashboard") { DashboardView(client: client) }
                 NavigationLink("Preferences") { PreferencesView(client: client) }
+                NavigationLink("Photos") { PhotosView(client: client) }
                 Button("Sign out", action: signOut)
             }
             .refreshable { await load() }

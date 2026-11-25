@@ -129,6 +129,36 @@ struct APIClient {
         return decided.applied
     }
 
+    /// The user's own photos, best first once ranked.
+    func photos() async throws -> [ProfilePhoto] {
+        try await send("GET", "photos")
+    }
+
+    /// Stores one of the user's photos on the server. `jpeg` is the JPEG file itself.
+    func uploadPhoto(jpeg: Data) async throws -> ProfilePhoto {
+        try Self.decoder.decode(ProfilePhoto.self, from: await data("POST", "photos", body: jpeg, contentType: "image/jpeg"))
+    }
+
+    /// Has Claude rank all the photos. Each comes back with a rank, a reason and perhaps a light edit on offer.
+    func rankPhotos() async throws -> [ProfilePhoto] {
+        try await send("POST", "photos/rank")
+    }
+
+    /// The photo's image file, with the accepted edit applied if there is one.
+    func photoImage(id: Int) async throws -> Data {
+        try await data("GET", "photos/\(id)/image")
+    }
+
+    /// The photo as it would look with the edit on offer. The server makes it from the uploaded pixels.
+    func photoPreview(id: Int) async throws -> Data {
+        try await data("GET", "photos/\(id)/preview")
+    }
+
+    /// Accepts or rejects the edit on offer for a photo. Either way the offer is gone afterwards.
+    func decideEdit(photoID: Int, accept: Bool) async throws -> ProfilePhoto {
+        try await send("PUT", "photos/\(photoID)/edit", body: Self.encoder.encode(["accept": accept]))
+    }
+
     private func send<Response: Decodable>(_ method: String, _ path: String, body: Data? = nil) async throws -> Response {
         try Self.decoder.decode(Response.self, from: await data(method, path, body: body))
     }

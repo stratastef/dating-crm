@@ -1,7 +1,7 @@
 """create swipe_candidates table
 
-Revision ID: 0021_swipe_candidates
-Revises: 0020_calendar_holds
+Revision ID: 0022_swipe_candidates
+Revises: 0021_photos
 """
 
 import sqlalchemy as sa
@@ -10,8 +10,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 from app.tenancy import user_id_column
 
-revision = "0021_swipe_candidates"
-down_revision = "0020_calendar_holds"
+revision = "0022_swipe_candidates"
+down_revision = "0021_photos"
 branch_labels = None
 depends_on = None
 
