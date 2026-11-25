@@ -13,7 +13,7 @@ The SwiftUI client for the API in the repo root. It needs Xcode 27 and an iOS 18
 | `DatingCRM/Push.swift` | `Push` (device token, tapped card) and `AppDelegate`, which receives both from UIKit. |
 | `DatingCRM.entitlements` | The push notification entitlement. |
 | `DatingCRM/API/APIClient.swift` | Every call to the server. |
-| `DatingCRM/API/Models.swift` | `Stage`, `Card`, `Message`, `Preferences`, `DashboardWeek`: the JSON the server sends. |
+| `DatingCRM/API/Models.swift` | `Stage`, `Card`, `Message`, `Preferences`, `DashboardWeek`, `SwipeCandidate`: the JSON the server sends. |
 | `DatingCRM/Screens/` | One file per screen. |
 | `DatingCRMTests/` | Unit tests (Swift Testing). `StubServer` stands in for the server. |
 | `Info.plist` | Only the keys that build settings cannot express. The rest of the Info.plist is generated. |
@@ -50,6 +50,10 @@ After sign-in the app asks for permission to notify, gets a device token from Ap
 ## Review queue
 
 "Review" on the board opens `QueueView`: the pending drafts from `GET /queue`, hot leads first. Each can be edited in place, then approved or dismissed; approve saves the edit first. Items of a kind the app does not know are skipped.
+
+## Swipe copilot
+
+"Swipe" on the board opens `SwipeView`: the profiles from `GET /swipes`, each with the server's suggestion and its reason. "Find profiles" asks the server for new ones from Tinder. The user taps Like or Pass on every profile; the suggested one is bold. When the server could not reach the dating app, the swipe is saved and a line asks the user to swipe there by hand. Photos load straight from the dating app's image server.
 
 ## Call the API
 
