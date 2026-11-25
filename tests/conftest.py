@@ -72,15 +72,24 @@ def client(client_for):
 
 
 class StubLlm:
-    """Stands in for `app.llm.complete`. Set `reply` to choose the text; `prompts` records what was sent."""
+    """Stands in for `app.llm.complete`. Set `reply` to choose the text; `prompts` records what was sent.
+
+    `replies` are used up first, one per call, for a route that calls Claude more than once. `images` records
+    each `(media_type, data)` sent.
+    """
 
     def __init__(self):
         self.reply = "stub reply"
+        self.replies: list[str] = []
         self.prompts: list[str] = []
+        self.images: list[tuple[str, bytes]] = []
 
-    def __call__(self, system: str, prompt: str, max_tokens: int = 16000) -> Completion:
+    def __call__(self, system: str, prompt: str, max_tokens: int = 16000, image=None) -> Completion:
         self.prompts.append(prompt)
-        return Completion(text=self.reply, model="stub", input_tokens=1, output_tokens=1)
+        if image:
+            self.images.append(image)
+        text = self.replies.pop(0) if self.replies else self.reply
+        return Completion(text=text, model="stub", input_tokens=1, output_tokens=1)
 
 
 @pytest.fixture(autouse=True)

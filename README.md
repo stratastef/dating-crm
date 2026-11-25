@@ -14,6 +14,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/cards.py` | Match cards and their messages: routes under `/cards` |
 | `app/llm.py` | `call()`, the only way to call Claude; records each call's cost |
 | `app/drafts.py` | Copilot drafts for a card and the user's edits: `POST /cards/{id}/drafts`, `PATCH /drafts/{id}` |
+| `app/screenshots.py` | Screenshot copilot: `POST /screenshots` reads a shared screenshot into a card and a draft |
 | `app/voice.py` | Questionnaire, style profile and similar past chats: routes under `/voice` |
 | `app/bios.py` | Bio and prompt rewrites per dating app: routes under `/bios` |
 | `app/preferences.py` | What the user wants, versioned: routes under `/preferences`, `current_preferences()` |
@@ -147,11 +148,13 @@ from app import llm
 result = llm.call(db, user.id, "draft", system="...", prompt="...")  # result.text, result.model, result.input_tokens, result.output_tokens
 ```
 
+To have Claude look at a picture, add `image=("image/png", data)` (media type and bytes). Its tokens are in the recorded input tokens.
+
 - The model is read from `ANTHROPIC_MODEL` (default `claude-fable-5-2`) and the key from `ANTHROPIC_API_KEY`. Compose passes both to the API and worker.
 - Every call inserts one row in `llm_calls`: `purpose` (the third argument, naming the feature), `model`, both token counts and `cost_usd`. The row is written in the caller's transaction. `llm.spend(db, user_id)` is the user's total in USD.
 - Cost is tokens times the per-model price in `llm.PRICES` (USD per million tokens). The prices are copied by hand: confirm them against Anthropic's price list. A model missing from the table is charged at the default model's price.
 - A refusal raises `RuntimeError`. Server-side fallback models are not configured.
-- Tests never reach the API: the autouse `llm` fixture in `tests/conftest.py` replaces `complete()` with a stub. Set `llm.reply` to choose the text and read `llm.prompts` to see what was sent.
+- Tests never reach the API: the autouse `llm` fixture in `tests/conftest.py` replaces `complete()` with a stub. Set `llm.reply` to choose the text and read `llm.prompts` to see what was sent. For a route that calls Claude more than once, set `llm.replies` to a list; it is used up first, one per call. `llm.images` holds each image sent.
 
 ## Voice
 
@@ -194,6 +197,17 @@ Routes are in `app/drafts.py`; the table is `drafts` (one row per draft).
 - `status` is `pending` for every draft so far. Nothing sends a draft yet: in copilot the user copies it.
 - The prompt holds the style profile, the card's app, name and notes, the conversation, and `similar_chats()` as examples.
 - The write route returns `409` until the style profile is written, and `502` if Claude's reply is empty.
+
+## Screenshot import
+
+`POST /screenshots` in `app/screenshots.py` is the copilot path for every app, with or without a connector. The iOS share extension calls it.
+
+- **Request:** the body is the image itself, with `Content-Type: image/png` or `image/jpeg`, at most 5 MB. Another type is `415`, a larger body `413`, an empty one `422`.
+- **Read:** Claude reads the app, the match's name and the visible messages (`llm.call` with `purpose` `screenshot`). A reply that is not usable is `502`; the client can retry.
+- **Card:** the user's card with the same app and name, ignoring case, else a new card in `matched`. An existing card keeps everything but gains messages.
+- **Messages:** the screenshot usually repeats the end of the stored chat, so only what comes after that overlap is added, through `upsert_message()`.
+- **Answer:** `201` with a draft for the card, as `POST /cards/{id}/drafts` returns it, including its `409` until the style profile is written. On any error nothing is stored.
+- **Limits:** two matches with the same name on one app share a card. A screenshot of an older part of a chat is added again at the end. Message times are not read: new messages are stamped with the time of the import. The image is not kept. Reading a real screenshot with the real Claude API has not been tried; the tests use the stub.
 
 ## Preferences
 
