@@ -12,6 +12,7 @@ from app.db import database_url
 from app.jobs import enqueue_recurring, run_once
 
 # Import every module that registers job handlers here, so the worker knows them.
+import app.chat_autopilot  # noqa: F401
 import app.send  # noqa: F401
 import app.swipes  # noqa: F401  (swipe_autopilot)
 import app.sync  # noqa: F401

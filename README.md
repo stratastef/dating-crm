@@ -33,6 +33,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/calendar.py` | Google Calendar: routes under `/calendar`, `free_slots()`, `hold_slot()`, `release_holds()`, `confirm_date()` |
 | `app/review.py` | Review queue: `GET /queue`, approve and dismiss a draft, `is_hot_lead()` |
 | `app/handover.py` | Handover: pauses a card on a handover trigger, suggested replies, take-over and hand-back, `is_paused()` |
+| `app/chat_autopilot.py` | Chat autopilot: the `chat_reply` job, `GET` and `PUT /settings/ai-disclosure` |
 | `app/tinder.py` | `TinderConnector`: reads matches and messages from Tinder's unofficial web API |
 | `app/sync.py` | `PUT /connectors/{app}/token` and the `sync_matches` job |
 | `app/paid_items.py` | Paid items (Super Like, Rose, Boost): `propose()`, approve and decline routes, and `spend()`, the only code that spends one |
@@ -116,7 +117,7 @@ A card is one match. Routes are in `app/cards.py`; tables are `cards` and `messa
 - `stage` is one of `matched`, `chatting`, `number_swapped`, `date_set`, `dated`, `seeing_them`, `archived`. Anything else is `422`. `stage_changed_at` on the card is the time of the last stage change; there is no stage history table.
 - Stalled is a flag on the card, not a stage. The hourly `mark_stalled` job sets `stalled: true` on a card in `chatting`, `number_swapped` or `date_set` whose last message, from either side, is older than the user's `stalled_after_days` (a card with no messages counts from `stage_changed_at`). A stalled card has `suggested_actions: ["revive", "archive"]`; otherwise the list is empty. A new message from `them` clears the flag, and so does moving the card out of those three stages; archive is `PATCH /cards/{id}` with `stage: archived`.
 - `GET /settings` and `PATCH /settings` read and change the user's settings. `stalled_after_days` is a whole number of days, at least 1, default 3.
-- `PATCH /cards/{id}` also takes `date_rating` (1 to 5) and `date_note`, both null until the user rates the date. A good date is a rating of 4 or 5: `is_good_date()` in `app/cards.py` is the only definition, and the card's `good_date` field is its result.
+- `PATCH /cards/{id}` also takes `date_rating` (1 to 5) and `date_note`, both null until the user rates the date. A good date is a rating of 4 or 5: `is_good_date()` in `app/cards.py` is the only definition, and the card's `good_date` field is its result. The card's `led_to_date` is the chat's outcome label (see "Voice").
 - `app` is free text, for example `tinder` or `hinge`.
 - `external_id` is the ID the dating app gives the match or message. It is unique per user and app for cards, and per card for messages; a duplicate is `409`. Rows without one are never duplicates.
 
@@ -178,7 +179,9 @@ Routes and the job are in `app/voice.py`; the table is `voice_profiles` (one row
 | `GET /cards/{id}/similar-chats?limit=` | Past chats that led to a date, most similar to this card's conversation first. `limit` defaults to 3. |
 
 - The `voice_profile` job writes the style profile from the answers and the user's own messages (the newest 200). Saving answers and `POST /cards/{id}/messages` with `sender: me` queue it. Code that stores messages another way must call `queue_profile(db, user_id)`.
-- A chat led to a date if its card's stage is `date_set`, `dated` or `seeing_them`.
+- A chat led to a date if its card has `led_to_date: true`. A trigger on `cards` sets the label when the stage is `date_set`, `dated` or `seeing_them` or the date is rated, and nothing unsets it, so an archived card keeps it.
+- A chat that led to a good date (`is_good_date()`) ranks as if it were `GOOD_DATE_BOOST` (1.5) times as similar. Each result carries its `date_rating`.
+- The job also reads the newest 20 draft edits (`original` against `edited`), and `PATCH /drafts/{id}` queues it. See "Feedback loop".
 - Similarity is `similarity()` from the Postgres `pg_trgm` extension over the whole chat text, so it measures shared wording, not meaning. Other code calls `similar_chats(db, user_id, card_id, limit)`.
 
 ## Bios
@@ -229,7 +232,8 @@ Routes are in `app/drafts.py`; the table is `drafts` (one row per draft).
 - A draft is `{"id", "card_id", "kind", "status", "original", "edited"}`. `original` is Claude's text and never changes; `edited` is `null` until the user edits. The text to use is `edited` if set, else `original`.
 - `status` is `pending` until the user sends, approves or dismisses the draft (see "Review queue"). A sent or approved draft is `approved` (queued), then `sending` (the worker is sending it) and `sent` or `failed`. A dismissed draft is `dismissed`. The user can still copy any draft.
 - **Send:** the route answers `409` with the reason and queues nothing when the draft is not `pending`, the card's app is paused (the kill switch, for that app or all apps), the app has no connector, the card has no `external_id`, or `send` is unavailable (see "Connectors": not declared, switched off, copilot-only, no token).
-- **Queue a send from code:** `queue_send(db, user_id, draft_id, trigger)` in `app/send.py` is the one way to send a draft. It moves a `pending` draft to `approved` and queues a `send_draft` job in your transaction; it returns the draft, or `None` if the draft is not `pending`. `trigger` goes to the audit log. It does not check the pause or autonomy: the route checks the pause before it, and the job checks the pause again. The review queue approves the draft itself, so it calls `send_approved(db, user_id, draft_id, trigger)`, which queues the job for an already `approved` draft if the app can send.
+- **Queue a send from code:** `queue_send(db, user_id, draft_id, trigger)` in `app/send.py` is the one way to send a draft. It moves a `pending` draft to `approved` and queues a `send_draft` job in your transaction; it returns the draft, or `None` if the draft is not `pending`. `trigger` goes to the audit log. For a tap it does not check the pause or autonomy: the route checks the pause before it, and the job checks the pause again. A send no user asked for must pass `unattended=True`: see "Chat autopilot".
+- **Guardrail and the tap:** the user's tap or approval sends a draft with a guardrail hit, because the guardrail's job is to put the draft in front of them. The one exception is `denies_ai`: such a draft is never sent, by a tap (`409`), an approval (it stays `approved`) or the job, until the user edits it and the guardrail runs again. The review queue approves the draft itself, so it calls `send_approved(db, user_id, draft_id, trigger)`, which queues the job for an already `approved` draft if the app can send.
 - **The `send_draft` job** sends the text (`edited` if set, else `original`) with the connector's `send`, stores the message on the card under the app's message ID (so sync does not add it twice), writes an audit log entry (`type: message`, `target: card:<id>`) and sets `sent`. If the app became paused or `send` unavailable after the tap, nothing is sent and the draft goes back to `pending`.
 - **At most once:** the job commits `sending` before it calls the app. If the app answers with an error, or the worker dies before the job commits, the draft ends as `failed` and is never sent again, because the message may have gone out. A `failed` draft whose message did go out appears on the card at the next sync. To try again, write another draft.
 - The prompt holds the style profile, the card's app, name and notes, the match read (its `tone` sets the draft's tone), the conversation, and `similar_chats()` as examples.
@@ -250,7 +254,7 @@ Jev is a cheap yes/no classifier reached through treg. It judges one sentence at
 
 - The three functions split the text into sentences and ask about each. A check is hit if any sentence hits it.
 - Results are stored with the row. `messages.handover` is set for every new message from `them`, by `POST /cards/{id}/messages` and by `upsert_message`; it is `null` for the user's own messages. `drafts.guardrail` and `drafts.hot_lead` are set when a draft is written, and `PATCH /drafts/{id}` runs the guardrail again on the edit. The routes return these fields.
-- Never send a draft whose `guardrail` is not an empty list. Code that sends any other text must call `jev.guardrail_hits()` on it first.
+- Never send a draft unattended whose `guardrail` is not an empty list: `queue_send(..., unattended=True)` enforces it. Code that sends any other text must call `jev.guardrail_hits()` on it first.
 - Fail closed: when Jev is not configured or a call fails, `guardrail_hits` and `handover_hits` return `["unavailable"]`, which counts as a hit, and `is_hot_lead` returns `False`. Nothing is sent unattended without Jev.
 - The owner must set three variables for the API and the worker; Compose passes them through from your shell or `.env`. Until all three are set, every check fails closed as above.
 
@@ -326,6 +330,30 @@ All in `app/handover.py`. When a new message from the match hits the handover tr
 - Suggested replies: one Claude call (purpose `handover`) writes up to three. Each goes through `jev.guardrail_hits()` and is dropped on any hit, so no suggestion denies being AI. There are none when Jev is unavailable, the AI budget is reached or Claude fails; the card is paused and the push is sent all the same.
 - The push goes through `notify_if_hot()`; a pending handover is a hot lead. Its body is the suggestions, one per line.
 - A hit on a message that is not the card's newest does nothing. A hit on a message older than a day pauses the card without a Claude call or a push, so a first sync of old chats costs nothing and sends nothing. A hit on a card that is already paused changes nothing.
+
+## Chat autopilot
+
+All in `app/chat_autopilot.py`, plus the gate in `app/send.py`. With chat autonomy at `guardrails` or `full`, each new message from a match (`POST /cards/{id}/messages` and `upsert_message`) queues a `chat_reply` job for its card. The job writes a reply with `draft_for()` and sends it through `queue_send(db, user_id, draft_id, trigger, unattended=True)`.
+
+- **The gate:** `unattended_block(db, user_id, draft_id)` in `app/send.py` holds every rule for a message that goes out without the user. It is asked when the send is queued and again by the `send_draft` job just before the app is called, so a change in between counts. A blocked draft stays `pending`, which puts it in the review queue. It blocks when:
+  - `autopilot_block()` gives a reason: the kill switch or a ban pause, the AI budget, or chat autonomy below `guardrails`;
+  - the draft's `guardrail` is not an empty list: a hit, `["unavailable"]` or never checked;
+  - the card is paused for handover or taken over (`handover.is_paused()`);
+  - the card's stage is not `matched` or `chatting`: from Number swapped on, nothing is sent alone.
+- **Any other code that sends alone** must go through `queue_send(..., unattended=True)` too.
+- **Which messages get a reply:** only the card's newest message, from the match, sent within the last day, on a card with no draft that is `pending`, `approved` or `sending`. So a first sync of old chats sends nothing, two messages in a row get one reply, and a draft left in the review queue stops further replies on that card until the user sends or dismisses it.
+- **Date logistics:** Claude is told to name no day, time or place, and `jev.names_logistics()` checks its text; a hit adds `logistics` to the draft's `guardrail`, so it goes to the user. In `guardrails` mode a message from the match about logistics hands the card over as before. In `full` mode a message whose only handover hit is `logistics` does not pause the card. Instead the job:
+  - offers up to 2 slots from `calendar.free_slots()`, calls `hold_slot()` for each and adds the sentence that names them itself, so the only times in a message sent alone are held slots;
+  - if the card has holds, asks Claude (purpose `date_coordination`) whether the match accepts one, declines all, or says something else. Accepted: `confirm_date()` for that slot and the card moves to `date_set`, where autopilot stops; the reply waits in the review queue. Declined: `release_holds()` and a new offer. Anything else, no free slot or no connected calendar: the draft goes to the user with `logistics`.
+- **Audit:** the sent message's entry has the trigger `chat autopilot (<level>): reply to message <messages.id>`. Holds, releases and confirmations have `chat autopilot (full): offered a time`, `match declined` and `match agreed`.
+- **AI disclosure:** `GET` and `PUT /settings/ai-disclosure` with `{"enabled": true}`, on by default. While on, the first message sent alone to a match ends with `DISCLOSURE` ("Heads up: an AI assistant helps me write my messages here."). First means the card has no `chat autopilot` message in the audit log. The sentence is part of the draft's `original`, so the guardrail checks it and the user sees it if the draft is held back. It is per user, not per match's country: keep it on where the law requires disclosure, such as the EU.
+- **Limits:**
+  - Only replies: openers to new matches are not sent alone.
+  - Nothing queues a reply when autopilot is resumed, the autonomy is raised or a card is handed back; the match's next message does.
+  - Offered slots are 19:00 to 21:00 on the next 7 days in `USER_TIMEZONE` (an IANA name such as `Europe/Berlin`, default `UTC`; Compose passes it to the API and worker). The slot sentence is English.
+  - Holds of a draft the user dismisses stay until the card is archived.
+  - Jev's `logistics` check also covers exclusivity, so full mode answers such a message alone; only the `overpromise` guardrail and the rule given to Claude stand in the way of a promise.
+  - Not run against the real Tinder, Claude, Jev or Google.
 
 ## Preferences
 
@@ -553,11 +581,25 @@ All in `app/swipes.py`; the table is `swipe_candidates` (one row per profile an 
 - A candidate is `{"id", "app", "name", "bio", "photos", "suggestion", "reason", "source", "decision"}`. `photos` are URLs for the user to look at. `source` is the pre-filter that suggested: `jev` or `model`.
 - **Pre-filters, cheapest first:** `jev.dealbreaker_hit()` asks Jev about each bio sentence and each of the user's dealbreakers; a hit is a `pass` with no Claude call. The rest go to a cheap Claude model through `llm.call()` with purpose `swipe_prescreen`. The model is read from `SWIPE_PRESCREEN_MODEL` (default `claude-haiku-5-5`). It sees the preferences in force, the name and the bio. Photos are never analysed.
 - One request screens at most `BATCH` (10) new profiles, inside the request. A profile already stored is not screened again. At the AI budget the request stops screening and returns what it has. A model answer that is neither `like` nor `pass` stores nothing; the profile is screened again when the app offers it next.
-- **Manual swipes:** a decided row is kept with both `suggestion` and `decision`. These rows are the manual-swipe preference signal; nothing reads them yet.
+- **Manual swipes:** a decided row is kept with both `suggestion` and `decision`. These rows are the manual-swipe preference signal: the pre-screen prompt holds `feedback.swipe_lines()` (see "Feedback loop").
 - The decision route answers with the candidate plus `applied`. `applied: false` means the app was not reached (connector unavailable or failed, see "Connectors"): the swipe is stored and the user swipes in the dating app by hand.
 - `apply_decision(db, user_id, app, profile_id, decision)` is the one function that swipes through a connector. Swipe autopilot must call it and `record_action()`. It sends a plain like or pass and never spends a paid item.
 - The copilot routes do not read the swipe autonomy level: a request from the user is the consent.
 - Find and purge: a candidate is not a card. Find it with `GET /people/candidates` and purge it with `candidate_ids` (see "Find and purge"). The dating app may offer a purged profile again; it is then stored again.
+
+## Feedback loop
+
+Nothing is trained in v1. What the user did changes later prompts and retrieval only. `app/feedback.py` holds the swipe part and the export.
+
+| Signal | Changes |
+| --- | --- |
+| Chat outcome: `led_to_date` and `date_rating` on the card | `similar_chats()` returns only chats that led to a date, good dates first. |
+| Draft edit: `edited` differs from `original` | The `voice_profile` job reads the newest 20 edits under `<my_edits>`; an edit queues the job. |
+| Manual swipe against the suggestion | The pre-screen prompt lists the newest 10 under `<manual_swipes>` (bio, suggestion, decision). Unattended swipes and swipes that agree with the screen are left out. |
+| Date rating | The pre-screen prompt lists the newest 10 rated dates under `<rated_dates>`: the rating with the card's `notes` and `date_note`. |
+
+- `GET /feedback/export` returns the caller's labelled data as JSON Lines (`application/x-ndjson`), one example per line, for later fine-tuning. `type` is `chat` (`app`, `led_to_date`, `date_rating`, `good_date`, `messages`), `draft_edit` (`kind`, `original`, `edited`) or `swipe` (`app`, `bio`, `suggestion`, `decision`; manual swipes only). No names or IDs.
+- The export is read from the live tables at each request and stored nowhere, so a purged person is not in it. A table that stores feedback must reference `cards` or `swipe_candidates` with ON DELETE CASCADE.
 
 ## Swipe autopilot
 
@@ -590,7 +632,7 @@ All in `app/paid_items.py`; the table is `paid_item_proposals`. A paid item is a
 
 ## Tinder connector
 
-`app/tinder.py` reads your own Tinder account with your own web session token. It supports `read_matches`, `read_messages`, `send`, `read_candidates`, `like` and `pass`, and the paid items `super_like` and `boost`, which are spent only on the user's approval (see "Paid items"). Nothing sends or swipes on its own: a message goes out only when the user taps send on a draft (see "Drafts"), and a like or pass only when the user swipes on a candidate (see "Swipe copilot") or, once the user turns it on, from swipe autopilot (see "Swipe autopilot"). Set `CONNECTOR_DISABLED_CAPABILITIES=tinder:send` to keep it read-only. Tinder's terms do not allow this API use; see Risks in the spec.
+`app/tinder.py` reads your own Tinder account with your own web session token. It supports `read_matches`, `read_messages`, `send`, `read_candidates`, `like` and `pass`, and the paid items `super_like` and `boost`, which are spent only on the user's approval (see "Paid items"). A message goes out when the user taps send on a draft (see "Drafts"), or on its own only with chat autonomy at `guardrails` or `full` (see "Chat autopilot"). A like or pass goes out when the user swipes on a candidate (see "Swipe copilot"), or on its own only once the user turns swipe autopilot on (see "Swipe autopilot"). Set `CONNECTOR_DISABLED_CAPABILITIES=tinder:send` to keep it read-only. Tinder's terms do not allow this API use; see Risks in the spec.
 
 ### Capture and submit your token
 

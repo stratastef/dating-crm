@@ -13,7 +13,8 @@ from app import calendar
 from app import handover
 from app.auth import CurrentUser, Db
 from app.voice import queue_profile
-from app.jobs import handler
+from app.autopilot import autopilot_allowed
+from app.jobs import enqueue, handler
 
 router = APIRouter()
 
@@ -22,7 +23,8 @@ Stage = Literal["matched", "chatting", "number_swapped", "date_set", "dated", "s
 
 _COLUMNS = (
     "id, app, external_id, name, stage, stage_changed_at, notes, next_action, due_date, created_at,"
-    " stalled_at IS NOT NULL AS stalled, date_rating, date_note, handover, handover_suggestions"
+    " stalled_at IS NOT NULL AS stalled, date_rating, date_note, handover, handover_suggestions,"
+    " led_to_date"
 )
 
 # Only cards in these stages can be Stalled. Stalled is a flag (`cards.stalled_at`), not a stage.
@@ -71,6 +73,8 @@ class Card(BaseModel):
     # Paused for handover (see `app/handover.py`): `pending`, `taken_over` or null.
     handover: str | None
     handover_suggestions: list[str]
+    # Outcome label of the chat: the card was once in `date_set`, `dated` or `seeing_them`, or has a rating.
+    led_to_date: bool
 
     @computed_field
     @property
@@ -136,6 +140,13 @@ def has_message(db: Connection, card_id: int, external_id: str) -> bool:
     ).scalar_one()
 
 
+def _queue_reply(db: Connection, user_id: int, card_id: int) -> None:
+    """Call after each new message from the match: chat autopilot answers it, if it may act (`app/chat_autopilot.py`)."""
+    app = db.execute(text("SELECT app FROM cards WHERE id = :id"), {"id": card_id}).scalar_one()
+    if autopilot_allowed(db, user_id, app, "chat"):
+        enqueue(db, user_id, "chat_reply", {"app": app, "card_id": card_id})
+
+
 def upsert_message(
     db: Connection, user_id: int, card_id: int, external_id: str | None, sender: str, body: str, sent_at: datetime | str
 ) -> None:
@@ -183,6 +194,7 @@ def upsert_message(
         # shortcut: Jev is called inside the sync job, once per sentence and check, also for old messages
         # on a first sync. Move to its own job if a sync gets slow.
         handover.incoming(db, user_id, card_id, added.id, body)
+        _queue_reply(db, user_id, card_id)
 
 
 class CardChanges(BaseModel):
@@ -315,7 +327,9 @@ def add_message(card_id: int, message: NewMessage, user: CurrentUser, db: Db):
             text("UPDATE cards SET stalled_at = NULL WHERE id = :id AND user_id = :user_id"),
             {"id": card_id, "user_id": user.id},
         )
-        return {**row._mapping, "handover": handover.incoming(db, user.id, card_id, row.id, message.body)}
+        hits = handover.incoming(db, user.id, card_id, row.id, message.body)
+        _queue_reply(db, user.id, card_id)
+        return {**row._mapping, "handover": hits}
     return row
 
 

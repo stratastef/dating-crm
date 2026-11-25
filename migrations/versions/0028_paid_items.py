@@ -1,7 +1,7 @@
 """paid items: proposals that wait for the user's approval, and their audit types
 
-Revision ID: 0026_paid_items
-Revises: 0025_swipe_autopilot
+Revision ID: 0028_paid_items
+Revises: 0027_feedback
 """
 
 import sqlalchemy as sa
@@ -9,8 +9,8 @@ from alembic import op
 
 from app.tenancy import user_id_column
 
-revision = "0026_paid_items"
-down_revision = "0025_swipe_autopilot"
+revision = "0028_paid_items"
+down_revision = "0027_feedback"
 branch_labels = None
 depends_on = None
 
