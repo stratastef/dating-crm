@@ -41,7 +41,21 @@ struct APIClient {
         try await send("PUT", "preferences", body: Self.encoder.encode(preferences))
     }
 
+    /// Good dates per hour for every week with recorded time or a good date, oldest first.
+    func dashboard() async throws -> [DashboardWeek] {
+        try await send("GET", "dashboard")
+    }
+
+    /// Reports a stretch of time the user spent in the app.
+    func recordTime(seconds: Int) async throws {
+        _ = try await data("POST", "time", body: Self.encoder.encode(["seconds": seconds]))
+    }
+
     private func send<Response: Decodable>(_ method: String, _ path: String, body: Data? = nil) async throws -> Response {
+        try Self.decoder.decode(Response.self, from: await data(method, path, body: body))
+    }
+
+    private func data(_ method: String, _ path: String, body: Data? = nil) async throws -> Data {
         var request = URLRequest(url: baseURL.appending(path: path))
         request.httpMethod = method
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -52,7 +66,7 @@ struct APIClient {
         let (data, response) = try await transport(request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else { throw APIError(status: status) }
-        return try Self.decoder.decode(Response.self, from: data)
+        return data
     }
 
     // The only dates the app reads or writes are plain days such as `due_date`.

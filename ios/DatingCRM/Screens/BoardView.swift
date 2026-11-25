@@ -34,6 +34,7 @@ struct BoardView: View {
                 }
             }
             .toolbar {
+                NavigationLink("Dashboard") { DashboardView(client: client) }
                 NavigationLink("Preferences") { PreferencesView(client: client) }
                 Button("Sign out", action: signOut)
             }

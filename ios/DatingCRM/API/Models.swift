@@ -49,6 +49,17 @@ struct Message: Codable, Identifiable, Hashable {
     var body: String
 }
 
+/// One week on the dashboard. `week` is local midnight of the Monday it starts on.
+struct DashboardWeek: Codable, Identifiable, Equatable {
+    var week: Date
+    var goodDates: Int
+    var hours: Double
+    /// nil when no time was recorded that week.
+    var goodDatesPerHour: Double?
+
+    var id: Date { week }
+}
+
 /// What the user wants: wishes in plain words, plus must-haves and dealbreakers.
 struct Preferences: Codable, Equatable {
     var wishes = ""
