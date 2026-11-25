@@ -116,7 +116,7 @@ A card is one match. Routes are in `app/cards.py`; tables are `cards` and `messa
 - `stage` is one of `matched`, `chatting`, `number_swapped`, `date_set`, `dated`, `seeing_them`, `archived`. Anything else is `422`. `stage_changed_at` on the card is the time of the last stage change; there is no stage history table.
 - Stalled is a flag on the card, not a stage. The hourly `mark_stalled` job sets `stalled: true` on a card in `chatting`, `number_swapped` or `date_set` whose last message, from either side, is older than the user's `stalled_after_days` (a card with no messages counts from `stage_changed_at`). A stalled card has `suggested_actions: ["revive", "archive"]`; otherwise the list is empty. A new message from `them` clears the flag, and so does moving the card out of those three stages; archive is `PATCH /cards/{id}` with `stage: archived`.
 - `GET /settings` and `PATCH /settings` read and change the user's settings. `stalled_after_days` is a whole number of days, at least 1, default 3.
-- `PATCH /cards/{id}` also takes `date_rating` (1 to 5) and `date_note`, both null until the user rates the date. A good date is a rating of 4 or 5: `is_good_date()` in `app/cards.py` is the only definition, and the card's `good_date` field is its result.
+- `PATCH /cards/{id}` also takes `date_rating` (1 to 5) and `date_note`, both null until the user rates the date. A good date is a rating of 4 or 5: `is_good_date()` in `app/cards.py` is the only definition, and the card's `good_date` field is its result. The card's `led_to_date` is the chat's outcome label (see "Voice").
 - `app` is free text, for example `tinder` or `hinge`.
 - `external_id` is the ID the dating app gives the match or message. It is unique per user and app for cards, and per card for messages; a duplicate is `409`. Rows without one are never duplicates.
 
@@ -178,7 +178,9 @@ Routes and the job are in `app/voice.py`; the table is `voice_profiles` (one row
 | `GET /cards/{id}/similar-chats?limit=` | Past chats that led to a date, most similar to this card's conversation first. `limit` defaults to 3. |
 
 - The `voice_profile` job writes the style profile from the answers and the user's own messages (the newest 200). Saving answers and `POST /cards/{id}/messages` with `sender: me` queue it. Code that stores messages another way must call `queue_profile(db, user_id)`.
-- A chat led to a date if its card's stage is `date_set`, `dated` or `seeing_them`.
+- A chat led to a date if its card has `led_to_date: true`. A trigger on `cards` sets the label when the stage is `date_set`, `dated` or `seeing_them` or the date is rated, and nothing unsets it, so an archived card keeps it.
+- A chat that led to a good date (`is_good_date()`) ranks as if it were `GOOD_DATE_BOOST` (1.5) times as similar. Each result carries its `date_rating`.
+- The job also reads the newest 20 draft edits (`original` against `edited`), and `PATCH /drafts/{id}` queues it. See "Feedback loop".
 - Similarity is `similarity()` from the Postgres `pg_trgm` extension over the whole chat text, so it measures shared wording, not meaning. Other code calls `similar_chats(db, user_id, card_id, limit)`.
 
 ## Bios
@@ -578,11 +580,25 @@ All in `app/swipes.py`; the table is `swipe_candidates` (one row per profile an 
 - A candidate is `{"id", "app", "name", "bio", "photos", "suggestion", "reason", "source", "decision"}`. `photos` are URLs for the user to look at. `source` is the pre-filter that suggested: `jev` or `model`.
 - **Pre-filters, cheapest first:** `jev.dealbreaker_hit()` asks Jev about each bio sentence and each of the user's dealbreakers; a hit is a `pass` with no Claude call. The rest go to a cheap Claude model through `llm.call()` with purpose `swipe_prescreen`. The model is read from `SWIPE_PRESCREEN_MODEL` (default `claude-haiku-5-5`). It sees the preferences in force, the name and the bio. Photos are never analysed.
 - One request screens at most `BATCH` (10) new profiles, inside the request. A profile already stored is not screened again. At the AI budget the request stops screening and returns what it has. A model answer that is neither `like` nor `pass` stores nothing; the profile is screened again when the app offers it next.
-- **Manual swipes:** a decided row is kept with both `suggestion` and `decision`. These rows are the manual-swipe preference signal; nothing reads them yet.
+- **Manual swipes:** a decided row is kept with both `suggestion` and `decision`. These rows are the manual-swipe preference signal: the pre-screen prompt holds `feedback.swipe_lines()` (see "Feedback loop").
 - The decision route answers with the candidate plus `applied`. `applied: false` means the app was not reached (connector unavailable or failed, see "Connectors"): the swipe is stored and the user swipes in the dating app by hand.
 - `apply_decision(db, user_id, app, profile_id, decision)` is the one function that swipes through a connector. Swipe autopilot must call it and `record_action()`. It sends a plain like or pass and never spends a paid item.
 - The copilot routes do not read the swipe autonomy level: a request from the user is the consent.
 - Find and purge: a candidate is not a card. Find it with `GET /people/candidates` and purge it with `candidate_ids` (see "Find and purge"). The dating app may offer a purged profile again; it is then stored again.
+
+## Feedback loop
+
+Nothing is trained in v1. What the user did changes later prompts and retrieval only. `app/feedback.py` holds the swipe part and the export.
+
+| Signal | Changes |
+| --- | --- |
+| Chat outcome: `led_to_date` and `date_rating` on the card | `similar_chats()` returns only chats that led to a date, good dates first. |
+| Draft edit: `edited` differs from `original` | The `voice_profile` job reads the newest 20 edits under `<my_edits>`; an edit queues the job. |
+| Manual swipe against the suggestion | The pre-screen prompt lists the newest 10 under `<manual_swipes>` (bio, suggestion, decision). Unattended swipes and swipes that agree with the screen are left out. |
+| Date rating | The pre-screen prompt lists the newest 10 rated dates under `<rated_dates>`: the rating with the card's `notes` and `date_note`. |
+
+- `GET /feedback/export` returns the caller's labelled data as JSON Lines (`application/x-ndjson`), one example per line, for later fine-tuning. `type` is `chat` (`app`, `led_to_date`, `date_rating`, `good_date`, `messages`), `draft_edit` (`kind`, `original`, `edited`) or `swipe` (`app`, `bio`, `suggestion`, `decision`; manual swipes only). No names or IDs.
+- The export is read from the live tables at each request and stored nowhere, so a purged person is not in it. A table that stores feedback must reference `cards` or `swipe_candidates` with ON DELETE CASCADE.
 
 ## Swipe autopilot
 

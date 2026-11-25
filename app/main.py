@@ -13,6 +13,7 @@ from app.chat_autopilot import router as chat_autopilot_router
 from app.dashboard import router as dashboard_router
 from app.db import database_url
 from app.drafts import router as drafts_router
+from app.feedback import router as feedback_router
 from app.handover import router as handover_router
 from app.jobs import enqueue
 from app.llm import BudgetReached
@@ -72,6 +73,7 @@ def create_app(url: str | None = None) -> FastAPI:
     app.include_router(chat_autopilot_router)
     app.include_router(dashboard_router)
     app.include_router(drafts_router)
+    app.include_router(feedback_router)
     app.include_router(photos_router)
     app.include_router(handover_router)
     app.include_router(purge_router)
