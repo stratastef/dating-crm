@@ -7,6 +7,8 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import Connection, Engine, text
 
+from app.autopilot import Job, autopilot_block
+
 log = logging.getLogger("jobs")
 
 MAX_ATTEMPTS = 5
@@ -15,13 +17,20 @@ RETRY_DELAY = timedelta(seconds=30)  # doubles after each failed attempt
 # handler(db, user_id, payload). `db` is the job's own transaction: its writes commit only if the handler returns.
 Handler = Callable[[Connection, int, dict], None]
 _handlers: dict[str, Handler] = {}
+_autopilot_jobs: dict[str, Job] = {}  # job kind -> the autonomy job it acts for
 
 
-def handler(kind: str) -> Callable[[Handler], Handler]:
-    """Register the function that runs jobs of this kind: `@handler("sync_matches")`."""
+def handler(kind: str, autopilot: Job | None = None) -> Callable[[Handler], Handler]:
+    """Register the function that runs jobs of this kind: `@handler("sync_matches")`.
+
+    `autopilot="chat"` marks an autopilot job: the worker skips it unless `autopilot_block()` allows it for
+    the app in `payload["app"]`.
+    """
 
     def register(function: Handler) -> Handler:
         _handlers[kind] = function
+        if autopilot:
+            _autopilot_jobs[kind] = autopilot
         return function
 
     return register
@@ -55,6 +64,15 @@ def run_once(engine: Engine, now: datetime | None = None) -> bool:
         ).one_or_none()
         if job is None:
             return False
+        if job.kind in _autopilot_jobs:
+            block = autopilot_block(db, job.user_id, job.payload.get("app"), _autopilot_jobs[job.kind])
+            if block:
+                # Skipped jobs are not retried: whatever resumes autopilot queues fresh work.
+                db.execute(
+                    text("UPDATE jobs SET status = 'skipped', last_error = :why WHERE id = :id"),
+                    {"id": job.id, "why": block},
+                )
+                return True
         try:
             # The savepoint undoes a failed handler's writes but keeps the claim.
             with db.begin_nested():
