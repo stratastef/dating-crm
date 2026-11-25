@@ -2,7 +2,7 @@
 
 import logging
 import os
-from typing import Literal
+from typing import Literal, get_args
 
 import httpx
 from sqlalchemy import Connection, Row, text
@@ -13,7 +13,11 @@ from app.vault import read_token
 
 log = logging.getLogger("connectors")
 
-Capability = Literal["read_matches", "read_messages", "read_candidates", "send", "like", "pass"]
+# A paid item spends something the account holds (bought or granted). It is a capability like the others, but
+# `call()` refuses it: only `app.paid_items.spend()` runs one, with a proposal the user approved.
+PaidItem = Literal["super_like", "rose", "boost"]
+PAID_ITEMS = frozenset(get_args(PaidItem))
+Capability = Literal["read_matches", "read_messages", "read_candidates", "send", "like", "pass", PaidItem]
 Reason = Literal["auth failure", "ban signal", "transient"]
 
 
@@ -46,9 +50,25 @@ class Connector:
     def pass_(self, token: str, profile_id: str) -> None:
         raise NotImplementedError
 
+    # Paid items. Each spends one item the account already holds and returns False when it holds none.
+    # A connector must never buy an item or touch a payment method.
+
+    def super_like(self, token: str, profile_id: str) -> bool:
+        raise NotImplementedError
+
+    def rose(self, token: str, profile_id: str) -> bool:
+        raise NotImplementedError
+
+    def boost(self, token: str) -> bool:
+        raise NotImplementedError
+
 
 class CapabilityUnavailable(Exception):
     """The capability was not attempted: not declared, disabled by configuration, or the app is copilot-only."""
+
+
+class PaidItemNeedsApproval(Exception):
+    """A paid item was asked for through `call()`. A bug in the caller: use `app.paid_items.spend()`."""
 
 
 class CapabilityFailed(Exception):
@@ -89,7 +109,17 @@ def call(db: Connection, user_id: int, connector: Connector, capability: Capabil
     declared, is disabled, the app is copilot-only, or the user has no stored token. If the connector raises, the app becomes copilot-only for this user, an alert
     is stored with the reason from `classify()`, and `CapabilityFailed` is raised. An auth failure or ban signal
     also pauses the app's autopilot for this user.
+
+    Never spends a paid item: asked for one, it raises `PaidItemNeedsApproval` before anything else.
     """
+    if capability in PAID_ITEMS:
+        raise PaidItemNeedsApproval(f"{connector.app}:{capability} is spent only by app.paid_items.spend()")
+    return _run(db, user_id, connector, capability, *args)
+
+
+def _run(db: Connection, user_id: int, connector: Connector, capability: Capability, *args):
+    """`call()` without the paid-item refusal. Its only callers are `call()` and `app.paid_items.spend()`;
+    `tests/test_paid_items.py` fails if another module names it."""
     name = f"{connector.app}:{capability}"
     why = unavailable(db, user_id, connector, capability)
     if why:

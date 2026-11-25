@@ -17,6 +17,7 @@ from app.feedback import router as feedback_router
 from app.handover import router as handover_router
 from app.jobs import enqueue
 from app.llm import BudgetReached
+from app.paid_items import router as paid_items_router
 from app.photos import router as photos_router
 from app.purge import router as purge_router
 from app.push import router as push_router
@@ -74,6 +75,7 @@ def create_app(url: str | None = None) -> FastAPI:
     app.include_router(dashboard_router)
     app.include_router(drafts_router)
     app.include_router(feedback_router)
+    app.include_router(paid_items_router)
     app.include_router(photos_router)
     app.include_router(handover_router)
     app.include_router(purge_router)

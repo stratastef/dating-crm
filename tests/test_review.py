@@ -49,8 +49,8 @@ def test_the_queue_lists_pending_drafts_with_hot_leads_first(app, client_for, ll
 
     assert queue.status_code == 200
     assert queue.json() == [
-        {"kind": "draft", "hot": True, "card_id": hot, "card_name": "Ada", "draft": hot_draft, "suggestions": None},
-        {"kind": "draft", "hot": False, "card_id": cold, "card_name": "Kim", "draft": cold_draft, "suggestions": None},
+        {"kind": "draft", "hot": True, "card_id": hot, "card_name": "Ada", "draft": hot_draft, "suggestions": None, "paid_item": None},
+        {"kind": "draft", "hot": False, "card_id": cold, "card_name": "Kim", "draft": cold_draft, "suggestions": None, "paid_item": None},
     ]
     assert bob.get("/queue").json() == []
 

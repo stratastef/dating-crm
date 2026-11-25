@@ -151,6 +151,7 @@ def test_a_pending_handover_is_a_hot_lead_in_the_queue_until_it_is_taken_over(cl
             "card_name": "Ada",
             "draft": None,
             "suggestions": ["saturday works"],
+            "paid_item": None,
         }
     ]
 

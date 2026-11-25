@@ -110,21 +110,39 @@ struct QueueItem: Codable, Identifiable, Hashable {
     var kind: String
     /// A hot lead: the server pushed it at once.
     var hot: Bool
-    var cardID: Int
+    /// Nil when `kind` is `paid_item`: a profile to swipe on is not a card.
+    var cardID: Int?
     var cardName: String
     /// Set when `kind` is `draft`.
     var draft: Draft?
     /// Set when `kind` is `handover`: the suggested replies.
     var suggestions: [String]?
+    /// Set when `kind` is `paid_item`.
+    var paidItem: PaidItem?
 
-    var id: String { "\(kind)-\(draft?.id ?? cardID)" }
+    var id: String { "\(kind)-\(draft?.id ?? paidItem?.id ?? cardID ?? 0)" }
 
     // The key strategy turns `card_id` into `cardId`.
     enum CodingKeys: String, CodingKey {
-        case kind, hot, draft, suggestions
+        case kind, hot, draft, suggestions, paidItem
         case cardID = "cardId"
         case cardName
     }
+}
+
+/// A Super Like, Rose or Boost the server proposes to spend. It is spent only when the user approves.
+struct PaidItem: Codable, Identifiable, Hashable {
+    let id: Int
+    var app: String
+    /// `super_like`, `rose` or `boost`.
+    var item: String
+    /// The profile the item is for; the app's name for a Boost.
+    var name: String
+    var reason: String
+    /// `pending`, `declined`, `spent`, or `failed`: approved, but the dating app did not spend it.
+    var status: String
+
+    var title: String { "\(item.replacingOccurrences(of: "_", with: " ").capitalized) on \(app.capitalized)" }
 }
 
 enum Swipe: String, Codable {

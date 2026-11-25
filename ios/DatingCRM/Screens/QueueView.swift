@@ -22,9 +22,11 @@ struct QueueView: View {
                     DraftRow(item: item, draft: draft) { text, approve in
                         await decide(item, draft: draft, text: text, approve: approve)
                     }
-                } else if item.kind == "handover" {
+                } else if let paidItem = item.paidItem {
+                    PaidItemSection(client: client, item: paidItem) { items.removeAll { $0.id == item.id } }
+                } else if item.kind == "handover", let cardID = item.cardID {
                     HandoverSection(
-                        client: client, cardID: item.cardID, title: item.cardName, suggestions: item.suggestions ?? [],
+                        client: client, cardID: cardID, title: item.cardName, suggestions: item.suggestions ?? [],
                         // Taken over, the chat no longer waits in the queue.
                         state: Binding(get: { .pending }, set: { _ in items.removeAll { $0.id == item.id } })
                     )

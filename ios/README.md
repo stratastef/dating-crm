@@ -72,7 +72,7 @@ After sign-in the app asks for permission to notify, gets a device token from Ap
 
 ## Review queue
 
-"Review" on the board opens `QueueView`: the pending drafts from `GET /queue`, hot leads first. Each can be edited in place, then approved or dismissed; approve saves the edit first. A handover item shows its suggested replies (tap one to copy it) and a "Take over" button. Items of a kind the app does not know are skipped.
+"Review" on the board opens `QueueView`: the pending drafts from `GET /queue`, hot leads first. Each can be edited in place, then approved or dismissed; approve saves the edit first. A handover item shows its suggested replies (tap one to copy it) and a "Take over" button. A proposed paid item (Super Like, Rose, Boost; `Screens/PaidItemSection.swift`) shows the item, the reason and "Approve" and "Decline"; the server spends it only on approve, and the row says so when the dating app did not spend it. Items of a kind the app does not know are skipped.
 
 A card that is paused for handover shows the same section on top of `CardDetailView` (`Screens/HandoverSection.swift`): "Take over" while the handover is pending, "Hand back to autopilot" once the user took over.
 

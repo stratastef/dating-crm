@@ -22,6 +22,7 @@ class StubTinder:
     def __init__(self):
         self.requests: list[httpx.Request] = []
         self.status = 200
+        self.super_like = "super_like"
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -32,7 +33,11 @@ class StubTinder:
         kind = request.url.path.split("/")[1]
         if request.url.path == "/v2/recs/core":
             return self._fixture("recs")
-        if kind in ("like", "pass"):
+        if request.method == "POST":  # the paid items; `super_like` names the fixture a Super Like answers with
+            paid = {"boost": "boost", "like": self.super_like}.get(kind)
+            if paid and request.url.path.endswith(("/boost", "/super")):
+                return self._fixture(paid)
+        elif kind in ("like", "pass"):
             return self._fixture(kind)
         return httpx.Response(404, json={"meta": {"status": 404}})
 

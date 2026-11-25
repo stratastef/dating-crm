@@ -82,6 +82,16 @@ struct APIClient {
         try await data("POST", "drafts/\(draftID)/dismiss")
     }
 
+    /// Approves a proposed paid item: the server spends it now. `status` of the answer is `spent` or `failed`.
+    func approve(paidItemID: Int) async throws -> PaidItem {
+        try await send("POST", "paid-items/\(paidItemID)/approve")
+    }
+
+    /// Declines a proposed paid item. Nothing is spent.
+    func decline(paidItemID: Int) async throws {
+        try await data("POST", "paid-items/\(paidItemID)/decline")
+    }
+
     /// Keeps the card's chat manual: autopilot stays out until `handBack`.
     func takeOver(cardID: Int) async throws {
         try await data("POST", "cards/\(cardID)/take-over")

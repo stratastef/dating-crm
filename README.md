@@ -36,6 +36,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/chat_autopilot.py` | Chat autopilot: the `chat_reply` job, `GET` and `PUT /settings/ai-disclosure` |
 | `app/tinder.py` | `TinderConnector`: reads matches and messages from Tinder's unofficial web API |
 | `app/sync.py` | `PUT /connectors/{app}/token` and the `sync_matches` job |
+| `app/paid_items.py` | Paid items (Super Like, Rose, Boost): `propose()`, approve and decline routes, and `spend()`, the only code that spends one |
 | `app/swipes.py` | Swipe copilot (like or pass suggestions and the user's swipes, routes under `/swipes`) and swipe autopilot (the `swipe_autopilot` job) |
 | `migrations/versions/` | Alembic migrations |
 | `tests/` | pytest suite |
@@ -278,7 +279,7 @@ All in `app/review.py`. A pending draft waits in the queue until the user approv
 | `POST /drafts/{id}/approve` | Set the draft's `status` to `approved` and return it. `409` if it is no longer pending. |
 | `POST /drafts/{id}/dismiss` | Set the draft's `status` to `dismissed` and return it. `409` if it is no longer pending. |
 
-- A queue item is `{"kind", "hot", "card_id", "card_name", "draft", "suggestions"}`. For kind `draft`, `draft` holds the draft. For kind `handover` (a card whose handover is pending, see "Handover"), `suggestions` holds the suggested replies and `draft` is null. A new kind of item adds its own `kind`.
+- A queue item is `{"kind", "hot", "card_id", "card_name", "draft", "suggestions"}`. For kind `draft`, `draft` holds the draft. For kind `handover` (a card whose handover is pending, see "Handover"), `suggestions` holds the suggested replies and `draft` is null. For kind `paid_item` (see "Paid items"), `paid_item` holds the proposal, `card_id` is null and `card_name` is the proposal's `name`; it is never hot. A new kind of item adds its own `kind`.
 - `is_hot_lead(db, card_id)` is the only definition of a hot lead. So far: the match sent a message within the last hour, Jev's hot-lead triage flagged a pending draft of the card (`drafts.hot_lead`), or the card's handover is pending. Add the date-coordination signal there.
 - `POST /cards/{id}/drafts` calls `notify_if_hot()`, which sends one push at once for a hot lead and nothing otherwise. Call it wherever else an item joins the queue.
 - Approving sends the draft when its card's app can send: `hand_on_approved_draft(db, user_id, draft)` is called once per approved draft and queues the `send_draft` job (see "Drafts"). When the app cannot send (no connector, paused, `send` unavailable, card without `external_id`), the approval still succeeds, the draft stays `approved` and the user copies it.
@@ -393,7 +394,7 @@ Compose passes `TOKEN_VAULT_MASTER_KEY` from your shell or `.env` to the API and
 
 ## Audit log
 
-Every autopilot action must call `record_action(connection, user_id, type=..., app=..., target=..., trigger=...)` from `app.audit`, in the same transaction as the action. `type` is one of `message`, `like`, `pass`, `profile_change`, `calendar_hold`, `purge`.
+Every autopilot action must call `record_action(connection, user_id, type=..., app=..., target=..., trigger=...)` from `app.audit`, in the same transaction as the action. `type` is one of `message`, `like`, `pass`, `profile_change`, `calendar_hold`, `purge`, `super_like`, `rose`, `boost`.
 The `audit_log` table is append-only (a trigger rejects `UPDATE` and `DELETE`). `GET /audit-log?app=&type=` lists the current user's entries, newest first.
 
 An entry about one match must name them only at the start of `target`, as `card:<cards.id>` or `match:<external_id>`, alone or followed by a space and details (`card:7 hold 2026-12-01T19:00:00+00:00`). It must never hold their name or message text: a purge finds the entries to delete by that start of `target` alone.
@@ -444,7 +445,7 @@ def send_reply(db: Connection, user_id: int, payload: dict) -> None: ...
 The worker runs such a job only if `autopilot_allowed()` is true at that moment. Otherwise it sets the job's status to `skipped` and writes the reason to `last_error`. Skipped jobs are not retried. Handlers that draft for copilot are not autopilot jobs: leave `autopilot` unset.
 ## Connectors
 
-The contract is in `app/connectors.py`. The capabilities are `read_matches`, `read_messages`, `read_candidates`, `send`, `like` and `pass`.
+The contract is in `app/connectors.py`. The capabilities are `read_matches`, `read_messages`, `read_candidates`, `send`, `like` and `pass`, and the paid items `super_like`, `rose` and `boost`. `call()` refuses a paid item; only an approved proposal spends one (see "Paid items").
 
 Add a connector: subclass `Connector`, set `app`, declare the `capabilities` it supports and implement the method for each one (`pass` is the method `pass_`). Leave a capability out of `capabilities` to leave it out of the build. Each method receives the session token as its first argument. A method raises any exception when the app refuses or breaks.
 
@@ -606,14 +607,32 @@ The `swipe_autopilot` job in `app/swipes.py` likes and passes without the user. 
 
 - **Off by default.** The worker skips the job unless the user's swipe autonomy is `guardrails` or `full` (`PUT /autonomy/swipe`). The two levels act the same here.
 - **What stops it:** `autopilot_allowed(db, user_id, app, "swipe")` is asked for each app and again before each swipe. So the kill switch (all apps or one), a ban or auth pause of the app and the AI budget cap all stop it, also in the middle of a run. A failed swipe ends the run for that app (it is then copilot-only).
-- **What it swipes:** the candidates that wait in `swipe_candidates`, oldest first, by their stored suggestion. It calls the copilot's `screen()` for new candidates only when fewer wait than it may swipe. It swipes with `apply_decision()`, so a paid item is never spent.
+- **What it swipes:** the candidates that wait in `swipe_candidates`, oldest first, by their stored suggestion. It calls the copilot's `screen()` for new candidates only when fewer wait than it may swipe. It swipes with `apply_decision()`, so a paid item is never spent. A candidate with a pending paid-item proposal is skipped (see "Paid items").
 - **Dealbreakers are checked again before each swipe**, with `jev.dealbreaker_hit(..., strict=True)`: a hit turns a stored like into a pass. If Jev cannot be asked the profile is not swiped and waits for the user. A profile with an empty bio has nothing to check and is swiped by its suggestion.
 - **Limits:** `GET /swipes/limits` and `PUT /swipes/limits` with `{"swipes_per_run": 5, "swipes_per_day": 20}` (the defaults; columns on `users`). They count unattended swipes per app: per run of the job, and in any 24 hours. Allowed values are 1 to 10 per run and 1 to 100 per day. Keep them low: fast swiping is a ban signal.
 - **Audit:** each swipe writes one entry: type `like` or `pass`, target `candidate:<swipe_candidates.id>`, trigger `swipe autopilot: jev dealbreaker` or `swipe autopilot: model pre-screen`. The row gets `unattended = true`, so it is not counted as a manual swipe.
 
+## Paid items
+
+All in `app/paid_items.py`; the table is `paid_item_proposals`. A paid item is a Super Like, a Rose or a Boost. The app proposes one, the proposal waits in the review queue, and the item is spent only when the user approves it. The app spends items the account already holds. It never buys one and never touches a payment method.
+
+| Route | Does |
+| --- | --- |
+| `POST /paid-items/{id}/approve` | Approve the proposal and spend the item now. The answer's `status` is `spent`, or `failed` when the app was not reached or the account holds no such item. `409` if it no longer waits, `404` if it is not the caller's. |
+| `POST /paid-items/{id}/decline` | Decline the proposal. Nothing is spent. Same errors. |
+
+- A proposal is `{"id", "app", "item", "name", "reason", "status"}`. `item` is `super_like`, `rose` or `boost`. `name` is the profile the item is for, or the app's name for a Boost. `status` goes `pending` to `declined`, or through `approved` to `spent` or `failed`.
+- **Who proposes:** `propose(db, user_id, app, item, reason, candidate_id=None)` stores a proposal and spends nothing. Today one caller: when the swipe pre-screen model answers `super like`, `screen()` stores the candidate as a like and proposes a Super Like for it. Nothing proposes a Boost yet. `propose()` returns `None` and stores nothing when the app's connector does not declare the item or it is switched off (`CONNECTOR_DISABLED_CAPABILITIES=tinder:super_like`). There is at most one proposal per candidate, and one pending Boost per app.
+- **Swipe autopilot waits:** it skips a candidate while a proposal for it is pending. After a decline or a failed spend it likes the profile for free on its next run. A proposal leaves the queue when the user swipes on the profile themselves.
+- **The approval is structural.** `call()` refuses a paid capability with `PaidItemNeedsApproval`. `spend(db, user_id, proposal)` is the only function that reaches one. It first claims the row in the database (`id`, this `user_id`, status `approved`), so a proposal of another user, one that is not approved, and a second use all raise `NotApproved` before the app is touched. Do not call `connectors._run()` or a connector's `super_like`, `rose` or `boost` from anywhere else: `tests/test_paid_items.py` reads the source and fails.
+- **Audit:** a spent item writes one entry: type `super_like`, `rose` or `boost`, target `candidate:<swipe_candidates.id>` (`account` for a Boost), trigger `paid item: user approved proposal <id>`. A failed or declined proposal writes none.
+- A spent Super Like also sets the candidate's `decision` to `like`. Purging a candidate deletes its proposal.
+- Hinge has no connector, so no Rose is ever proposed. A Hinge connector turns it on by declaring `rose` and implementing `rose()`.
+- Not built: reading how many items the account holds. An approval when it holds none ends as `failed`.
+
 ## Tinder connector
 
-`app/tinder.py` reads your own Tinder account with your own web session token. It supports `read_matches`, `read_messages`, `send`, `read_candidates`, `like` and `pass`. A message goes out when the user taps send on a draft (see "Drafts"), or on its own only with chat autonomy at `guardrails` or `full` (see "Chat autopilot"). A like or pass goes out when the user swipes on a candidate (see "Swipe copilot"), or on its own only once the user turns swipe autopilot on (see "Swipe autopilot"). Set `CONNECTOR_DISABLED_CAPABILITIES=tinder:send` to keep it read-only. Tinder's terms do not allow this API use; see Risks in the spec.
+`app/tinder.py` reads your own Tinder account with your own web session token. It supports `read_matches`, `read_messages`, `send`, `read_candidates`, `like` and `pass`, and the paid items `super_like` and `boost`, which are spent only on the user's approval (see "Paid items"). A message goes out when the user taps send on a draft (see "Drafts"), or on its own only with chat autonomy at `guardrails` or `full` (see "Chat autopilot"). A like or pass goes out when the user swipes on a candidate (see "Swipe copilot"), or on its own only once the user turns swipe autopilot on (see "Swipe autopilot"). Set `CONNECTOR_DISABLED_CAPABILITIES=tinder:send` to keep it read-only. Tinder's terms do not allow this API use; see Risks in the spec.
 
 ### Capture and submit your token
 
@@ -653,7 +672,11 @@ The connector was built from public write-ups of the web API and was never run a
 | `GET /v2/recs/core` returns `{"data": {"results": [{"user": {...}}]}}`, and `results` is absent or empty when nobody is left | `read_candidates` |
 | A candidate's `user` has `_id`, `name`, optional `bio` and `photos`, a list of objects with `url` | Candidate `profile_id`, name, bio, photo URLs |
 | `GET /like/{user _id}` likes and `GET /pass/{user _id}` passes, with no body, query or `s_number` needed, and both give HTTP `200` | `like`, `pass` |
-| The like is the free one: Super Like is a different endpoint (`/like/{id}/super`), which the connector never calls | No paid item is spent |
+| The like is the free one: Super Like is a different endpoint (`/like/{id}/super`), which `like` never calls | A like spends no paid item |
+| `POST /like/{user _id}/super` with no body spends one Super Like the account holds and gives HTTP `200` | `super_like` (see "Paid items") |
+| `POST /boost` with no body starts one Boost the account holds and gives HTTP `200` | `boost` |
+| With none left, both still give HTTP `200` and the body has `"limit_exceeded": true`. Neither request buys an item or charges a payment method: buying is a separate purchase flow the connector never calls | The proposal ends as `failed` and nothing is logged. If Tinder answers another way, a spend that did not happen is logged as spent, or the app becomes copilot-only |
+| The body of a spent Super Like or Boost needs no reading (`match`, `super_likes.remaining`, `boost.expires_at` are ignored) | `super_like`, `boost` |
 | A like when no free likes are left still gives HTTP `200` (the body has `likes_remaining: 0` or `rate_limited_until`) | Such a like is reported as applied although Tinder dropped it |
 | One sync every 15 minutes does not trip Tinder's rate limits or bot detection | `SYNC_INTERVAL` |
 
