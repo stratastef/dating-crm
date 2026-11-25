@@ -363,8 +363,24 @@ Compose passes `TOKEN_VAULT_MASTER_KEY` from your shell or `.env` to the API and
 
 ## Audit log
 
-Every autopilot action must call `record_action(connection, user_id, type=..., app=..., target=..., trigger=...)` from `app.audit`, in the same transaction as the action. `type` is one of `message`, `like`, `pass`, `profile_change`, `calendar_hold`.
+Every autopilot action must call `record_action(connection, user_id, type=..., app=..., target=..., trigger=...)` from `app.audit`, in the same transaction as the action. `type` is one of `message`, `like`, `pass`, `profile_change`, `calendar_hold`, `purge`.
 The `audit_log` table is append-only (a trigger rejects `UPDATE` and `DELETE`). `GET /audit-log?app=&type=` lists the current user's entries, newest first.
+
+An entry about one match must name them only at the start of `target`, as `card:<cards.id>` or `match:<external_id>`, alone or followed by a space and details (`card:7 hold 2026-12-01T19:00:00+00:00`). It must never hold their name or message text: a purge finds the entries to delete by that start of `target` alone.
+
+## Find and purge
+
+A match can ask for their data to be deleted. Routes are in `app/purge.py`.
+
+| Route | Does |
+| --- | --- |
+| `GET /people?q=` | The caller's cards, on every app, whose name or handle (`external_id`) contains `q`, ignoring case. |
+| `POST /people/purge` | Delete the cards in `card_ids` and everything stored about them. Body: `{"card_ids": [1, 2], "confirm": "purge"}`. Returns `{"purged": 2}`. |
+
+- The purge cannot be undone. Without `"confirm": "purge"` the request is `422`. It runs in one transaction: if any card is not the caller's it is `404` and nothing is deleted.
+- Every table that holds data about a match must reference `cards` (directly or through another table) with `ON DELETE CASCADE`; deleting the card is the purge. `tests/test_purge.py` reads the foreign keys from the database, so a new card table fails `test_no_row_for_a_purged_person_remains_in_any_table` until that test seeds a row in it. Anything kept outside Postgres needs its own delete in `purge_people()`: today that is the Google Calendar events of the card's holds, held or confirmed, whose titles carry the match's name. No file about a match is kept on disk: `card_photos` holds URLs, an imported screenshot is not stored, and the files under `PHOTOS_DIR` are the user's own photos.
+- Audit log: the entries about the purged match are deleted, not kept or blanked, because `target` identifies the person. The `cards_purge_audit_log` trigger does it when the card is deleted, which is the only delete the append-only trigger lets through besides deleting the user. The purge then adds one entry per card: type `purge`, the card's app, target `card:<id>` (an id that now points at nothing), trigger `deletion request`.
+- Not covered: backups made before the purge still hold the data until they expire.
 
 ## Autonomy and kill switch
 
