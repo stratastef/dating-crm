@@ -29,6 +29,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/review.py` | Review queue: `GET /queue`, approve and dismiss a draft, `is_hot_lead()` |
 | `app/tinder.py` | `TinderConnector`: reads matches and messages from Tinder's unofficial web API |
 | `app/sync.py` | `PUT /connectors/{app}/token` and the `sync_matches` job |
+| `app/swipes.py` | Swipe copilot: like or pass suggestions and the user's swipes, routes under `/swipes` |
 | `migrations/versions/` | Alembic migrations |
 | `tests/` | pytest suite |
 | `compose.yaml` | `db`, `api` and `worker` services |
@@ -150,7 +151,7 @@ from app import llm
 result = llm.call(db, user.id, "draft", system="...", prompt="...")  # result.text, result.model, result.input_tokens, result.output_tokens
 ```
 
-- The model is read from `ANTHROPIC_MODEL` (default `claude-fable-5-2`) and the key from `ANTHROPIC_API_KEY`. Compose passes both to the API and worker.
+- The model is read from `ANTHROPIC_MODEL` (default `claude-fable-5-2`) and the key from `ANTHROPIC_API_KEY`. Compose passes both to the API and worker. A feature that needs another model passes `model=` to `call()`; cost and the cap apply the same way.
 - Every call inserts one row in `llm_calls`: `purpose` (the third argument, naming the feature), `model`, both token counts and `cost_usd`. The row is written in its own transaction, so it is kept when the calling job fails. `llm.spend(db, user_id)` is the user's total for the current calendar month (UTC) in USD.
 - **AI budget:** each user has a hard monthly cap, `users.ai_budget_usd`, default 50 USD. `GET /budget` returns `{"spend_usd", "cap_usd", "paused"}` and `PUT /budget` with `{"cap_usd": 20}` sets the cap (routes in `app/budget.py`). While the month's spend is at the cap, `call()` raises `llm.BudgetReached` without calling Claude (a route answers `402`; a job retries and then fails), and the worker skips autopilot jobs with the reason `AI budget reached`. The call that reaches the cap sends the user a push. The budget pause is computed, not a row in `autopilot_pauses`: a new month or a higher cap lifts it, `POST /autopilot/resume` does not, and it is not shown by `GET /autopilot/pause`. Pauses set for other reasons are untouched. Spend can pass the cap by the cost of calls already in flight.
 - Cost is tokens times the per-model price in `llm.PRICES` (USD per million tokens). The prices are copied by hand: confirm them against Anthropic's price list. A model missing from the table is charged at the default model's price.
@@ -210,6 +211,7 @@ Jev is a cheap yes/no classifier reached through treg. It judges one sentence at
 | `jev.guardrail_hits(text)` | Draft guardrail on an outgoing message. | The checks hit, from `denies_ai`, `protected_trait`, `overpromise`. Empty means safe to send. |
 | `jev.handover_hits(text)` | Handover trigger on an incoming message. | The checks hit, from `asks_if_ai`, `logistics`, `personal_info`, `sensitive`. Empty means no handover. |
 | `jev.is_hot_lead(text)` | Hot-lead triage on a draft. | `bool`: the draft deserves a live push. |
+| `jev.dealbreaker_hit(bio, dealbreakers)` | Swipe pre-filter on a candidate's bio. | The first dealbreaker the bio shows, else `None`. `None` too when Jev could not be asked: the cheap model then screens the profile. |
 
 - The three functions split the text into sentences and ask about each. A check is hit if any sentence hits it.
 - Results are stored with the row. `messages.handover` is set for every new message from `them`, by `POST /cards/{id}/messages` and by `upsert_message`; it is `null` for the user's own messages. `drafts.guardrail` and `drafts.hot_lead` are set when a draft is written, and `PATCH /drafts/{id}` runs the guardrail again on the edit. The routes return these fields.
@@ -316,7 +318,7 @@ def send_reply(db: Connection, user_id: int, payload: dict) -> None: ...
 The worker runs such a job only if `autopilot_allowed()` is true at that moment. Otherwise it sets the job's status to `skipped` and writes the reason to `last_error`. Skipped jobs are not retried. Handlers that draft for copilot are not autopilot jobs: leave `autopilot` unset.
 ## Connectors
 
-The contract is in `app/connectors.py`. The capabilities are `read_matches`, `read_messages`, `send`, `like` and `pass`.
+The contract is in `app/connectors.py`. The capabilities are `read_matches`, `read_messages`, `read_candidates`, `send`, `like` and `pass`.
 
 Add a connector: subclass `Connector`, set `app`, declare the `capabilities` it supports and implement the method for each one (`pass` is the method `pass_`). Leave a capability out of `capabilities` to leave it out of the build. Each method receives the session token as its first argument. A method raises any exception when the app refuses or breaks.
 
@@ -382,9 +384,27 @@ send_push(db, user_id, "Hot lead", "Ada replied", card_id=card_id)
 
 A connector's `read_matches` returns dicts with `id`, `name`, `has_messages` and `last_message_id` (`None` if unknown). Its `read_messages` returns dicts with `id`, `sender` (`me` or `them`), `body` and `sent_at`.
 
+## Swipe copilot
+
+All in `app/swipes.py`; the table is `swipe_candidates` (one row per profile an app offered). The app suggests like or pass and the user decides every one: nothing is swiped until they do. It works for every connector in `CONNECTORS` that has `read_candidates`, `like` and `pass`.
+
+| Route | Does |
+| --- | --- |
+| `POST /swipes/{app}/suggestions` | Read the app's next candidates, suggest for each new one, and return all that wait. `409` when the connector is unavailable (no token, copilot-only, switched off), `502` when the app fails, `404` for an app with no connector. |
+| `GET /swipes?app=` | The candidates that wait for the user's swipe, oldest first. Calls neither the app nor Claude. |
+| `POST /swipes/{id}/decision` with `{"decision": "like"}` | Store the user's swipe (`like` or `pass`), then swipe in the app. `409` if already swiped. |
+
+- A candidate is `{"id", "app", "name", "bio", "photos", "suggestion", "reason", "source", "decision"}`. `photos` are URLs for the user to look at. `source` is the pre-filter that suggested: `jev` or `model`.
+- **Pre-filters, cheapest first:** `jev.dealbreaker_hit()` asks Jev about each bio sentence and each of the user's dealbreakers; a hit is a `pass` with no Claude call. The rest go to a cheap Claude model through `llm.call()` with purpose `swipe_prescreen`. The model is read from `SWIPE_PRESCREEN_MODEL` (default `claude-haiku-5-5`). It sees the preferences in force, the name and the bio. Photos are never analysed.
+- One request screens at most `BATCH` (10) new profiles, inside the request. A profile already stored is not screened again. At the AI budget the request stops screening and returns what it has. A model answer that is neither `like` nor `pass` stores nothing; the profile is screened again when the app offers it next.
+- **Manual swipes:** a decided row is kept with both `suggestion` and `decision`. These rows are the manual-swipe preference signal; nothing reads them yet.
+- The decision route answers with the candidate plus `applied`. `applied: false` means the app was not reached (connector unavailable or failed, see "Connectors"): the swipe is stored and the user swipes in the dating app by hand.
+- `apply_decision(db, user_id, app, profile_id, decision)` is the one function that swipes through a connector. Swipe autopilot must call it and `record_action()`. It sends a plain like or pass and never spends a paid item.
+- Not built: the swipe autonomy level is not read (a request from the user is the consent), and swiping without confirmation.
+
 ## Tinder connector
 
-`app/tinder.py` reads your own Tinder account with your own web session token. It supports `read_matches` and `read_messages` only. Tinder's terms do not allow this API use; see Risks in the spec.
+`app/tinder.py` reads your own Tinder account with your own web session token. It supports `read_matches`, `read_messages`, `read_candidates`, `like` and `pass`. Tinder's terms do not allow this API use; see Risks in the spec.
 
 ### Capture and submit your token
 
@@ -418,6 +438,11 @@ The connector was built from public write-ups of the web API and was never run a
 | A message has `_id`, `from` (a user ID), `message` (the text) and `sent_date` (ISO 8601) | Message `external_id`, sender, body, time |
 | A message whose `from` is not `person._id` is yours | `sender` |
 | An expired token gives HTTP `401` | Fallback to copilot |
+| `GET /v2/recs/core` returns `{"data": {"results": [{"user": {...}}]}}`, and `results` is absent or empty when nobody is left | `read_candidates` |
+| A candidate's `user` has `_id`, `name`, optional `bio` and `photos`, a list of objects with `url` | Candidate `profile_id`, name, bio, photo URLs |
+| `GET /like/{user _id}` likes and `GET /pass/{user _id}` passes, with no body, query or `s_number` needed, and both give HTTP `200` | `like`, `pass` |
+| The like is the free one: Super Like is a different endpoint (`/like/{id}/super`), which the connector never calls | No paid item is spent |
+| A like when no free likes are left still gives HTTP `200` (the body has `likes_remaining: 0` or `rate_limited_until`) | Such a like is reported as applied although Tinder dropped it |
 | One sync every 15 minutes does not trip Tinder's rate limits or bot detection | `SYNC_INTERVAL` |
 
 ## Add a migration

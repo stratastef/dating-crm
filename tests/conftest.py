@@ -77,9 +77,11 @@ class StubLlm:
     def __init__(self):
         self.reply = "stub reply"
         self.prompts: list[str] = []
+        self.models: list[str | None] = []  # the model each call asked for; None is the default model
 
-    def __call__(self, system: str, prompt: str, max_tokens: int = 16000) -> Completion:
+    def __call__(self, system: str, prompt: str, max_tokens: int = 16000, model: str | None = None) -> Completion:
         self.prompts.append(prompt)
+        self.models.append(model)
         return Completion(text=self.reply, model="stub", input_tokens=1, output_tokens=1)
 
 
@@ -134,7 +136,7 @@ class StubJev:
         self.yes: dict[str, list[str]] = {}
         self.asked: list[tuple[str, str]] = []
 
-    def __call__(self, sentence: str, check: str) -> bool:
+    def __call__(self, sentence: str, check: str, subject: str = "") -> bool:
         self.asked.append((sentence, check))
         return any(phrase in sentence.lower() for phrase in self.yes.get(check, []))
 
