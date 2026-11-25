@@ -6,6 +6,8 @@ from typing import Literal
 
 from sqlalchemy import Connection, Row, text
 
+from app.vault import read_token
+
 log = logging.getLogger("connectors")
 
 Capability = Literal["read_matches", "read_messages", "send", "like", "pass"]
@@ -53,8 +55,9 @@ def disabled_capabilities() -> set[str]:
 def call(db: Connection, user_id: int, connector: Connector, capability: Capability, *args):
     """Run one capability of a connector for a user and return its result.
 
-    Raises `CapabilityUnavailable` without touching the app when the capability is not declared, is disabled,
-    or the app is copilot-only. If the connector raises, the app becomes copilot-only for this user, an alert
+    The user's session token is read from the vault and passed to the connector as its first argument;
+    `args` are the rest. Raises `CapabilityUnavailable` without touching the app when the capability is not
+    declared, is disabled, the app is copilot-only, or the user has no stored token. If the connector raises, the app becomes copilot-only for this user, an alert
     is stored, and `CapabilityFailed` is raised.
     """
     name = f"{connector.app}:{capability}"
@@ -64,8 +67,11 @@ def call(db: Connection, user_id: int, connector: Connector, capability: Capabil
         raise CapabilityUnavailable(f"{name} is disabled by configuration")
     if is_copilot_only(db, user_id, connector.app):
         raise CapabilityUnavailable(f"{connector.app} is copilot-only")
+    token = read_token(db, user_id, connector.app)
+    if token is None:
+        raise CapabilityUnavailable(f"no {connector.app} session token is stored")
     try:
-        return getattr(connector, "pass_" if capability == "pass" else capability)(*args)
+        return getattr(connector, "pass_" if capability == "pass" else capability)(token, *args)
     except Exception as error:
         log.warning("%s failed for user %s, falling back to copilot: %r", name, user_id, error)
         # Own transaction: the caller (a job handler) rolls back when this raises, and the fallback must survive that.
