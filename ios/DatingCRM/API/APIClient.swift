@@ -31,7 +31,22 @@ struct APIClient {
         try await send("PATCH", "cards/\(card.id)", body: Self.encoder.encode(CardChanges(card: card)))
     }
 
+    func card(id: Int) async throws -> Card {
+        try await send("GET", "cards/\(id)")
+    }
+
+    /// Tells the server where to send this phone's push notifications. `token` is the APNs device token in hex.
+    func registerDevice(token: String) async throws {
+        try await data("POST", "devices", body: Self.encoder.encode(["token": token]))
+    }
+
     private func send<Response: Decodable>(_ method: String, _ path: String, body: Data? = nil) async throws -> Response {
+        try Self.decoder.decode(Response.self, from: await data(method, path, body: body))
+    }
+
+    /// For routes that answer with no body, call this instead of `send`.
+    @discardableResult
+    private func data(_ method: String, _ path: String, body: Data? = nil) async throws -> Data {
         var request = URLRequest(url: baseURL.appending(path: path))
         request.httpMethod = method
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -42,7 +57,7 @@ struct APIClient {
         let (data, response) = try await transport(request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else { throw APIError(status: status) }
-        return try Self.decoder.decode(Response.self, from: data)
+        return data
     }
 
     // The only dates the app reads or writes are plain days such as `due_date`.
