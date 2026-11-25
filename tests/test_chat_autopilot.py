@@ -424,6 +424,21 @@ def test_full_mode_hands_over_an_answer_that_neither_accepts_nor_declines(
     assert [draft["guardrail"] for draft in queued_for_review(client)] == [["logistics"]]
 
 
+@pytest.mark.parametrize("message", ["let's meet at joe's bar", "are we exclusive?"])
+def test_full_mode_hands_a_place_or_exclusivity_to_the_user(
+    app, client, card_id, tinder, jev, gcal, evenings, message  # noqa: F811
+):
+    autonomy(client, "full")
+    jev.yes["logistics"] = jev.yes["place_or_exclusivity"] = ["joe's bar", "exclusive"]
+
+    incoming(client, card_id, message)
+    work(app)
+
+    assert sent(tinder) == []
+    assert gcal.events == {}
+    assert client.get(f"/cards/{card_id}").json()["handover"] == "pending"
+
+
 def test_full_mode_offers_times_when_the_question_is_not_the_newest_message(
     app, client, card_id, tinder, jev, gcal, evenings  # noqa: F811
 ):

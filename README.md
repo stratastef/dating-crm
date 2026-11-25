@@ -248,7 +248,7 @@ Jev is a cheap yes/no classifier reached through treg. It judges one sentence at
 | --- | --- | --- |
 | `jev.ask(sentence, check)` | One yes/no check on one sentence. `check` is a key of `jev.CHECKS`; add a key to add a check, for example a bio dealbreaker. | `bool`. Raises `JevUnavailable` when Jev is not configured or the call fails. |
 | `jev.guardrail_hits(text)` | Draft guardrail on an outgoing message. | The checks hit, from `denies_ai`, `protected_trait`, `overpromise`. Empty means safe to send. |
-| `jev.handover_hits(text)` | Handover trigger on an incoming message. | The checks hit, from `asks_if_ai`, `logistics`, `personal_info`, `sensitive`. Empty means no handover. |
+| `jev.handover_hits(text)` | Handover trigger on an incoming message. | The checks hit, from `asks_if_ai`, `logistics`, `place_or_exclusivity`, `personal_info`, `sensitive`. Empty means no handover. |
 | `jev.is_hot_lead(text)` | Hot-lead triage on a draft. | `bool`: the draft deserves a live push. |
 | `jev.dealbreaker_hit(bio, dealbreakers)` | Swipe pre-filter on a candidate's bio. | The first dealbreaker the bio shows, else `None`. `None` too when Jev could not be asked: the cheap model then screens the profile. With `strict=True` it raises `JevUnavailable` instead; swipe autopilot uses that. |
 
@@ -342,7 +342,7 @@ All in `app/chat_autopilot.py`, plus the gate in `app/send.py`. With chat autono
   - the card's stage is not `matched` or `chatting`: from Number swapped on, nothing is sent alone.
 - **Any other code that sends alone** must go through `queue_send(..., unattended=True)` too.
 - **Which messages get a reply:** only the card's newest message, from the match, sent within the last day, on a card with no draft that is `pending`, `approved` or `sending`. So a first sync of old chats sends nothing, two messages in a row get one reply, and a draft left in the review queue stops further replies on that card until the user sends or dismisses it.
-- **Date logistics:** Claude is told to name no day, time or place, and `jev.names_logistics()` checks its text; a hit adds `logistics` to the draft's `guardrail`, so it goes to the user. In `guardrails` mode a message from the match about logistics hands the card over as before. In `full` mode a message whose only handover hit is `logistics` does not pause the card. Instead the job:
+- **Date logistics:** Claude is told to name no day, time or place, and `jev.names_logistics()` checks its text; a hit adds `logistics` to the draft's `guardrail`, so it goes to the user. In `guardrails` mode a message from the match about logistics hands the card over as before. In `full` mode the app coordinates a time alone and nothing else: a message whose only handover hit is `logistics` does not pause the card. A place to meet or exclusivity also hits `place_or_exclusivity`, so it hands the card over like every other trigger. For a time the job:
   - offers up to 2 slots from `calendar.free_slots()`, calls `hold_slot()` for each and adds the sentence that names them itself, so the only times in a message sent alone are held slots;
   - if the card has holds, asks Claude (purpose `date_coordination`) whether the match accepts one, declines all, or says something else. Accepted: `confirm_date()` for that slot and the card moves to `date_set`, where autopilot stops; the reply waits in the review queue. Declined: `release_holds()` and a new offer. Anything else, no free slot or no connected calendar: the draft goes to the user with `logistics`.
 - **Audit:** the sent message's entry has the trigger `chat autopilot (<level>): reply to message <messages.id>`. Holds, releases and confirmations have `chat autopilot (full): offered a time`, `match declined` and `match agreed`.
@@ -352,7 +352,7 @@ All in `app/chat_autopilot.py`, plus the gate in `app/send.py`. With chat autono
   - Nothing queues a reply when autopilot is resumed, the autonomy is raised or a card is handed back; the match's next message does.
   - Offered slots are 19:00 to 21:00 on the next 7 days in `USER_TIMEZONE` (an IANA name such as `Europe/Berlin`, default `UTC`; Compose passes it to the API and worker). The slot sentence is English.
   - Holds of a draft the user dismisses stay until the card is archived.
-  - Jev's `logistics` check also covers exclusivity, so full mode answers such a message alone; only the `overpromise` guardrail and the rule given to Claude stand in the way of a promise.
+  - Whether a message is about a place or exclusivity is Jev's judgement (`place_or_exclusivity`); when Jev cannot be asked the card is handed over.
   - Not run against the real Tinder, Claude, Jev or Google.
 
 ## Preferences
