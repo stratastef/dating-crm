@@ -73,6 +73,35 @@ struct APIClientTests {
         ] as NSDictionary)
     }
 
+    @Test func savesTheDateRatingAndNote() async throws {
+        server.respond("""
+        {"id": 1, "app": "tinder", "name": "Ada", "stage": "dated", "notes": "Climbs", "next_action": null,
+         "due_date": null, "date_rating": 4, "date_note": "Easy to talk to", "good_date": true}
+        """)
+        var rated = Card(id: 1, app: "tinder", name: "Ada", stage: .dated, notes: "Climbs")
+        rated.dateRating = 4
+        rated.dateNote = "Easy to talk to"
+
+        let saved = try await server.client().update(rated)
+
+        #expect(saved == rated)
+        #expect(try sentJSON(server.requests[0]) == [
+            "stage": "dated", "notes": "Climbs", "next_action": NSNull(), "due_date": NSNull(),
+            "date_rating": 4, "date_note": "Easy to talk to",
+        ] as NSDictionary)
+    }
+
+    @Test func aCardAsksForARatingOnlyWhenItIsDatedAndUnrated() {
+        var card = Card(id: 1, app: "tinder", name: "Ada", stage: .dateSet, notes: "")
+        #expect(!card.needsDateRating)
+
+        card.stage = .dated
+        #expect(card.needsDateRating)
+
+        card.dateRating = 2
+        #expect(!card.needsDateRating)
+    }
+
     @Test func reportsTheStatusWhenTheServerRefuses() async {
         server.respond(#"{"detail": "invalid token"}"#, status: 401)
 

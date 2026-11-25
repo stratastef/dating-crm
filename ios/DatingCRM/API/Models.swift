@@ -33,6 +33,12 @@ struct Card: Codable, Identifiable, Hashable {
     var nextAction: String?
     /// Local midnight of the due day; the server stores a plain date.
     var dueDate: Date?
+    /// 1 to 5, nil until the user rates the date.
+    var dateRating: Int?
+    var dateNote: String?
+
+    /// True when the card is in Dated and has no rating yet: the app then asks for one.
+    var needsDateRating: Bool { stage == .dated && dateRating == nil }
 }
 
 struct Message: Codable, Identifiable, Hashable {
