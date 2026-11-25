@@ -10,14 +10,14 @@
   --bg:#FFFFFF; --bg2:#F5F5F7; --fill:#EDEDF0; --text:#0B0B0F; --text2:#3C3C43; --text3:#6C6C70; --line:rgba(60,60,67,.18);
   --glass:rgba(255,255,255,.58); --edge:rgba(255,255,255,.75); --edge2:rgba(0,0,0,.10); --pri:#000; --onpri:#fff;
   --acc:#4F46E5; --acc-soft:#EEF0FF; --acc-on:#fff;
-  --page:#E9E9EC; --pagetext:#1C1C1E;
+  --page:#E9E9EC; --pagetext:#1C1C1E; --pagetext2:#55555A;
 }
 [data-accent="rose"]{--acc:#BE185D;--acc-soft:#FCE7F1}
 [data-accent="amber"]{--acc:#B45309;--acc-soft:#FEF3E2}
 [data-theme="dark"]{
   --bg:#000; --bg2:#111113; --fill:#2C2C2E; --text:#F5F5F7; --text2:#D1D1D6; --text3:#98989F; --line:rgba(235,235,245,.16);
   --glass:rgba(40,40,44,.55); --edge:rgba(255,255,255,.18); --edge2:rgba(0,0,0,.5); --pri:#F5F5F7; --onpri:#000;
-  --acc:#A5B4FC; --acc-soft:#1E1B4B; --acc-on:#0B0B0F; --page:#1C1C1E; --pagetext:#F5F5F7;
+  --acc:#A5B4FC; --acc-soft:#1E1B4B; --acc-on:#0B0B0F; --page:#1C1C1E; --pagetext:#F5F5F7; --pagetext2:#A1A1A6;
 }
 [data-theme="dark"][data-accent="rose"]{--acc:#F9A8D4;--acc-soft:#3B0A22}
 [data-theme="dark"][data-accent="amber"]{--acc:#FCD34D;--acc-soft:#3A2405}
@@ -28,15 +28,15 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
 button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .page{max-width:1180px;margin:0 auto;padding:28px 20px 60px}
 .top{display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between;margin-bottom:8px}
-.top h1{font-size:22px;margin:0;font-weight:600}
+.top h1{font-size:24px;margin:0;font-weight:600}
 .seg{display:inline-flex;background:var(--fill);border-radius:10px;padding:2px}
 .seg button{padding:6px 12px;border-radius:8px;font-size:14px}
 .seg button[aria-pressed="true"]{background:var(--bg);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.12)}
 section{margin-top:36px}
-section h2{font-size:18px;font-weight:600;margin:0 0 4px}
-section p.lead{font-size:15px;color:var(--text3);margin:0 0 16px;max-width:70ch;line-height:1.5}
+section h2{font-size:19px;font-weight:600;margin:0 0 4px}
+section p.lead{font-size:15px;color:var(--pagetext2);margin:0 0 16px;max-width:70ch;line-height:1.5}
 .row{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}
-.cap{font-size:13px;color:var(--text3);text-align:center;margin-top:8px;max-width:330px}
+.cap{font-size:13px;color:var(--pagetext2);text-align:center;margin-top:8px;max-width:330px}
 
 /* phone */
 .phone{width:330px;height:700px;border-radius:48px;border:7px solid #111;background:var(--bg);color:var(--text);position:relative;overflow:hidden;box-shadow:0 20px 40px rgba(0,0,0,.18)}
@@ -183,7 +183,7 @@ section p.lead{font-size:15px;color:var(--text3);margin:0 0 16px;max-width:70ch;
       </div>
     </div>
   </div>
-  <p class="lead" style="font-size:15px;color:var(--text3);margin:0;max-width:75ch">The accent marks only what waits on you. Everything else is black and white, as in Hinge. Liquid Glass is on the functional layer only: the tab bar, the status strip, section headers once you scroll, sheets and toolbar buttons. Scroll inside each phone to see the glass headers.</p>
+  <p class="lead" style="font-size:15px;color:var(--pagetext2);margin:0;max-width:75ch">The accent marks only what waits on you. Everything else is black and white, as in Hinge. Liquid Glass is on the functional layer only: the tab bar, the status strip, section headers once you scroll, sheets and toolbar buttons. Scroll inside each phone to see the glass headers.</p>
 
   <!-- A2 -->
   <section>

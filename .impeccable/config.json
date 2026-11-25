@@ -1,0 +1,26 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "nested-cards",
+        "value": "*",
+        "files": [
+          "docs/design/mockups/a3-combined.html"
+        ],
+        "createdAt": "2026-11-25T23:31:04.779Z",
+        "reason": "false positive plus sanctioned exception: the outer card is a drawn iPhone bezel in a static mockup, and the inner glass plates over photos are the faces-in-glass design the user confirmed as A3 (ADR 0009)"
+      },
+      {
+        "rule": "nested-cards",
+        "value": "*",
+        "files": [
+          "docs/design/mockups/a2-and-overdrive.html"
+        ],
+        "createdAt": "2026-11-25T23:31:04.793Z",
+        "reason": "false positive plus sanctioned exception: the outer card is a drawn iPhone bezel in a static mockup, and the inner glass plates over photos are the faces-in-glass design the user confirmed as A3 (ADR 0009)"
+      }
+    ]
+  }
+}
