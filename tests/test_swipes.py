@@ -114,6 +114,16 @@ def suggestions(client) -> dict[str, dict]:
     return {candidate["name"]: candidate for candidate in response.json()}
 
 
+def test_a_purged_candidate_is_not_stored_again_when_the_app_offers_the_profile_again(signed_in, llm):
+    llm.reply = "like\nShe climbs."
+    dana = suggestions(signed_in)["Dana"]
+
+    assert signed_in.post("/people/purge", json={"candidate_ids": [dana["id"]], "confirm": "purge"}).status_code == 200
+
+    assert "Dana" not in suggestions(signed_in)
+    assert signed_in.get("/people/candidates", params={"q": "Dana"}).json() == []
+
+
 def test_a_dealbreaker_in_the_bio_is_a_pass_with_no_claude_call_and_no_photo_analysis(signed_in, tinder, jev, llm):
     signed_in.put("/preferences", json={"dealbreakers": ["smokes"]})
     jev.yes["dealbreaker"] = ["smoke"]

@@ -141,7 +141,10 @@ def _run(db: Connection, user_id: int, connector: Connector, capability: Capabil
                     "user_id": user_id,
                     "app": connector.app,
                     "capability": capability,
-                    "error": repr(error),
+                    # The kind of error only. Its text and URL can hold match and profile IDs, and an alert
+                    # outlives a purge of that person. The full error is in the log line above.
+                    "error": type(error).__name__
+                    + (f" {error.response.status_code}" if isinstance(error, httpx.HTTPStatusError) else ""),
                     "reason": reason,
                 },
             )

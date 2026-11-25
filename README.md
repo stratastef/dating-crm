@@ -36,6 +36,8 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/chat_autopilot.py` | Chat autopilot: the `chat_reply` job, `GET` and `PUT /settings/ai-disclosure` |
 | `app/tinder.py` | `TinderConnector`: reads matches and messages from Tinder's unofficial web API |
 | `app/sync.py` | `PUT /connectors/{app}/token` and the `sync_matches` job |
+| `app/purge.py` | Find and purge: `GET /people`, `GET /people/candidates`, `POST /people/purge` |
+| `app/tombstones.py` | `bury()` and `is_buried()`: a purged person is not stored again |
 | `app/paid_items.py` | Paid items (Super Like, Rose, Boost): `propose()`, approve and decline routes, and `spend()`, the only code that spends one |
 | `app/swipes.py` | Swipe copilot (like or pass suggestions and the user's swipes, routes under `/swipes`) and swipe autopilot (the `swipe_autopilot` job) |
 | `migrations/versions/` | Alembic migrations |
@@ -413,6 +415,9 @@ A match can ask for their data to be deleted. Routes are in `app/purge.py`.
 - The purge cannot be undone. Without `"confirm": "purge"` the request is `422`. It runs in one transaction: if any card is not the caller's it is `404` and nothing is deleted.
 - Every table that holds data about a match must reference `cards` (directly or through another table) with `ON DELETE CASCADE`; deleting the card is the purge. `tests/test_purge.py` reads the foreign keys from the database, so a new card table fails `test_no_row_for_a_purged_person_remains_in_any_table` until that test seeds a row in it. Anything kept outside Postgres needs its own delete in `purge_people()`: today that is the Google Calendar events of the card's holds, held or confirmed, whose titles carry the match's name. No file about a match is kept on disk: `card_photos` holds URLs, an imported screenshot is not stored, and the files under `PHOTOS_DIR` are the user's own photos.
 - Audit log: the entries about the purged match are deleted, not kept or blanked, because `target` identifies the person. The `cards_purge_audit_log` trigger does it when the card is deleted, which is the only delete the append-only trigger lets through besides deleting the user. The purge then adds one entry per card: type `purge`, the card's app, target `card:<id>` (an id that now points at nothing), trigger `deletion request`.
+- **A purged person stays purged.** The purge stores one tombstone per card with an `external_id` and per candidate, in `purge_tombstones`: a keyed hash (HMAC-SHA256 under `TOKEN_VAULT_MASTER_KEY`) of the user, the app and the app's ID for the person. It holds no name, app or ID. `app/tombstones.py` has `bury()` and `is_buried()`. Every path that stores a match or a candidate asks `is_buried()` first: `upsert_card()` returns `None` for a purged match (sync then skips their messages), `POST /cards` with their `external_id` is `409`, and `screen()` skips a purged profile. New code that stores a person from an app must ask too.
+- Limits of the tombstone: a new master key forgets all of them. A card without an `external_id` has none, so a screenshot of the same chat makes a new card. A purged candidate who later becomes a match has another ID and gets a card.
+- `connector_alerts` holds no match or profile ID (see "Connectors"), so a purge has nothing to delete there.
 - Not covered: backups made before the purge still hold the data until they expire.
 
 ## Autonomy and kill switch
@@ -469,7 +474,7 @@ messages = call(db, user_id, TinderConnector(), "read_messages", match_id)
 
 - **Switch a capability off:** set `CONNECTOR_DISABLED_CAPABILITIES=tinder:send,hinge:like` (comma-separated `app:capability`).
 - **Unavailable:** `unavailable(db, user_id, connector, capability)` returns the reason, or `None`. `call()` raises `CapabilityUnavailable` and does not touch the app when the capability is not declared, is disabled, the app is copilot-only, or the user has no stored token for the app.
-- **Fallback to copilot:** if the connector method raises, `call()` inserts a row in `connector_alerts` (`user_id`, `app`, `capability`, `error` = `repr()` of the exception) and raises `CapabilityFailed`, with the connector's exception as `__cause__`. The row is written in its own transaction, so it survives the failed job's rollback. That row is both the alert and the fallback: `is_copilot_only(db, user_id, app)` is true while the user has any alert for the app, and every capability of that app is then unavailable for that user. `alerts(db, user_id)` lists them. Delete the user's rows for an app to re-enable its connector.
+- **Fallback to copilot:** if the connector method raises, `call()` inserts a row in `connector_alerts` (`user_id`, `app`, `capability`, `error` = the exception's class name, plus the status code for an HTTP error, such as `HTTPStatusError 401`; never its text or URL, which can hold match and profile IDs and would outlive a purge; the full error is logged) and raises `CapabilityFailed`, with the connector's exception as `__cause__`. The row is written in its own transaction, so it survives the failed job's rollback. That row is both the alert and the fallback: `is_copilot_only(db, user_id, app)` is true while the user has any alert for the app, and every capability of that app is then unavailable for that user. `alerts(db, user_id)` lists them. Delete the user's rows for an app to re-enable its connector.
 - **Ban detection:** `classify(error)` sorts the connector's exception into `auth failure` (HTTP 401), `ban signal` (HTTP 403) or `transient` (anything else), stored in the alert's `reason`. An auth failure or ban signal also calls `pause(user_id, app, reason)` in the same transaction as the alert, so that app's autopilot stops for that user; a transient error does not pause. `GET /connectors/alerts` returns the user's alerts (`id`, `app`, `capability`, `reason`, `error`, `created_at`), newest first. A fresh token lifts the copilot-only fallback but not the pause: resume with `POST /autopilot/resume?app=...`.
 
 Test a connector's callers with a fake like `FakeConnector` in `tests/test_connectors.py`.
@@ -562,7 +567,7 @@ calendar.confirm_date(db, user_id, card_id, trigger="match agreed", start=start)
 
 - **Start:** `PUT /connectors/{app}/token` with `{"token": "..."}` stores the token in the vault, deletes the user's alerts for the app (so the connector is on again) and queues a `sync_matches` job with payload `{"app": app}`. It returns `204`, or `404` if the app has no connector.
 - **Schedule:** `sync_matches` is a recurring job (`every=SYNC_INTERVAL`, 15 minutes). The recurring run has an empty payload and syncs every app in `CONNECTORS`. It skips an app, without failing, when the user has no token for it, the app is copilot-only or a read capability is switched off.
-- **Cards:** a new match becomes a card in `matched`. `upsert_card()` in `app/cards.py` finds the card by `external_id`; on a later sync it changes only the name.
+- **Cards:** a new match becomes a card in `matched`. `upsert_card()` in `app/cards.py` finds the card by `external_id`; on a later sync it changes only the name. A match the user purged is skipped (see "Find and purge").
 - **Messages:** `upsert_message()` adds a message unless the card already has its `external_id`. A new message moves a card from `matched` to `chatting`. Sync never changes any other stage.
 - **Fewer requests:** sync reads a match's messages only when the match has messages and its newest one is not stored yet.
 - **Not built:** a match that disappears from the app (unmatched) keeps its card and stage.
@@ -586,7 +591,7 @@ All in `app/swipes.py`; the table is `swipe_candidates` (one row per profile an 
 - The decision route answers with the candidate plus `applied`. `applied: false` means the app was not reached (connector unavailable or failed, see "Connectors"): the swipe is stored and the user swipes in the dating app by hand.
 - `apply_decision(db, user_id, app, profile_id, decision)` is the one function that swipes through a connector. Swipe autopilot must call it and `record_action()`. It sends a plain like or pass and never spends a paid item.
 - The copilot routes do not read the swipe autonomy level: a request from the user is the consent.
-- Find and purge: a candidate is not a card. Find it with `GET /people/candidates` and purge it with `candidate_ids` (see "Find and purge"). The dating app may offer a purged profile again; it is then stored again.
+- Find and purge: a candidate is not a card. Find it with `GET /people/candidates` and purge it with `candidate_ids` (see "Find and purge"). The dating app may offer a purged profile again; it is not stored again.
 
 ## Feedback loop
 

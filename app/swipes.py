@@ -15,7 +15,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import Connection, text
 
-from app import feedback, jev, llm, paid_items
+from app import feedback, jev, llm, paid_items, tombstones
 from app.audit import record_action
 from app.auth import CurrentUser, Db
 from app.autopilot import autopilot_allowed
@@ -142,7 +142,13 @@ def screen(db: Connection, user_id: int, app: str) -> None:
         ).scalars()
     )
     wants = current_preferences(db, user_id)
-    for candidate in [candidate for candidate in candidates if candidate["id"] not in seen][:BATCH]:
+    new = [
+        candidate
+        for candidate in candidates
+        # A profile the user purged is not stored again, however often the app offers it.
+        if candidate["id"] not in seen and not tombstones.is_buried(db, user_id, "profile", app, candidate["id"])
+    ]
+    for candidate in new[:BATCH]:
         try:
             suggested = suggest(db, user_id, wants, candidate)
         except llm.BudgetReached:

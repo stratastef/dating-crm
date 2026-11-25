@@ -123,7 +123,7 @@ def test_a_failing_capability_makes_the_app_copilot_only_and_raises_an_alert(db,
     assert is_copilot_only(db, user_id, "fake")
     [alert] = alerts(db, user_id)
     assert (alert.app, alert.capability) == ("fake", "send")
-    assert "send is down" in alert.error
+    assert alert.error == "RuntimeError"
     # Working capabilities stop too: the whole app is on copilot.
     with pytest.raises(CapabilityUnavailable):
         call(db, user_id, fake, "read_matches")
@@ -157,9 +157,20 @@ def test_fallback_is_per_user_and_per_app(app, client_for):
         assert alerts(db, bob) == []
 
 
-def http_error(status: int) -> httpx.HTTPStatusError:
-    request = httpx.Request("GET", "https://app.example/matches")
-    return httpx.HTTPStatusError(f"{status} from app", request=request, response=httpx.Response(status, request=request))
+def http_error(status: int, url: str = "https://app.example/matches") -> httpx.HTTPStatusError:
+    request = httpx.Request("GET", url)
+    return httpx.HTTPStatusError(f"{status} for {url}", request=request, response=httpx.Response(status, request=request))
+
+
+def test_a_stored_alert_holds_the_kind_of_error_and_no_match_or_profile_id(db, user_id):
+    """An alert outlives a purge, so it must not name anyone: the app's URLs hold match and profile IDs."""
+    error = http_error(500, "https://app.example/matches/match-771/messages")
+
+    with pytest.raises(CapabilityFailed):
+        call(db, user_id, RefusingConnector(error), "read_messages", "match-771")
+
+    [alert] = alerts(db, user_id)
+    assert alert.error == "HTTPStatusError 500"
 
 
 class RefusingConnector(FakeConnector):

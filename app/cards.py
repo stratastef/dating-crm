@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app import calendar
 from app import handover
+from app import tombstones
 from app.auth import CurrentUser, Db
 from app.voice import queue_profile
 from app.autopilot import autopilot_allowed
@@ -100,6 +101,8 @@ class NewCard(BaseModel):
 
 @router.post("/cards", status_code=201, response_model=Card)
 def create_card(card: NewCard, user: CurrentUser, db: Db):
+    if card.external_id and tombstones.is_buried(db, user.id, "match", card.app, card.external_id):
+        raise HTTPException(status_code=409, detail="this person asked for their data to be deleted")
     try:
         return db.execute(
             text(
@@ -115,11 +118,14 @@ def create_card(card: NewCard, user: CurrentUser, db: Db):
         raise HTTPException(status_code=409, detail="a card with this app and external_id already exists")
 
 
-def upsert_card(db: Connection, user_id: int, app: str, external_id: str, name: str) -> int:
+def upsert_card(db: Connection, user_id: int, app: str, external_id: str, name: str) -> int | None:
     """Create the card for a synced match in Matched, or refresh its name. Returns the card id.
 
-    An existing card keeps its stage, notes, next action and due date.
+    An existing card keeps its stage, notes, next action and due date. A match the user purged is not stored
+    again: None is returned and the caller must store nothing about them.
     """
+    if tombstones.is_buried(db, user_id, "match", app, external_id):
+        return None
     return db.execute(
         text(
             """
