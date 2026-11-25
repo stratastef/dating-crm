@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Redesign A3, combined</title>
+<title>Redesign A3 combined</title>
 <style>
 @property --p { syntax: '<number>'; inherits: false; initial-value: 1; }
 :root{
@@ -58,9 +58,9 @@ section p.lead{font-size:15px;color:var(--text3);margin:0 0 16px;max-width:70ch;
 .strip strong{font-weight:600}
 .sticky{position:sticky;top:-54px;z-index:3;padding:58px 20px 8px;margin-top:-54px;font-size:15px;font-weight:600;display:flex;justify-content:space-between;align-items:baseline;transition:background .2s}
 .sticky.hd{padding-top:8px;margin-top:0;top:44px;border-radius:0}
-.sec{position:sticky;top:44px;z-index:3;margin:8px 10px 0;padding:7px 12px;border-radius:14px;font-size:15px;font-weight:600;display:flex;justify-content:space-between}
-.sec.plain{background:transparent;border-color:transparent;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none}
-.sec .n{color:var(--text3);font-weight:500}
+.sech{position:sticky;top:44px;z-index:3;margin:8px 10px 0;padding:7px 12px;border-radius:14px;font-size:15px;font-weight:600;display:flex;justify-content:space-between}
+.sech.plain{background:transparent;border-color:transparent;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none}
+.sech .n{color:var(--text3);font-weight:500}
 .acc{color:var(--acc)}
 
 /* rows */
@@ -206,13 +206,13 @@ section p.lead{font-size:15px;color:var(--text3);margin:0 0 16px;max-width:70ch;
               <span class="ln" id="cntSub" style="display:block">Lena is a hot lead. She wrote 10 min ago.</span>
             </button>
             </div></div>
-            <div class="sec glass plain"><span class="acc">Overdue</span><span class="n">1</span></div>
+            <div class="sech glass plain"><span class="acc">Overdue</span><span class="n">1</span></div>
             <div class="r"><div class="face p1"></div><div><div class="nm">Clara Novak</div><div class="ln">Send her the museum link</div></div><div class="tm acc">2 days late</div></div>
-            <div class="sec glass plain"><span>Today</span><span class="n">3</span></div>
+            <div class="sech glass plain"><span>Today</span><span class="n">3</span></div>
             <div class="r"><div class="face p2"></div><div><div class="nm">Date with Priya</div><div class="mt">Café Lume</div></div><div class="tm">19:30</div></div>
             <div class="r"><div class="face p3"></div><div><div class="nm">Iris Romero</div><div class="ln">Revive or archive</div></div><div class="tm">quiet 4d</div></div>
             <div class="r"><div class="face p4"></div><div><div class="nm">Zoe Tanaka</div><div class="ln">Rate your date</div></div><div class="tm">Sat</div></div>
-            <div class="sec glass plain"><span>Coming up</span><span class="n">2</span></div>
+            <div class="sech glass plain"><span>Coming up</span><span class="n">2</span></div>
             <div class="r"><div class="face p5"></div><div><div class="nm">Hannah Brooks</div><div class="ln">Confirm the booking</div></div><div class="tm">Fri</div></div>
             <div class="r"><div class="face nophoto-s">N</div><div><div class="nm">Noor Aziz</div><div class="ln">Ask about the gallery opening</div></div><div class="tm">Sun</div></div>
           </div>
@@ -262,19 +262,19 @@ section p.lead{font-size:15px;color:var(--text3);margin:0 0 16px;max-width:70ch;
           <div class="status"><span>9:41</span><span><i class="ti ti-antenna-bars-5"></i> <i class="ti ti-battery-3"></i></span></div>
           <div class="scroll">
             <div style="display:flex;justify-content:space-between;align-items:center;padding-right:16px"><div class="big">Pipeline</div><div style="display:flex;gap:8px"><span class="glass tbtn"><i class="ti ti-search"></i></span><span class="glass tbtn"><i class="ti ti-plus"></i></span></div></div>
-            <div class="sec glass plain"><span class="acc">Waiting for you</span><span class="n" id="cWait">2</span></div>
+            <div class="sech glass plain"><span class="acc">Waiting for you</span><span class="n" id="cWait">2</span></div>
             <div id="gWait">
               <div class="r" id="pLena"><div class="face p1"></div><div><div class="nm">Lena Okafor</div><div class="ln" id="pLenaLine"><span class="ai" style="font-weight:500;font-size:15px"><i class="ti ti-sparkles"></i>Reply ready in Review</span></div><div class="mt">Chatting on Tinder</div></div><div class="tm">10m</div></div>
               <div class="r"><div class="face p2"></div><div><div class="nm">Sofia Marchetti</div><div class="ln">Asked for your number</div><div class="mt">Chatting on Tinder</div></div><div class="tm">1h</div></div>
             </div>
-            <div class="sec glass plain"><span>Handled by autopilot</span><span class="n">1</span></div>
+            <div class="sech glass plain"><span>Handled by autopilot</span><span class="n">1</span></div>
             <div class="r"><div class="face p3"></div><div style="flex:1"><div class="nm">Nora Reyes</div><div class="ln" style="display:flex;align-items:center;gap:8px"><span class="ring run" style="--dur:40s"></span><span class="ai" style="font-weight:500;font-size:15px">Replies around 21:40</span></div><div class="mt">Talking hiking, Tinder</div></div><div class="tm">2m</div></div>
-            <div class="sec glass plain"><span>Waiting for them</span><span class="n" id="cThem">2</span></div>
+            <div class="sech glass plain"><span>Waiting for them</span><span class="n" id="cThem">2</span></div>
             <div id="gThem">
               <div class="r" id="rNoor"><div class="face nophoto-s">N</div><div><div class="nm">Noor Aziz</div><div class="ln" id="noorLine">You wrote yesterday</div><div class="mt">Chatting on Bumble</div></div><div class="tm" id="noorTime">1d</div></div>
               <div class="r"><div class="face p5"></div><div><div class="nm">Ella Brandt</div><div class="ln">You wrote 3h ago</div><div class="mt">Chatting on Tinder</div></div><div class="tm">3h</div></div>
             </div>
-            <div class="sec glass plain"><span>Texting off-app</span><span class="n">1</span></div>
+            <div class="sech glass plain"><span>Texting off-app</span><span class="n">1</span></div>
             <div class="r"><div class="face p2"></div><div><div class="nm">Priya Raman</div><div class="ln">Date tonight, 19:30</div><div class="mt">Date set on Tinder</div></div><div class="tm">1d</div></div>
           </div>
           <div class="tabbar glass"><span><i class="ti ti-calendar"></i>Today</span><span><i class="ti ti-checklist"></i>Review<b class="rbadge">3</b></span><span class="on"><i class="ti ti-users"></i>Pipeline</span><span><i class="ti ti-cards"></i>Swipe</span><span><i class="ti ti-user"></i>You</span></div>
@@ -316,7 +316,7 @@ document.querySelectorAll('i.ti').forEach(i=>{const n=[...i.classList].find(c=>c
 const root=document.documentElement,reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
 const sparkle='<svg class="ic" aria-hidden="true"><use href="#i-sparkles"/></svg>';
 document.querySelectorAll('.seg [data-theme]').forEach(b=>b.onclick=()=>{root.dataset.theme=b.dataset.theme;document.querySelectorAll('.seg [data-theme]').forEach(x=>x.setAttribute('aria-pressed',x===b))});
-document.querySelectorAll('.scroll').forEach(s=>s.addEventListener('scroll',()=>{s.querySelectorAll('.sec').forEach(h=>{const stuck=h.getBoundingClientRect().top-s.getBoundingClientRect().top<=46&&s.scrollTop>10;h.classList.toggle('plain',!stuck)})}));
+document.querySelectorAll('.scroll').forEach(s=>s.addEventListener('scroll',()=>{s.querySelectorAll('.sech').forEach(h=>{const stuck=h.getBoundingClientRect().top-s.getBoundingClientRect().top<=46&&s.scrollTop>10;h.classList.toggle('plain',!stuck)})}));
 function spring(from,axis='Y',{stiffness=170,damping=19}={}){const f=[];let x=from,v=0;const dt=1/60;for(let i=0;i<90;i++){const a=-stiffness*x-damping*v;v+=a*dt;x+=v*dt;f.push({transform:`translate${axis}(${x}px)`});if(Math.abs(x)<.2&&Math.abs(v)<.2)break}f.push({transform:'none'});return f}
 
 // Today: the ambient field runs under the status bar; the bar only gets its fade once rows scroll under it
