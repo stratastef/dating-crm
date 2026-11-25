@@ -7,11 +7,19 @@ draft. Jev never sees the rest of the chat.
 
 import os
 import re
+from contextlib import contextmanager
+from decimal import Decimal
 
 import httpx
 from sqlalchemy import Connection, text
 
+from app import llm
+
 DEFAULT_MODEL = "typesafe/jev-1.13"
+
+# USD per call to `ask`, counted against the user's AI budget. A guess, written by hand: confirm it against
+# what treg charges for `JEV_TOOL` before relying on the recorded costs.
+PRICE_USD = Decimal("0.0005")
 
 # Jev answers with the probability that the statement is true; at or above this it counts as yes.
 THRESHOLD = 0.5
@@ -119,79 +127,113 @@ def sentences(message: str) -> list[str]:
     return [part.strip() for part in re.split(r"(?<=[.!?])\s+|\n+", message) if part.strip()]
 
 
-def _hits(message: str, checks: tuple[str, ...]) -> list[str]:
+@contextmanager
+def _paid(db: Connection, user_id: int):
+    """Gives `ask` for one user, under their AI budget. At the cap it raises `JevUnavailable` without calling
+    Jev, so every check fails closed. The calls made are recorded as one row in `llm_calls` on the way out."""
+    if llm.budget_reached(db, user_id):
+        raise JevUnavailable("AI budget reached")
+    calls = 0
+
+    def counted(*question: str) -> bool:  # the arguments of `ask`
+        nonlocal calls
+        answer = ask(*question)  # looked up at call time, so tests can replace `ask`
+        calls += 1
+        return answer
+
     try:
-        return [check for check in checks if any(ask(sentence, check) for sentence in sentences(message))]
+        yield counted
+    finally:
+        if calls:
+            llm.record(db, user_id, "jev", os.environ.get("JEV_MODEL") or DEFAULT_MODEL, calls * PRICE_USD)
+
+
+def _hits(db: Connection, user_id: int, message: str, checks: tuple[str, ...]) -> list[str]:
+    try:
+        with _paid(db, user_id) as asks:
+            return [check for check in checks if any(asks(sentence, check) for sentence in sentences(message))]
     except JevUnavailable:
         return [UNAVAILABLE]  # fail closed: an unchecked message is treated as a hit
 
 
-def guardrail_hits(message: str) -> list[str]:
+def guardrail_hits(db: Connection, user_id: int, message: str) -> list[str]:
     """Draft guardrail for an outgoing message: the checks of `GUARDRAIL` it hits. Empty means safe to send.
 
     `["unavailable"]` when Jev could not be asked, so nothing is sent unattended.
     """
-    return _hits(message, GUARDRAIL)
+    return _hits(db, user_id, message, GUARDRAIL)
 
 
-def handover_hits(message: str) -> list[str]:
+def handover_hits(db: Connection, user_id: int, message: str) -> list[str]:
     """Handover trigger for an incoming message: the checks of `HANDOVER` it hits. Empty means no handover.
 
     `["unavailable"]` when Jev could not be asked, so the chat is handed over.
     """
-    return _hits(message, HANDOVER)
+    return _hits(db, user_id, message, HANDOVER)
 
 
-def read_hits(inference: str) -> list[str]:
+def read_hits(db: Connection, user_id: int, inference: str) -> list[str]:
     """Limits of the match read for one inference (its value and evidence): the checks of `READ` it hits.
 
     `["unavailable"]` when Jev could not be asked, so the inference is dropped.
     """
-    return _hits(inference, READ)
+    return _hits(db, user_id, inference, READ)
 
 
-def answer_denies_ai(question: str, answer: str) -> bool:
+def answer_denies_ai(db: Connection, user_id: int, question: str, answer: str) -> bool:
     """Whether `answer`, read as the reply to `question`, denies being an AI: "Nope, why?" after "are you a
     bot?". The sentence checks cannot see this, because each judges one sentence alone. True when Jev could
     not be asked."""
     try:
-        return ask(f"Question: {' '.join(question.split())} Answer: {' '.join(answer.split())}", "answer_denies_ai")
+        with _paid(db, user_id) as asks:
+            return asks(
+                f"Question: {' '.join(question.split())} Answer: {' '.join(answer.split())}", "answer_denies_ai"
+            )
     except JevUnavailable:
         return True
 
 
-def names_logistics(message: str) -> bool:
+def names_logistics(db: Connection, user_id: int, message: str) -> bool:
     """Whether an outgoing message is about a time, a place to meet or exclusivity. True when Jev could not be
     asked. Autopilot must not send such a text alone: the user, or a slot from the calendar, settles a date."""
-    return bool(_hits(message, ("logistics",)))
+    return bool(_hits(db, user_id, message, ("logistics",)))
 
 
-def is_hot_lead(message: str) -> bool:
+def is_hot_lead(db: Connection, user_id: int, message: str) -> bool:
     """Hot-lead triage for a draft: whether it deserves a live push. False when Jev could not be asked."""
     try:
-        return any(ask(sentence, "hot_lead") for sentence in sentences(message))
+        with _paid(db, user_id) as asks:
+            return any(asks(sentence, "hot_lead") for sentence in sentences(message))
     except JevUnavailable:
         return False
 
 
-def dealbreaker_hit(bio: str, dealbreakers: list[str], strict: bool = False) -> str | None:
+def dealbreaker_hit(
+    db: Connection, user_id: int, bio: str, dealbreakers: list[str], strict: bool = False
+) -> str | None:
     """Swipe pre-filter for a candidate's bio: the first of the user's dealbreakers it shows, else None.
 
     None when Jev could not be asked: the profile then goes on to the next pre-filter, and the user decides.
     With `strict`, `JevUnavailable` is raised instead: swipe autopilot must not swipe on an unchecked profile.
     """
+    if not (dealbreakers and sentences(bio)):
+        return None  # nothing to ask, so nothing to fail on
     try:
-        for dealbreaker in dealbreakers:
-            if any(ask(sentence, "dealbreaker", dealbreaker) for sentence in sentences(bio)):
-                return dealbreaker
+        with _paid(db, user_id) as asks:
+            for dealbreaker in dealbreakers:
+                if any(asks(sentence, "dealbreaker", dealbreaker) for sentence in sentences(bio)):
+                    return dealbreaker
     except JevUnavailable:
         if strict:
             raise
     return None
 
 
-def record_handover(db: Connection, message_id: int, body: str) -> list[str]:
+def record_handover(db: Connection, user_id: int, message_id: int, body: str) -> list[str]:
     """Run the handover trigger on a new incoming message, store the result on its row and return it."""
-    hits = handover_hits(body)
-    db.execute(text("UPDATE messages SET handover = :hits WHERE id = :id"), {"hits": hits, "id": message_id})
+    hits = handover_hits(db, user_id, body)
+    db.execute(
+        text("UPDATE messages SET handover = :hits WHERE id = :id AND user_id = :user_id"),
+        {"hits": hits, "id": message_id, "user_id": user_id},
+    )
     return hits

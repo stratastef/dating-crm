@@ -172,13 +172,13 @@ def test_a_profile_is_screened_once_and_waits_until_the_user_decides(signed_in, 
     assert signed_in.get("/swipes", params={"app": "tinder"}).json() == list(first.values())
 
 
-def test_at_the_ai_budget_only_the_jev_passes_are_suggested(signed_in, jev, llm):
+def test_at_the_ai_budget_nothing_is_screened_by_jev_or_by_the_model(signed_in, jev, llm):
     signed_in.put("/preferences", json={"dealbreakers": ["smokes"]})
     jev.yes["dealbreaker"] = ["smoke"]
     signed_in.put("/budget", json={"cap_usd": 0})
 
-    assert list(suggestions(signed_in)) == ["Dana"]
-    assert llm.prompts == []
+    assert list(suggestions(signed_in)) == []
+    assert llm.prompts == [] and jev.asked == []
 
 
 def test_an_answer_that_is_neither_like_nor_pass_suggests_nothing(signed_in, llm):

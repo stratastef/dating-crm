@@ -142,8 +142,12 @@ def chat_reply(db: Connection, user_id: int, payload: dict) -> None:
         return  # no style profile yet, or an empty draft: nothing to send
 
     body = [draft.original]
-    for_user = ["logistics"] if jev.names_logistics(draft.original) else []  # hits that keep the draft for the user
-    if logistics and not for_user:
+    # Hits that keep the draft for the user.
+    for_user = ["logistics"] if jev.names_logistics(db, user_id, draft.original) else []
+    if any(message.handover is None for message in waiting):
+        # An old message was never sent to Jev (see `handover.incoming()`), so it may be a handover trigger.
+        for_user.append("unchecked")
+    if logistics and "logistics" not in for_user:
         try:
             if isinstance(answer, int):
                 # A booked date is where full mode ends: the reply below stays in the review queue.
@@ -177,7 +181,7 @@ def chat_reply(db: Connection, user_id: int, payload: dict) -> None:
     message = " ".join(body)
     db.execute(
         text("UPDATE drafts SET original = :original, guardrail = :guardrail WHERE id = :id"),
-        {"id": draft.id, "original": message, "guardrail": jev.guardrail_hits(message) + for_user},
+        {"id": draft.id, "original": message, "guardrail": jev.guardrail_hits(db, user_id, message) + for_user},
     )
     trigger = f"{TRIGGER} ({level}): reply to message {newest.id}"
     if not queue_send(db, user_id, draft.id, trigger, unattended=True):

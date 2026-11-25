@@ -61,23 +61,19 @@ def suggest_replies(db: Connection, user_id: int, card_id: int, hits: list[str])
     # Each suggestion is also judged as the answer to what the match asked: alone, "Nope, why?" denies nothing.
     question = " ".join(message.body for message in unanswered(db, user_id, card_id))
     return [
-        line for line in lines if not jev.guardrail_hits(line) and not jev.answer_denies_ai(question, line)
+        line
+        for line in lines
+        if not jev.guardrail_hits(db, user_id, line) and not jev.answer_denies_ai(db, user_id, question, line)
     ]
 
 
-def incoming(db: Connection, user_id: int, card_id: int, message_id: int, body: str) -> list[str]:
+def incoming(db: Connection, user_id: int, card_id: int, message_id: int, body: str) -> list[str] | None:
     """Call for each new message from the match. Runs the handover trigger, stores its result on the message
     and returns it. On a hit the card is paused for handover and the user gets a push with suggested replies.
+
+    A message the user has already answered, or one older than a day, is not checked: None is returned and
+    `messages.handover` stays null. A first sync reads whole chats, and must not pay Jev for their history.
     """
-    hits = jev.record_handover(db, message_id, body)
-    if not hits:
-        return hits
-    # Full mode coordinates a time alone (see `app/chat_autopilot.py`), so logistics alone do not hand over
-    # while it may act. Every other trigger does, in every mode: a place or exclusivity is its own hit.
-    app = db.execute(text("SELECT app FROM cards WHERE id = :id"), {"id": card_id}).scalar_one()
-    full = autonomy_levels(db, user_id)["chat"] == "full" and autopilot_allowed(db, user_id, app, "chat")
-    if full and hits == ["logistics"]:
-        return hits
     # Unanswered, not newest: an app may hand over a batch newest first, so the message that hits is often
     # stored after the ones that followed it.
     message = db.execute(
@@ -92,20 +88,32 @@ def incoming(db: Connection, user_id: int, card_id: int, message_id: int, body: 
         ),
         {"id": message_id, "card_id": card_id, "user_id": user_id},
     ).one()
-    if not message.unanswered:
-        return hits  # the user has replied since: the chat has moved on
-    name = db.execute(
-        text("UPDATE cards SET handover = 'pending' WHERE id = :id AND handover IS NULL RETURNING name"),
-        {"id": card_id},
-    ).scalar_one_or_none()
-    # Nothing more for a card that was paused before, and none for an old message: a first sync reads whole
-    # chats, and must not call Claude or push once per old hit.
-    if name is None or not message.recent:
+    if not (message.unanswered and message.recent):
+        return None
+    hits = jev.record_handover(db, user_id, message_id, body)
+    if not hits:
         return hits
+    # Full mode coordinates a time alone (see `app/chat_autopilot.py`), so logistics alone do not hand over
+    # while it may act. Every other trigger does, in every mode: a place or exclusivity is its own hit.
+    app = db.execute(
+        text("SELECT app FROM cards WHERE id = :id AND user_id = :user_id"), {"id": card_id, "user_id": user_id}
+    ).scalar_one()
+    full = autonomy_levels(db, user_id)["chat"] == "full" and autopilot_allowed(db, user_id, app, "chat")
+    if full and hits == ["logistics"]:
+        return hits
+    name = db.execute(
+        text(
+            "UPDATE cards SET handover = 'pending'"
+            " WHERE id = :id AND user_id = :user_id AND handover IS NULL RETURNING name"
+        ),
+        {"id": card_id, "user_id": user_id},
+    ).scalar_one_or_none()
+    if name is None:
+        return hits  # nothing more for a card that was paused before
     suggestions = suggest_replies(db, user_id, card_id, hits)
     db.execute(
-        text("UPDATE cards SET handover_suggestions = :suggestions WHERE id = :id"),
-        {"id": card_id, "suggestions": suggestions},
+        text("UPDATE cards SET handover_suggestions = :suggestions WHERE id = :id AND user_id = :user_id"),
+        {"id": card_id, "user_id": user_id, "suggestions": suggestions},
     )
     review.notify_if_hot(
         db,

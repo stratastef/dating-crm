@@ -76,7 +76,7 @@ def suggest(db: Connection, user_id: int, wants: PreferencesVersion, candidate: 
     A dealbreaker Jev finds in the bio is a pass at once, before anything is paid for. Raises
     `llm.BudgetReached` when the cheap model is needed and the user's AI budget is spent.
     """
-    dealbreaker = jev.dealbreaker_hit(candidate["bio"], wants.dealbreakers)
+    dealbreaker = jev.dealbreaker_hit(db, user_id, candidate["bio"], wants.dealbreakers)
     if dealbreaker:
         return "pass", f"Dealbreaker: {dealbreaker}", "jev"
     reply = llm.call(
@@ -286,7 +286,7 @@ def swipe_autopilot(db: Connection, user_id: int, payload: dict) -> None:
                 # shortcut: this asks Jev a second time about a profile screened in this run; store the result
                 # of the first check on the row if the calls get costly.
                 try:
-                    if jev.dealbreaker_hit(candidate.bio, wants.dealbreakers, strict=True):
+                    if jev.dealbreaker_hit(db, user_id, candidate.bio, wants.dealbreakers, strict=True):
                         decision, source = "pass", "jev"
                 except jev.JevUnavailable:
                     continue  # no dealbreaker check, no unattended swipe: the profile waits for the user

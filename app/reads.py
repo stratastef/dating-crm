@@ -81,7 +81,7 @@ _SYSTEM = (
 )
 
 
-def _allowed(item: object, opted_in: bool) -> _Inferred | None:
+def _allowed(db: Connection, user_id: int, item: object, opted_in: bool) -> _Inferred | None:
     """The inference if it may be stored, else None. This is where the spec's limits are enforced."""
     try:
         inferred = _Inferred.model_validate(item)
@@ -96,7 +96,7 @@ def _allowed(item: object, opted_in: bool) -> _Inferred | None:
     if inferred.kind not in KINDS | PROTECTED:
         return None
     # The labels above are Claude's own. Jev judges the text itself; when it cannot, the inference is dropped.
-    hits = set(jev.read_hits(f"{inferred.value}\n{inferred.evidence}"))
+    hits = set(jev.read_hits(db, user_id, f"{inferred.value}\n{inferred.evidence}"))
     if hits - {"guesses_protected_trait"}:
         return None
     if hits and not inferred.protected_trait:
@@ -189,7 +189,7 @@ def make_read(card_id: int, user: CurrentUser, db: Db):
         text("DELETE FROM inferences WHERE card_id = :card_id AND user_id = :user_id AND corrected IS NULL"),
         {"card_id": card_id, "user_id": user.id},
     )
-    for inferred in filter(None, (_allowed(item, opted_in) for item in items)):
+    for inferred in filter(None, (_allowed(db, user.id, item, opted_in) for item in items)):
         db.execute(
             text(
                 """

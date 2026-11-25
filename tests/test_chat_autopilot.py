@@ -494,6 +494,22 @@ def test_two_messages_in_a_row_get_one_reply(app, client, card_id, tinder):  # n
     assert len(sent(tinder)) == 1
 
 
+def test_a_reply_waits_for_the_user_when_an_older_unanswered_message_was_never_checked(
+    app, client, card_id, tinder, jev  # noqa: F811
+):
+    """Old messages are not sent to Jev, so autopilot cannot know that one of them was a handover trigger."""
+    autonomy(client, "full")
+    jev.yes["asks_if_ai"] = ["are you a bot"]
+    old = (datetime.now(UTC) - timedelta(days=2)).isoformat()
+    client.post(f"/cards/{card_id}/messages", json={"sender": "them", "body": "are you a bot?", "sent_at": old})
+
+    incoming(client, card_id, "hello?")
+    work(app)
+
+    assert sent(tinder) == []
+    assert [draft["guardrail"] for draft in queued_for_review(client)] == [["unchecked"]]
+
+
 def test_an_old_message_is_not_answered(app, client, card_id, tinder):  # noqa: F811
     autonomy(client, "full")
     old = (datetime.now(UTC) - timedelta(days=2)).isoformat()

@@ -130,19 +130,22 @@ def test_take_over_keeps_the_chat_manual_until_the_user_hands_it_back(app, clien
     assert not paused(app, card_id)
 
 
-def test_an_old_hit_from_a_first_sync_pauses_the_card_without_a_push_or_a_claude_call(app, client, jev, llm, apns):
+def test_a_first_sync_sends_neither_old_nor_answered_messages_to_jev(app, client, jev, llm, apns):
+    """A first sync reads whole chats, newest message first: only what still waits for an answer is checked."""
     jev.yes["asks_if_ai"] = ["are you real"]
     client.post("/devices", json={"token": "abc123"})
+    now = datetime.now(timezone.utc)
     with app.state.engine.begin() as db:
         user_id = db.exec_driver_sql("SELECT id FROM users").scalar_one()
-        answered = upsert_card(db, user_id, "tinder", "match-1", "Sam")
-        upsert_message(db, user_id, answered, "m1", "them", "are you real", "2026-01-01T10:00:00Z")
-        upsert_message(db, user_id, answered, "m2", "me", "ask me something", "2026-01-01T10:05:00Z")
-        unanswered = upsert_card(db, user_id, "tinder", "match-2", "Kim")
-        upsert_message(db, user_id, unanswered, "m1", "them", "are you real", "2026-01-01T10:00:00Z")
+        old = upsert_card(db, user_id, "tinder", "match-1", "Sam")
+        upsert_message(db, user_id, old, "m1", "them", "are you real", "2026-01-01T10:00:00Z")
+        answered = upsert_card(db, user_id, "tinder", "match-2", "Kim")
+        upsert_message(db, user_id, answered, "m2", "me", "ask me something", now)
+        upsert_message(db, user_id, answered, "m1", "them", "are you real", now - timedelta(minutes=5))
 
-    assert not paused(app, answered)
-    assert paused(app, unanswered)
+    assert jev.asked == []
+    assert not paused(app, old) and not paused(app, answered)
+    assert [message["handover"] for message in client.get(f"/cards/{old}/messages").json()] == [None]
     assert llm.prompts == []
     assert apns.sent == []
 

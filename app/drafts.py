@@ -113,8 +113,8 @@ def draft_for(db: Connection, user_id: int, card_id: int, rule: str = "") -> tup
             "card_id": card_id,
             "kind": kind,
             "original": original,
-            "guardrail": jev.guardrail_hits(original),
-            "hot_lead": jev.is_hot_lead(original),
+            "guardrail": jev.guardrail_hits(db, user_id, original),
+            "hot_lead": jev.is_hot_lead(db, user_id, original),
         },
     ).one()
     return draft, card.name
@@ -126,8 +126,11 @@ def edit_draft(draft_id: int, edit: Edit, user: CurrentUser, db: Db):
 
     The guardrail is run again, because the edit is now the text to send.
     """
-    # shortcut: Jev is asked before the draft is known to be the caller's. Check ownership first if that
-    # cost matters.
+    owned = db.execute(
+        text("SELECT 1 FROM drafts WHERE id = :id AND user_id = :user_id"), {"id": draft_id, "user_id": user.id}
+    ).one_or_none()
+    if not owned:
+        raise HTTPException(status_code=404, detail="draft not found")  # before Jev is paid for
     draft = db.execute(
         text(
             f"""
@@ -136,9 +139,12 @@ def edit_draft(draft_id: int, edit: Edit, user: CurrentUser, db: Db):
             RETURNING {_COLUMNS}
             """
         ),
-        {"id": draft_id, "user_id": user.id, "edited": edit.edited, "guardrail": jev.guardrail_hits(edit.edited)},
-    ).one_or_none()
-    if not draft:
-        raise HTTPException(status_code=404, detail="draft not found")
+        {
+            "id": draft_id,
+            "user_id": user.id,
+            "edited": edit.edited,
+            "guardrail": jev.guardrail_hits(db, user.id, edit.edited),
+        },
+    ).one()
     queue_profile(db, user.id)  # feedback loop: the edit shows what the style profile got wrong
     return draft
