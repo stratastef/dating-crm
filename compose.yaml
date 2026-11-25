@@ -11,6 +11,10 @@ x-app: &app
     APNS_TEAM_ID: ${APNS_TEAM_ID:-}
     APNS_BUNDLE_ID: ${APNS_BUNDLE_ID:-}
     APNS_SANDBOX: ${APNS_SANDBOX:-}
+    JEV_BASE_URL: ${JEV_BASE_URL:-}
+    JEV_API_KEY: ${JEV_API_KEY:-}
+    JEV_TOOL: ${JEV_TOOL:-}
+    JEV_MODEL: ${JEV_MODEL:-}
   depends_on:
     db:
       condition: service_healthy

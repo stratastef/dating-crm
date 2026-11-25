@@ -124,3 +124,24 @@ def apns(monkeypatch):
     stub.key = APNS_KEY  # for checking the signature of a push
     monkeypatch.setattr("app.push.post", stub)
     return stub
+
+
+class StubJev:
+    """Stands in for `app.jev.ask`. Jev answers yes when the sentence contains a phrase listed for that check
+    in `yes`, for example `jev.yes["logistics"] = ["saturday"]`; otherwise no. `asked` records each call."""
+
+    def __init__(self):
+        self.yes: dict[str, list[str]] = {}
+        self.asked: list[tuple[str, str]] = []
+
+    def __call__(self, sentence: str, check: str) -> bool:
+        self.asked.append((sentence, check))
+        return any(phrase in sentence.lower() for phrase in self.yes.get(check, []))
+
+
+@pytest.fixture(autouse=True)
+def jev(monkeypatch):
+    """Every test gets the stub, so no test can call Jev."""
+    stub = StubJev()
+    monkeypatch.setattr("app.jev.ask", stub)
+    return stub

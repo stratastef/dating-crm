@@ -65,6 +65,7 @@ Fixtures in `tests/conftest.py`:
 | `app` | The FastAPI app, for unauthenticated requests: `TestClient(app)`. |
 | `llm` | The stub that replaces `app.llm.complete` in every test. See "Calling Claude". |
 | `apns` | The stub that replaces `app.push.post` in every test. See "Push notifications". |
+| `jev` | The stub that replaces `app.jev.ask` in every test. See "Jev checks". |
 
 ## Authentication and tenancy
 
@@ -193,6 +194,35 @@ Routes are in `app/drafts.py`; the table is `drafts` (one row per draft).
 - `status` is `pending` for every draft so far. Nothing sends a draft yet: in copilot the user copies it.
 - The prompt holds the style profile, the card's app, name and notes, the conversation, and `similar_chats()` as examples.
 - The write route returns `409` until the style profile is written, and `502` if Claude's reply is empty.
+- A draft also has `guardrail` and `hot_lead`, the results of its Jev checks (see below).
+
+## Jev checks
+
+Jev is a cheap yes/no classifier reached through treg. It judges one sentence at a time and never sees the rest of the chat. All of it is in `app/jev.py`; `ask()` is the one function that calls Jev.
+
+| Function | Use it for | Returns |
+| --- | --- | --- |
+| `jev.ask(sentence, check)` | One yes/no check on one sentence. `check` is a key of `jev.CHECKS`; add a key to add a check, for example a bio dealbreaker. | `bool`. Raises `JevUnavailable` when Jev is not configured or the call fails. |
+| `jev.guardrail_hits(text)` | Draft guardrail on an outgoing message. | The checks hit, from `denies_ai`, `protected_trait`, `overpromise`. Empty means safe to send. |
+| `jev.handover_hits(text)` | Handover trigger on an incoming message. | The checks hit, from `asks_if_ai`, `logistics`, `personal_info`, `sensitive`. Empty means no handover. |
+| `jev.is_hot_lead(text)` | Hot-lead triage on a draft. | `bool`: the draft deserves a live push. |
+
+- The three functions split the text into sentences and ask about each. A check is hit if any sentence hits it.
+- Results are stored with the row. `messages.handover` is set for every new message from `them`, by `POST /cards/{id}/messages` and by `upsert_message`; it is `null` for the user's own messages. `drafts.guardrail` and `drafts.hot_lead` are set when a draft is written, and `PATCH /drafts/{id}` runs the guardrail again on the edit. The routes return these fields.
+- Never send a draft whose `guardrail` is not an empty list. Code that sends any other text must call `jev.guardrail_hits()` on it first.
+- Fail closed: when Jev is not configured or a call fails, `guardrail_hits` and `handover_hits` return `["unavailable"]`, which counts as a hit, and `is_hot_lead` returns `False`. Nothing is sent unattended without Jev.
+- The owner must set three variables for the API and the worker; Compose passes them through from your shell or `.env`. Until all three are set, every check fails closed as above.
+
+| Variable | Fill in |
+| --- | --- |
+| `JEV_BASE_URL` | The treg server, for example `https://treg.to`. |
+| `JEV_API_KEY` | Your treg token. It is sent as the `X-Treg-Token` header. |
+| `JEV_TOOL` | The treg endpoint that reaches Jev, for example `openrouter.ai-judge.decide`. |
+| `JEV_MODEL` | Optional. The Jev model, default `typesafe/jev-1.13`. |
+
+- The request is `POST {JEV_BASE_URL}/call/{JEV_TOOL}` with one question of type `noul`; the answer is read from `answers.q1.noul` (a probability; 0.5 or more is yes). This shape is copied from treg's `jev-memory` example and has not been run against the real service: confirm it with one real call before relying on the checks.
+- Jev calls are not recorded in `llm_calls`.
+- Tests never reach Jev: the autouse `jev` fixture in `tests/conftest.py` replaces `ask()`. It answers no unless the sentence contains a phrase you list, `jev.yes["logistics"] = ["saturday"]`; `jev.asked` records each call.
 
 ## Preferences
 
