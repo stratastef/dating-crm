@@ -20,6 +20,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/send.py` | Sending a draft: `POST /drafts/{id}/send`, `queue_send()` and the `send_draft` job |
 | `app/voice.py` | Questionnaire, style profile and similar past chats: routes under `/voice` |
 | `app/bios.py` | Bio and prompt rewrites per dating app: routes under `/bios` |
+| `app/photos.py` | The user's own photos, their ranking and light edits: routes under `/photos` |
 | `app/preferences.py` | What the user wants, versioned: routes under `/preferences`, `current_preferences()` |
 | `app/dashboard.py` | Good dates per hour, weekly: `POST /time` and `GET /dashboard` |
 | `app/settings.py` | User settings: `GET` and `PATCH /settings` |
@@ -191,6 +192,27 @@ Routes are in `app/bios.py`; the table is `bios` (one row per user and app). A b
 - The rewrite route returns `409` until the style profile is written, and `502` if Claude's reply is not a bio; the client can retry.
 - Nothing is written to a dating app: in copilot the user copies the accepted text.
 
+## Photos
+
+Routes are in `app/photos.py`; the table is `photos` (one row per photo). A photo is `{"id", "rank", "reason", "suggested_edit", "edit"}`.
+
+| Route | Does |
+| --- | --- |
+| `POST /photos` | Store one photo. The body is the file itself, with `Content-Type: image/jpeg` or `image/png`. |
+| `GET /photos` | List the photos, best first. Unranked photos come last. |
+| `POST /photos/rank` | Have Claude look at all the photos and store a `rank` (1 is best) and a `reason` for each. It may also offer a light edit per photo, stored as `suggested_edit`. |
+| `GET /photos/{id}/preview` | The photo with the edit on offer applied. Stores nothing. |
+| `PUT /photos/{id}/edit` with `{"accept": true}` | Accept or reject the edit on offer. An accepted edit becomes `edit`; either way `suggested_edit` is cleared. |
+| `GET /photos/{id}/image` | The photo with the accepted edit applied, or the file as uploaded. |
+
+- **Files** are on local disk under `PHOTOS_DIR` (default `./photos`), as `<user id>/<photo id>`. Compose sets it to `/data/photos` on the `photos` volume, shared by the API and worker. Back that volume up with the database. The uploaded file is never changed or deleted.
+- **Upload limits:** at most 10 MB (`413`), `image/jpeg` or `image/png` only (`415`), and the file must really be that type (`422`).
+- **Edits are not generated.** An edit is `{"crop": [left, top, right, bottom] or null, "exposure", "colour"}`: crop in fractions of the width and height, the two factors from 0.5 to 1.5 where 1 changes nothing. Claude only proposes these numbers. `_edited()` applies them to the uploaded file with Pillow. No route returns pixels from a model.
+- Claude is called with the photos through `llm.call(..., images=[(content_type, data)])`. Each photo is sent scaled down to 1024 pixels a side.
+- The rank route returns `409` when the user has no photos, and `502` when Claude's reply does not rank exactly the user's photos or holds an edit outside the limits; nothing is stored then.
+- Nothing is uploaded to a dating app and nothing rotates photos: the user saves the photo they want and changes their profile themselves.
+- Not built: deleting a photo.
+
 ## Drafts
 
 Routes are in `app/drafts.py`; the table is `drafts` (one row per draft).
@@ -339,7 +361,7 @@ A match can ask for their data to be deleted. Routes are in `app/purge.py`.
 | `POST /people/purge` | Delete the cards in `card_ids` and everything stored about them. Body: `{"card_ids": [1, 2], "confirm": "purge"}`. Returns `{"purged": 2}`. |
 
 - The purge cannot be undone. Without `"confirm": "purge"` the request is `422`. It runs in one transaction: if any card is not the caller's it is `404` and nothing is deleted.
-- Every table that holds data about a match must reference `cards` (directly or through another table) with `ON DELETE CASCADE`; deleting the card is the purge. `tests/test_purge.py` reads the foreign keys from the database, so a new card table fails `test_no_row_for_a_purged_person_remains_in_any_table` until that test seeds a row in it. Anything kept outside Postgres needs its own delete in `purge_people()`: today that is the Google Calendar events of the card's holds, held or confirmed, whose titles carry the match's name. No files are kept on disk (`card_photos` holds URLs, and an imported screenshot is not stored).
+- Every table that holds data about a match must reference `cards` (directly or through another table) with `ON DELETE CASCADE`; deleting the card is the purge. `tests/test_purge.py` reads the foreign keys from the database, so a new card table fails `test_no_row_for_a_purged_person_remains_in_any_table` until that test seeds a row in it. Anything kept outside Postgres needs its own delete in `purge_people()`: today that is the Google Calendar events of the card's holds, held or confirmed, whose titles carry the match's name. No file about a match is kept on disk: `card_photos` holds URLs, an imported screenshot is not stored, and the files under `PHOTOS_DIR` are the user's own photos.
 - Audit log: the entries about the purged match are deleted, not kept or blanked, because `target` identifies the person. The `cards_purge_audit_log` trigger does it when the card is deleted, which is the only delete the append-only trigger lets through besides deleting the user. The purge then adds one entry per card: type `purge`, the card's app, target `card:<id>` (an id that now points at nothing), trigger `deletion request`.
 - Not covered: backups made before the purge still hold the data until they expire.
 

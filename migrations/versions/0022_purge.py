@@ -1,13 +1,13 @@
 """purge: a deleted card takes its audit entries with it, and the purge is an audit type
 
-Revision ID: 0021_purge
-Revises: 0020_calendar_holds
+Revision ID: 0022_purge
+Revises: 0021_photos
 """
 
 from alembic import op
 
-revision = "0021_purge"
-down_revision = "0020_calendar_holds"
+revision = "0022_purge"
+down_revision = "0021_photos"
 branch_labels = None
 depends_on = None
 
