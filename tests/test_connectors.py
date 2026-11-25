@@ -2,6 +2,7 @@ import pytest
 from sqlalchemy import text
 
 from app.connectors import CapabilityFailed, CapabilityUnavailable, Connector, alerts, call, is_copilot_only
+from app.vault import delete_token, store_token
 
 
 class FakeConnector(Connector):
@@ -19,6 +20,7 @@ class FakeConnector(Connector):
             raise RuntimeError(f"{capability} is down")
 
     def read_matches(self, token):
+        self.token = token
         self._check("read_matches")
         return [{"id": "m1", "name": "Sam"}]
 
@@ -47,17 +49,35 @@ def db(app, client):
 
 @pytest.fixture
 def user_id(db):
-    return db.execute(text("SELECT id FROM users")).scalar_one()
+    user_id = db.execute(text("SELECT id FROM users")).scalar_one()
+    store_token(db, user_id, "fake", "fake-session")
+    return user_id
+
+
+def test_the_connector_gets_the_users_token_from_the_vault(db, user_id):
+    fake = FakeConnector()
+
+    call(db, user_id, fake, "read_matches")
+
+    assert fake.token == "fake-session"
+
+
+def test_without_a_stored_token_the_capability_is_unavailable(db, user_id):
+    delete_token(db, user_id, "fake")
+
+    with pytest.raises(CapabilityUnavailable):
+        call(db, user_id, FakeConnector(), "read_matches")
+    assert not is_copilot_only(db, user_id, "fake")
 
 
 def test_every_declared_capability_can_be_called(db, user_id):
     fake = FakeConnector()
 
-    assert call(db, user_id, fake, "read_matches", "token") == [{"id": "m1", "name": "Sam"}]
-    assert call(db, user_id, fake, "read_messages", "token", "m1") == [{"match_id": "m1", "text": "hi"}]
-    call(db, user_id, fake, "send", "token", "m1", "hello")
-    call(db, user_id, fake, "like", "token", "p1")
-    call(db, user_id, fake, "pass", "token", "p2")
+    assert call(db, user_id, fake, "read_matches") == [{"id": "m1", "name": "Sam"}]
+    assert call(db, user_id, fake, "read_messages", "m1") == [{"match_id": "m1", "text": "hi"}]
+    call(db, user_id, fake, "send", "m1", "hello")
+    call(db, user_id, fake, "like", "p1")
+    call(db, user_id, fake, "pass", "p2")
 
     assert fake.sent == [("m1", "hello")]
     assert fake.liked == ["p1"]
@@ -71,9 +91,9 @@ def test_a_capability_left_out_of_a_build_is_unavailable(db, user_id):
 
     fake = ReadOnly()
 
-    assert call(db, user_id, fake, "read_matches", "token")
+    assert call(db, user_id, fake, "read_matches")
     with pytest.raises(CapabilityUnavailable):
-        call(db, user_id, fake, "send", "token", "m1", "hello")
+        call(db, user_id, fake, "send", "m1", "hello")
     assert fake.sent == []
     assert not is_copilot_only(db, user_id, "fake")
 
@@ -83,8 +103,8 @@ def test_a_capability_disabled_by_configuration_is_unavailable(db, user_id, monk
     fake = FakeConnector()
 
     with pytest.raises(CapabilityUnavailable):
-        call(db, user_id, fake, "like", "token", "p1")
-    call(db, user_id, fake, "send", "token", "m1", "hello")
+        call(db, user_id, fake, "like", "p1")
+    call(db, user_id, fake, "send", "m1", "hello")
 
     assert fake.liked == []
     assert fake.sent == [("m1", "hello")]
@@ -95,7 +115,7 @@ def test_a_failing_capability_makes_the_app_copilot_only_and_raises_an_alert(db,
     fake = FakeConnector(broken={"send"})
 
     with pytest.raises(CapabilityFailed) as failure:
-        call(db, user_id, fake, "send", "token", "m1", "hello")
+        call(db, user_id, fake, "send", "m1", "hello")
 
     assert isinstance(failure.value.__cause__, RuntimeError)
     assert is_copilot_only(db, user_id, "fake")
@@ -104,15 +124,16 @@ def test_a_failing_capability_makes_the_app_copilot_only_and_raises_an_alert(db,
     assert "send is down" in alert.error
     # Working capabilities stop too: the whole app is on copilot.
     with pytest.raises(CapabilityUnavailable):
-        call(db, user_id, fake, "read_matches", "token")
+        call(db, user_id, fake, "read_matches")
     assert len(alerts(db, user_id)) == 1
 
 
 def test_fallback_survives_the_callers_rollback(app, client):
     with app.state.engine.connect() as db:
         user_id = db.execute(text("SELECT id FROM users")).scalar_one()
+        store_token(db, user_id, "fake", "fake-session")
         with pytest.raises(CapabilityFailed):
-            call(db, user_id, FakeConnector(broken={"like"}), "like", "token", "p1")
+            call(db, user_id, FakeConnector(broken={"like"}), "like", "p1")
         db.rollback()
 
     with app.state.engine.connect() as db:
@@ -124,8 +145,9 @@ def test_fallback_is_per_user_and_per_app(app, client_for):
     client_for("bob@example.com")
     with app.state.engine.begin() as db:
         alice, bob = db.execute(text("SELECT id FROM users ORDER BY email")).scalars()
+        store_token(db, alice, "fake", "fake-session")
         with pytest.raises(CapabilityFailed):
-            call(db, alice, FakeConnector(broken={"read_matches"}), "read_matches", "token")
+            call(db, alice, FakeConnector(broken={"read_matches"}), "read_matches")
 
         assert is_copilot_only(db, alice, "fake")
         assert not is_copilot_only(db, alice, "tinder")

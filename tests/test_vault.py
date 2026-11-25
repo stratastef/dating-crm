@@ -9,11 +9,6 @@ from app.db import database_url
 from app.vault import delete_token, read_token, store_token
 
 
-@pytest.fixture(autouse=True)
-def master_key(monkeypatch):
-    monkeypatch.setenv("TOKEN_VAULT_MASTER_KEY", Fernet.generate_key().decode())
-
-
 @pytest.fixture
 def db(app):
     with app.state.engine.begin() as connection:
