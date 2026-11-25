@@ -37,21 +37,29 @@ class QueueItem(BaseModel):
     paid_item: paid_items.Proposal | None = None  # set when `kind` is `paid_item`
 
 
-def is_hot_lead(db: Connection, card_id: int) -> bool:
-    """The only definition of a hot lead. So far: the match replied within the last hour, Jev's hot-lead
-    triage flagged a pending draft of the card (`drafts.hot_lead`, see `app/jev.py`), or the card waits for
-    the user after a handover trigger (`cards.handover` is `pending`, see `app/handover.py`).
-
-    Date coordination is also hot (see the spec); add that signal here.
+def is_hot_lead(db: Connection, user_id: int, card_id: int) -> bool:
+    """The only definition of a hot lead: the match replied within the last hour, Jev's hot-lead triage
+    flagged a pending draft of the card (`drafts.hot_lead`, see `app/jev.py`), the card waits for the user
+    after a handover trigger (`cards.handover` is `pending`, see `app/handover.py`), or a date is being
+    coordinated: a slot is held for the match, or a message of theirs about logistics is unanswered.
     """
     return db.execute(
         text(
-            "SELECT EXISTS (SELECT 1 FROM messages WHERE card_id = :card_id AND sender = 'them'"
-            " AND sent_at > now() - interval '1 hour')"
-            " OR EXISTS (SELECT 1 FROM drafts WHERE card_id = :card_id AND status = 'pending' AND hot_lead)"
-            " OR EXISTS (SELECT 1 FROM cards WHERE id = :card_id AND handover = 'pending')"
+            """
+            SELECT EXISTS (SELECT 1 FROM messages WHERE card_id = :card_id AND user_id = :user_id
+                           AND sender = 'them' AND sent_at > now() - interval '1 hour')
+                OR EXISTS (SELECT 1 FROM drafts WHERE card_id = :card_id AND user_id = :user_id
+                           AND status = 'pending' AND hot_lead)
+                OR EXISTS (SELECT 1 FROM cards WHERE id = :card_id AND user_id = :user_id AND handover = 'pending')
+                OR EXISTS (SELECT 1 FROM calendar_holds WHERE card_id = :card_id AND user_id = :user_id
+                           AND status = 'held')
+                OR EXISTS (SELECT 1 FROM messages WHERE card_id = :card_id AND user_id = :user_id
+                           AND sender = 'them' AND 'logistics' = ANY(handover)
+                           AND sent_at > coalesce((SELECT max(sent_at) FROM messages WHERE card_id = :card_id
+                                                   AND user_id = :user_id AND sender = 'me'), '-infinity'))
+            """
         ),
-        {"card_id": card_id},
+        {"card_id": card_id, "user_id": user_id},
     ).scalar_one()
 
 
@@ -59,7 +67,7 @@ def notify_if_hot(
     db: Connection, user_id: int, card_id: int, name: str, title: str = "Hot lead", body: str | None = None
 ) -> None:
     """Call when an item joins the queue. A hot lead is pushed at once; the rest waits in the queue silently."""
-    if is_hot_lead(db, card_id):
+    if is_hot_lead(db, user_id, card_id):
         send_push(db, user_id, title, body or f"A draft for {name} is waiting for you", card_id=card_id)
 
 
@@ -88,7 +96,7 @@ def queue(user: CurrentUser, db: Db):
     items = [
         QueueItem(
             kind="draft",
-            hot=is_hot_lead(db, row.card_id),
+            hot=is_hot_lead(db, user.id, row.card_id),
             card_id=row.card_id,
             card_name=row.card_name,
             draft=Draft.model_validate(row, from_attributes=True),
@@ -106,7 +114,7 @@ def queue(user: CurrentUser, db: Db):
     items = [
         QueueItem(
             kind="handover",
-            hot=is_hot_lead(db, row.id),
+            hot=is_hot_lead(db, user.id, row.id),
             card_id=row.id,
             card_name=row.name,
             draft=None,

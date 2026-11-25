@@ -35,6 +35,21 @@ def test_a_draft_for_any_other_match_sends_no_push(app, client, llm, apns):
     assert apns.sent == []
 
 
+def test_a_card_in_date_coordination_is_a_hot_lead(app, client, llm, jev, apns):
+    """The match's unanswered message is about when to meet. Nothing else makes this card hot."""
+    write_profile(app, client, llm, "Short, lowercase, teasing.")
+    client.post("/devices", json={"token": "abc123"})
+    jev.yes["logistics"] = ["saturday"]
+    card_id = card_with_reply(client, "Kim", minutes_ago=90)
+    client.post(f"/cards/{card_id}/hand-back")  # the handover the message caused is over
+    apns.sent.clear()
+
+    client.post(f"/cards/{card_id}/drafts")
+
+    assert len(apns.sent) == 1
+    assert [item["hot"] for item in client.get("/queue").json()] == [True]
+
+
 def test_the_queue_lists_pending_drafts_with_hot_leads_first(app, client_for, llm):
     alice = client_for("alice@example.com")
     bob = client_for("bob@example.com")
