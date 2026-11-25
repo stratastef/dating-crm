@@ -9,7 +9,7 @@ from sqlalchemy import Connection, text
 
 from app.auth import CurrentUser, Db
 from app.cards import has_message, upsert_card, upsert_message
-from app.connectors import CapabilityUnavailable, Connector, call
+from app.connectors import CapabilityUnavailable, Connector, alerts, call
 from app.jobs import enqueue, handler
 from app.tinder import TinderConnector
 from app.vault import store_token
@@ -37,6 +37,12 @@ def submit_token(app: str, session: SessionToken, user: CurrentUser, db: Db) -> 
         text("DELETE FROM connector_alerts WHERE user_id = :user_id AND app = :app"), {"user_id": user.id, "app": app}
     )
     enqueue(db, user.id, "sync_matches", {"app": app})
+
+
+@router.get("/connectors/alerts")
+def get_alerts(user: CurrentUser, db: Db) -> list[dict]:
+    """The user's connector alerts, newest first: `app`, `capability`, `reason`, `error`, `created_at`."""
+    return [dict(alert._mapping) for alert in alerts(db, user.id)]
 
 
 @handler("sync_matches", every=SYNC_INTERVAL)

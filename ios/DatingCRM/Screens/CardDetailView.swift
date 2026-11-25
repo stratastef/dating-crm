@@ -53,6 +53,8 @@ struct CardDetailView: View {
                     }
                 }
             }
+
+            DraftSection(client: client, cardID: card.id)
         }
         .navigationTitle(card.name)
         .navigationBarTitleDisplayMode(.inline)

@@ -12,7 +12,8 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/db.py` | `database_url()`, read from `DATABASE_URL` |
 | `app/auth.py` | `CurrentUser` and `Db` route dependencies, `create_user()` |
 | `app/cards.py` | Match cards and their messages: routes under `/cards` |
-| `app/llm.py` | `complete()`, the only function that calls Claude |
+| `app/llm.py` | `call()`, the only way to call Claude; records each call's cost |
+| `app/drafts.py` | Copilot drafts for a card and the user's edits: `POST /cards/{id}/drafts`, `PATCH /drafts/{id}` |
 | `app/voice.py` | Questionnaire, style profile and similar past chats: routes under `/voice` |
 | `app/bios.py` | Bio and prompt rewrites per dating app: routes under `/bios` |
 | `app/preferences.py` | What the user wants, versioned: routes under `/preferences`, `current_preferences()` |
@@ -136,16 +137,17 @@ In a test, call `enqueue_recurring(app.state.engine)` to queue the recurring job
 
 ## Calling Claude
 
-All Claude calls go through one function, `complete()` in `app/llm.py`, which uses the `anthropic` SDK. Call it through the module so tests can replace it:
+All Claude calls go through one function, `call()` in `app/llm.py`. It sends the prompt with the `anthropic` SDK (`complete()`) and records what the call cost. Never call `complete()` directly: the cost would not be recorded.
 
 ```python
 from app import llm
 
-result = llm.complete(system="...", prompt="...")  # result.text, result.model, result.input_tokens, result.output_tokens
+result = llm.call(db, user.id, "draft", system="...", prompt="...")  # result.text, result.model, result.input_tokens, result.output_tokens
 ```
 
 - The model is read from `ANTHROPIC_MODEL` (default `claude-fable-5-2`) and the key from `ANTHROPIC_API_KEY`. Compose passes both to the API and worker.
-- Every call returns its token usage. Nothing stores it yet.
+- Every call inserts one row in `llm_calls`: `purpose` (the third argument, naming the feature), `model`, both token counts and `cost_usd`. The row is written in the caller's transaction. `llm.spend(db, user_id)` is the user's total in USD.
+- Cost is tokens times the per-model price in `llm.PRICES` (USD per million tokens). The prices are copied by hand: confirm them against Anthropic's price list. A model missing from the table is charged at the default model's price.
 - A refusal raises `RuntimeError`. Server-side fallback models are not configured.
 - Tests never reach the API: the autouse `llm` fixture in `tests/conftest.py` replaces `complete()` with a stub. Set `llm.reply` to choose the text and read `llm.prompts` to see what was sent.
 
@@ -176,6 +178,20 @@ Routes are in `app/bios.py`; the table is `bios` (one row per user and app). A b
 - To regenerate, call the rewrite route again. To regenerate from an edit, send the edited text as the body.
 - The rewrite route returns `409` until the style profile is written, and `502` if Claude's reply is not a bio; the client can retry.
 - Nothing is written to a dating app: in copilot the user copies the accepted text.
+
+## Drafts
+
+Routes are in `app/drafts.py`; the table is `drafts` (one row per draft).
+
+| Route | Does |
+| --- | --- |
+| `POST /cards/{id}/drafts` | Have Claude write a draft for the card and store it. `kind` is `opener` when the card has no messages, else `reply`. |
+| `PATCH /drafts/{id}` | Store the user's edit. Body: `{"edited": "..."}`. |
+
+- A draft is `{"id", "card_id", "kind", "status", "original", "edited"}`. `original` is Claude's text and never changes; `edited` is `null` until the user edits. The text to use is `edited` if set, else `original`.
+- `status` is `pending` for every draft so far. Nothing sends a draft yet: in copilot the user copies it.
+- The prompt holds the style profile, the card's app, name and notes, the conversation, and `similar_chats()` as examples.
+- The write route returns `409` until the style profile is written, and `502` if Claude's reply is empty.
 
 ## Preferences
 
@@ -273,6 +289,7 @@ messages = call(db, user_id, TinderConnector(), "read_messages", match_id)
 - **Switch a capability off:** set `CONNECTOR_DISABLED_CAPABILITIES=tinder:send,hinge:like` (comma-separated `app:capability`).
 - **Unavailable:** `call()` raises `CapabilityUnavailable` and does not touch the app when the capability is not declared, is disabled, the app is copilot-only, or the user has no stored token for the app.
 - **Fallback to copilot:** if the connector method raises, `call()` inserts a row in `connector_alerts` (`user_id`, `app`, `capability`, `error` = `repr()` of the exception) and raises `CapabilityFailed`, with the connector's exception as `__cause__`. The row is written in its own transaction, so it survives the failed job's rollback. That row is both the alert and the fallback: `is_copilot_only(db, user_id, app)` is true while the user has any alert for the app, and every capability of that app is then unavailable for that user. `alerts(db, user_id)` lists them. Delete the user's rows for an app to re-enable its connector.
+- **Ban detection:** `classify(error)` sorts the connector's exception into `auth failure` (HTTP 401), `ban signal` (HTTP 403) or `transient` (anything else), stored in the alert's `reason`. An auth failure or ban signal also calls `pause(user_id, app, reason)` in the same transaction as the alert, so that app's autopilot stops for that user; a transient error does not pause. `GET /connectors/alerts` returns the user's alerts (`id`, `app`, `capability`, `reason`, `error`, `created_at`), newest first. A fresh token lifts the copilot-only fallback but not the pause: resume with `POST /autopilot/resume?app=...`.
 
 Test a connector's callers with a fake like `FakeConnector` in `tests/test_connectors.py`.
 
