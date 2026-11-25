@@ -1,7 +1,7 @@
 """create cards and messages tables
 
-Revision ID: 0002_cards
-Revises: 0001
+Revision ID: 0004_cards
+Revises: 0003_token_vault
 """
 
 import sqlalchemy as sa
@@ -9,8 +9,8 @@ from alembic import op
 
 from app.tenancy import user_id_column
 
-revision = "0002_cards"
-down_revision = "0001"
+revision = "0004_cards"
+down_revision = "0003_token_vault"
 branch_labels = None
 depends_on = None
 
