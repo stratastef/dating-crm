@@ -11,3 +11,7 @@ The five default triage labels: `needs-triage`, `needs-info`, `ready-for-agent`,
 ### Domain docs
 
 Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Implementing and reviewing
+
+Implementer subagents and their orchestrator: `docs/agents/implementing.md`. Review rules: `CODING_STANDARDS.md`. Per-module reference: `docs/modules/`, listed in `README.md`.
