@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import text
+from sqlalchemy import Connection, Row, text
 
 from app import jev, llm, review
 from app.auth import CurrentUser, Db
@@ -49,14 +49,25 @@ def _chat(messages) -> list[str]:
 @router.post("/cards/{card_id}/drafts", response_model=Draft, status_code=201)
 def write_draft(card_id: int, user: CurrentUser, db: Db):
     """Write a draft for the card and store it: an opener when the card has no messages, a reply otherwise."""
+    draft, name = draft_for(db, user.id, card_id)
+    review.notify_if_hot(db, user.id, card_id, name)
+    return draft
+
+
+def draft_for(db: Connection, user_id: int, card_id: int, rule: str = "") -> tuple[Row, str]:
+    """Have Claude write a draft for the card and store it as `pending`. Returns the draft and the match's name.
+
+    `rule` is one more sentence for the task, for a caller that limits what the draft may say. Raises the
+    same `HTTPException`s the route answers with.
+    """
     card = db.execute(
         text("SELECT app, name, notes FROM cards WHERE id = :id AND user_id = :user_id"),
-        {"id": card_id, "user_id": user.id},
+        {"id": card_id, "user_id": user_id},
     ).one_or_none()
     if not card:
         raise HTTPException(status_code=404, detail="card not found")
     profile = db.execute(
-        text("SELECT profile FROM voice_profiles WHERE user_id = :user_id"), {"user_id": user.id}
+        text("SELECT profile FROM voice_profiles WHERE user_id = :user_id"), {"user_id": user_id}
     ).scalar_one_or_none()
     if not profile:
         raise HTTPException(status_code=409, detail="style profile not written yet")
@@ -67,17 +78,17 @@ def write_draft(card_id: int, user: CurrentUser, db: Db):
     kind = "reply" if messages else "opener"
     prompt = "\n".join(
         [
-            f"<task>Write the {kind}.</task>",
+            f"<task>Write the {kind}.{rule and ' ' + rule}</task>",
             f"<style_profile>\n{profile}\n</style_profile>",
             "<example_chats>",
             *(
                 "\n".join(["<chat>", *_chat((line["sender"], line["body"]) for line in chat.messages), "</chat>"])
-                for chat in similar_chats(db, user.id, card_id)
+                for chat in similar_chats(db, user_id, card_id)
             ),
             "</example_chats>",
             f"<match>\napp: {card.app}\nname: {card.name}\nnotes: {card.notes}\n</match>",
             "<match_read>",
-            *read_lines(db, user.id, card_id),
+            *read_lines(db, user_id, card_id),
             "</match_read>",
             "<conversation>",
             *_chat(messages),
@@ -86,7 +97,7 @@ def write_draft(card_id: int, user: CurrentUser, db: Db):
     )
     # shortcut: Claude is called inside the request, which holds a database connection meanwhile. Move
     # to a job if drafts get slow or many users draft at once.
-    original = llm.call(db, user.id, "draft", _SYSTEM, prompt).text.strip()
+    original = llm.call(db, user_id, "draft", _SYSTEM, prompt).text.strip()
     if not original:
         raise HTTPException(status_code=502, detail="the draft was empty, try again")
     draft = db.execute(
@@ -98,7 +109,7 @@ def write_draft(card_id: int, user: CurrentUser, db: Db):
             """
         ),
         {
-            "user_id": user.id,
+            "user_id": user_id,
             "card_id": card_id,
             "kind": kind,
             "original": original,
@@ -106,8 +117,7 @@ def write_draft(card_id: int, user: CurrentUser, db: Db):
             "hot_lead": jev.is_hot_lead(original),
         },
     ).one()
-    review.notify_if_hot(db, user.id, card_id, card.name)
-    return draft
+    return draft, card.name
 
 
 @router.patch("/drafts/{draft_id}", response_model=Draft)
