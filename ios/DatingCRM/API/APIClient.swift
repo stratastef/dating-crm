@@ -41,6 +41,11 @@ struct APIClient {
         try await send("PATCH", "drafts/\(draftID)", body: Self.encoder.encode(["edited": text]))
     }
 
+    /// Has the server read a screenshot of a chat or profile into the match's card, and returns a draft for it.
+    func importScreenshot(jpeg: Data) async throws -> Draft {
+        try Self.decoder.decode(Draft.self, from: await data("POST", "screenshots", body: jpeg, contentType: "image/jpeg"))
+    }
+
     /// The match read of a card: empty until one is made.
     func read(cardID: Int) async throws -> [Inference] {
         try await send("GET", "cards/\(cardID)/read")
@@ -54,6 +59,12 @@ struct APIClient {
     /// Stores the user's correction of an inference. The server keeps Claude's value next to it.
     func correct(inferenceID: Int, text: String) async throws -> Inference {
         try await send("PATCH", "inferences/\(inferenceID)", body: Self.encoder.encode(["corrected": text]))
+    }
+
+    /// Approves a draft: the server queues it and its worker sends it through the dating app. `409` means the
+    /// server refused: the app is paused, sending is off for it, or the draft was already sent.
+    func sendDraft(draftID: Int) async throws {
+        try await data("POST", "drafts/\(draftID)/send")
     }
 
     /// Everything that waits for the user's review, hot leads first.
@@ -106,13 +117,15 @@ struct APIClient {
 
     /// For routes that answer with no body, call this instead of `send`.
     @discardableResult
-    private func data(_ method: String, _ path: String, body: Data? = nil) async throws -> Data {
+    private func data(
+        _ method: String, _ path: String, body: Data? = nil, contentType: String = "application/json"
+    ) async throws -> Data {
         var request = URLRequest(url: baseURL.appending(path: path))
         request.httpMethod = method
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         if let body {
             request.httpBody = body
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
         let (data, response) = try await transport(request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0

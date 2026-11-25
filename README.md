@@ -15,7 +15,9 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/llm.py` | `call()`, the only way to call Claude; records each call's cost |
 | `app/budget.py` | The monthly AI budget: `GET` and `PUT /budget` |
 | `app/drafts.py` | Copilot drafts for a card and the user's edits: `POST /cards/{id}/drafts`, `PATCH /drafts/{id}` |
+| `app/screenshots.py` | Screenshot copilot: `POST /screenshots` reads a shared screenshot into a card and a draft |
 | `app/reads.py` | The match read: inferences about a match, the user's corrections, card photos and the protected-trait opt-in |
+| `app/send.py` | Sending a draft: `POST /drafts/{id}/send`, `queue_send()` and the `send_draft` job |
 | `app/voice.py` | Questionnaire, style profile and similar past chats: routes under `/voice` |
 | `app/bios.py` | Bio and prompt rewrites per dating app: routes under `/bios` |
 | `app/preferences.py` | What the user wants, versioned: routes under `/preferences`, `current_preferences()` |
@@ -27,6 +29,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/autopilot.py` | Autonomy per job and the kill switch: `autopilot_allowed()`, `pause()`, `resume()` |
 | `app/connectors.py` | `Connector` contract, `call()`, `is_copilot_only()`, `alerts()` |
 | `app/push.py` | `send_push()` and `POST /devices` |
+| `app/calendar.py` | Google Calendar: routes under `/calendar`, `free_slots()`, `hold_slot()`, `release_holds()`, `confirm_date()` |
 | `app/review.py` | Review queue: `GET /queue`, approve and dismiss a draft, `is_hot_lead()` |
 | `app/tinder.py` | `TinderConnector`: reads matches and messages from Tinder's unofficial web API |
 | `app/sync.py` | `PUT /connectors/{app}/token` and the `sync_matches` job |
@@ -151,14 +154,14 @@ from app import llm
 result = llm.call(db, user.id, "draft", system="...", prompt="...")  # result.text, result.model, result.input_tokens, result.output_tokens
 ```
 
-- To show Claude images, pass `images=[...]`, a list of `https` URLs that Claude fetches.
+- To show Claude images, pass `images=[...]`. An item is an `https` URL that Claude fetches, or `("image/png", data)` (media type and bytes) to send the picture itself.
 
 - The model is read from `ANTHROPIC_MODEL` (default `claude-fable-5-2`) and the key from `ANTHROPIC_API_KEY`. Compose passes both to the API and worker.
 - Every call inserts one row in `llm_calls`: `purpose` (the third argument, naming the feature), `model`, both token counts and `cost_usd`. The row is written in its own transaction, so it is kept when the calling job fails. `llm.spend(db, user_id)` is the user's total for the current calendar month (UTC) in USD.
 - **AI budget:** each user has a hard monthly cap, `users.ai_budget_usd`, default 50 USD. `GET /budget` returns `{"spend_usd", "cap_usd", "paused"}` and `PUT /budget` with `{"cap_usd": 20}` sets the cap (routes in `app/budget.py`). While the month's spend is at the cap, `call()` raises `llm.BudgetReached` without calling Claude (a route answers `402`; a job retries and then fails), and the worker skips autopilot jobs with the reason `AI budget reached`. The call that reaches the cap sends the user a push. The budget pause is computed, not a row in `autopilot_pauses`: a new month or a higher cap lifts it, `POST /autopilot/resume` does not, and it is not shown by `GET /autopilot/pause`. Pauses set for other reasons are untouched. Spend can pass the cap by the cost of calls already in flight.
 - Cost is tokens times the per-model price in `llm.PRICES` (USD per million tokens). The prices are copied by hand: confirm them against Anthropic's price list. A model missing from the table is charged at the default model's price.
 - A refusal raises `RuntimeError`. Server-side fallback models are not configured.
-- Tests never reach the API: the autouse `llm` fixture in `tests/conftest.py` replaces `complete()` with a stub. Set `llm.reply` to choose the text and read `llm.prompts`, `llm.systems` and `llm.images` to see what was sent.
+- Tests never reach the API: the autouse `llm` fixture in `tests/conftest.py` replaces `complete()` with a stub. Set `llm.reply` to choose the text and read `llm.prompts`, `llm.systems` and `llm.images` to see what was sent. For a route that calls Claude more than once, set `llm.replies` to a list; it is used up first, one per call.
 
 ## Voice
 
@@ -196,9 +199,14 @@ Routes are in `app/drafts.py`; the table is `drafts` (one row per draft).
 | --- | --- |
 | `POST /cards/{id}/drafts` | Have Claude write a draft for the card and store it. `kind` is `opener` when the card has no messages, else `reply`. |
 | `PATCH /drafts/{id}` | Store the user's edit. Body: `{"edited": "..."}`. |
+| `POST /drafts/{id}/send` | The user approves the draft: queue it for the worker to send. Returns `202` and the draft. In `app/send.py`. |
 
 - A draft is `{"id", "card_id", "kind", "status", "original", "edited"}`. `original` is Claude's text and never changes; `edited` is `null` until the user edits. The text to use is `edited` if set, else `original`.
-- `status` is `pending` until the user approves or dismisses the draft (see "Review queue"). Nothing sends a draft yet: in copilot the user copies it.
+- `status` is `pending` until the user sends, approves or dismisses the draft (see "Review queue"). A sent or approved draft is `approved` (queued), then `sending` (the worker is sending it) and `sent` or `failed`. A dismissed draft is `dismissed`. The user can still copy any draft.
+- **Send:** the route answers `409` with the reason and queues nothing when the draft is not `pending`, the card's app is paused (the kill switch, for that app or all apps), the app has no connector, the card has no `external_id`, or `send` is unavailable (see "Connectors": not declared, switched off, copilot-only, no token).
+- **Queue a send from code:** `queue_send(db, user_id, draft_id, trigger)` in `app/send.py` is the one way to send a draft. It moves a `pending` draft to `approved` and queues a `send_draft` job in your transaction; it returns the draft, or `None` if the draft is not `pending`. `trigger` goes to the audit log. It does not check the pause or autonomy: the route checks the pause before it, and the job checks the pause again. The review queue approves the draft itself, so it calls `send_approved(db, user_id, draft_id, trigger)`, which queues the job for an already `approved` draft if the app can send.
+- **The `send_draft` job** sends the text (`edited` if set, else `original`) with the connector's `send`, stores the message on the card under the app's message ID (so sync does not add it twice), writes an audit log entry (`type: message`, `target: card:<id>`) and sets `sent`. If the app became paused or `send` unavailable after the tap, nothing is sent and the draft goes back to `pending`.
+- **At most once:** the job commits `sending` before it calls the app. If the app answers with an error, or the worker dies before the job commits, the draft ends as `failed` and is never sent again, because the message may have gone out. A `failed` draft whose message did go out appears on the card at the next sync. To try again, write another draft.
 - The prompt holds the style profile, the card's app, name and notes, the match read (its `tone` sets the draft's tone), the conversation, and `similar_chats()` as examples.
 - The write route returns `409` until the style profile is written, and `502` if Claude's reply is empty.
 - A draft also has `guardrail` and `hot_lead`, the results of its Jev checks (see below).
@@ -244,7 +252,7 @@ All in `app/review.py`. A pending draft waits in the queue until the user approv
 - A queue item is `{"kind", "hot", "card_id", "card_name", "draft"}`. `kind` is `draft` so far and `draft` holds the draft; a new kind of item adds its own `kind` and may leave `draft` null.
 - `is_hot_lead(db, card_id)` is the only definition of a hot lead. So far: the match sent a message within the last hour, or Jev's hot-lead triage flagged a pending draft of the card (`drafts.hot_lead`). Add date-coordination and handover signals there.
 - `POST /cards/{id}/drafts` calls `notify_if_hot()`, which sends one push at once for a hot lead and nothing otherwise. Call it wherever else an item joins the queue.
-- Approving sends nothing yet. `hand_on_approved_draft(db, user_id, draft)` is called once per approved draft and does nothing: sending through a connector goes there.
+- Approving sends the draft when its card's app can send: `hand_on_approved_draft(db, user_id, draft)` is called once per approved draft and queues the `send_draft` job (see "Drafts"). When the app cannot send (no connector, paused, `send` unavailable, card without `external_id`), the approval still succeeds, the draft stays `approved` and the user copies it.
 
 ## Match read
 
@@ -265,6 +273,17 @@ Routes are in `app/reads.py`; the tables are `inferences` (one row per card and 
 - With no photos on the card the read is from text only.
 - Other server code reads the card's read with `read_lines(db, user_id, card_id)`.
 - The read route returns `502` if Claude's reply is not a JSON list; the last read is kept.
+
+## Screenshot import
+
+`POST /screenshots` in `app/screenshots.py` is the copilot path for every app, with or without a connector. The iOS share extension calls it.
+
+- **Request:** the body is the image itself, with `Content-Type: image/png` or `image/jpeg`, at most 5 MB. Another type is `415`, a larger body `413`, an empty one `422`.
+- **Read:** Claude reads the app, the match's name and the visible messages (`llm.call` with `purpose` `screenshot`). A reply that is not usable is `502`; the client can retry.
+- **Card:** the user's card with the same app and name, ignoring case, else a new card in `matched`. An existing card keeps everything but gains messages.
+- **Messages:** the screenshot usually repeats the end of the stored chat, so only what comes after that overlap is added, through `upsert_message()`.
+- **Answer:** `201` with a draft for the card, as `POST /cards/{id}/drafts` returns it, including its `409` until the style profile is written. On any error no card, message or draft is stored.
+- **Limits:** two matches with the same name on one app share a card. A screenshot of an older part of a chat is added again at the end. Message times are not read: new messages are stamped with the time of the import. The image is not kept. Reading a real screenshot with the real Claude API has not been tried; the tests use the stub.
 
 ## Preferences
 
@@ -362,10 +381,11 @@ Add a connector: subclass `Connector`, set `app`, declare the `capabilities` it 
 ```python
 class TinderConnector(Connector):
     app = "tinder"
-    capabilities = frozenset({"read_matches", "read_messages"})
+    capabilities = frozenset({"read_matches", "read_messages", "send"})
 
     def read_matches(self, token: str) -> list[dict]: ...
     def read_messages(self, token: str, match_id: str) -> list[dict]: ...
+    def send(self, token: str, match_id: str, text: str) -> dict: ...  # the sent message: `id`, `sent_at`
 ```
 
 Never call a connector method directly. Go through `call()`, which reads the user's token from the vault, passes it to the method and enforces the rules below:
@@ -376,7 +396,7 @@ messages = call(db, user_id, TinderConnector(), "read_messages", match_id)
 ```
 
 - **Switch a capability off:** set `CONNECTOR_DISABLED_CAPABILITIES=tinder:send,hinge:like` (comma-separated `app:capability`).
-- **Unavailable:** `call()` raises `CapabilityUnavailable` and does not touch the app when the capability is not declared, is disabled, the app is copilot-only, or the user has no stored token for the app.
+- **Unavailable:** `unavailable(db, user_id, connector, capability)` returns the reason, or `None`. `call()` raises `CapabilityUnavailable` and does not touch the app when the capability is not declared, is disabled, the app is copilot-only, or the user has no stored token for the app.
 - **Fallback to copilot:** if the connector method raises, `call()` inserts a row in `connector_alerts` (`user_id`, `app`, `capability`, `error` = `repr()` of the exception) and raises `CapabilityFailed`, with the connector's exception as `__cause__`. The row is written in its own transaction, so it survives the failed job's rollback. That row is both the alert and the fallback: `is_copilot_only(db, user_id, app)` is true while the user has any alert for the app, and every capability of that app is then unavailable for that user. `alerts(db, user_id)` lists them. Delete the user's rows for an app to re-enable its connector.
 - **Ban detection:** `classify(error)` sorts the connector's exception into `auth failure` (HTTP 401), `ban signal` (HTTP 403) or `transient` (anything else), stored in the alert's `reason`. An auth failure or ban signal also calls `pause(user_id, app, reason)` in the same transaction as the alert, so that app's autopilot stops for that user; a transient error does not pause. `GET /connectors/alerts` returns the user's alerts (`id`, `app`, `capability`, `reason`, `error`, `created_at`), newest first. A fresh token lifts the copilot-only fallback but not the pause: resume with `POST /autopilot/resume?app=...`.
 
@@ -408,6 +428,62 @@ send_push(db, user_id, "Hot lead", "Ada replied", card_id=card_id)
 - Tests never reach Apple: the autouse `apns` fixture replaces `post()`, the only function that calls APNs, and sets throwaway settings. Read `apns.sent` (each has `url`, `headers`, `payload`) to see what was pushed, and set `apns.answers["<token>"] = (410, "Unregistered")` to choose Apple's answer for a device.
 - Sending to the real APNs has not been tried: no Apple developer account was available when this was written.
 
+## Google Calendar holds
+
+All in `app/calendar.py`; the table is `calendar_holds` (one row per slot held or confirmed for a match).
+
+### What the owner sets up in Google Cloud
+
+Do this once per server, at <https://console.cloud.google.com>:
+
+1. Create a project.
+2. In APIs & Services > Library, enable the **Google Calendar API**.
+3. In APIs & Services > OAuth consent screen, choose user type **External**, and add the scopes `.../auth/calendar.events` and `.../auth/calendar.freebusy`. Add your own Google account under Test users.
+4. Set the publishing status to **In production**. In **Testing**, Google expires the refresh token after 7 days and the calendar disconnects. Your own unverified app shows a warning page on connect; continue through it.
+5. In APIs & Services > Credentials, create an **OAuth client ID** of type **Web application**. Add `https://<your server>/calendar/callback` as an authorized redirect URI (`http://localhost:8000/calendar/callback` for local use).
+6. Give the server the three values. Compose passes them to the API and worker:
+
+| Variable | Value |
+| --- | --- |
+| `GOOGLE_CLIENT_ID` | The OAuth client's ID |
+| `GOOGLE_CLIENT_SECRET` | The OAuth client's secret |
+| `GOOGLE_REDIRECT_URI` | The redirect URI from step 5, character for character |
+
+### Connect
+
+| Route | Does |
+| --- | --- |
+| `GET /calendar/connect` | Returns `{"url": "..."}`: Google's consent page. Open it in a browser. `503` while a variable above is unset. |
+| `GET /calendar/callback?code=&state=` | Where Google sends the browser. Stores the refresh token and shows one line of text. It takes no API token: `state` names the user and is valid for 10 minutes. |
+| `GET /calendar` | `{"connected": true}` once a refresh token is stored. |
+
+The refresh token is stored in the token vault under the app name `google_calendar`. Never log it. Only the user's primary calendar is used. To disconnect, remove the app's access at <https://myaccount.google.com/permissions>; there is no disconnect route.
+
+### Functions for the chat autopilot
+
+All take the caller's transaction as `db`. Datetimes must be timezone-aware.
+
+```python
+from app import calendar
+
+slots = calendar.free_slots(db, user_id, start, end, duration=timedelta(hours=2))  # [(start, end), ...]
+hold_id = calendar.hold_slot(db, user_id, card_id, start, end, trigger="chat autopilot: proposed a time")
+calendar.release_holds(db, user_id, card_id, trigger="match declined")
+calendar.confirm_date(db, user_id, card_id, trigger="match agreed", start=start)  # True if a hold was confirmed
+```
+
+- `free_slots()` cuts the window into slots of `duration` from `start` and returns those that touch no busy time in Google and no row in `calendar_holds`. Choosing the window (which days and hours) is the caller's job.
+- `hold_slot()` must be called for every slot a message offers. It creates a tentative event named "Hold: date with <name>". It raises `SlotTaken` if the slot is busy in Google or overlaps any slot held or confirmed for a match.
+- Two matches never get the same slot because the database refuses it: `calendar_holds` has an exclusion constraint, so no two rows of one user overlap. A second hold on an overlapping slot fails even if two jobs race.
+- `release_holds()` deletes the card's tentative events and their rows. Call it when the match declines. `PATCH /cards/{id}` with `stage: archived` calls it too.
+- `confirm_date()` turns the hold that starts at `start` into a confirmed event named "Date with <name>" and releases the card's other holds. Without `start` it confirms only if the card has exactly one hold. `PATCH /cards/{id}` with `stage: date_set` calls it without `start`, so a card with several holds keeps them until code names the agreed slot.
+- Code that sets a card's stage without the `PATCH` route must call `calendar.stage_changed(db, user_id, card_id, stage)`.
+- A confirmed row stays and keeps its slot taken. Archiving the card later does not delete the event.
+- Every hold, release and confirmation writes a `calendar_hold` entry to the audit log with target `card:<id> hold|release|confirm <start in UTC>` and the given trigger.
+- All four raise `NotConnected` if the user has no stored refresh token, and `httpx.HTTPError` if Google refuses or cannot be reached; nothing is stored then. The `PATCH` route answers `502` and leaves the stage unchanged.
+- Tests never reach Google: the autouse `gcal` fixture replaces `calendar.google`, the only object that calls Google. Set `gcal.busy` to `(start, end)` pairs and read `gcal.events`.
+- Calls to the real Google API have not been tried: no Google credentials were available when this was written. Check the scopes, the free/busy response and the event fields in `GoogleCalendar` on the first real connect.
+
 ## Sync
 
 `app/sync.py` copies an app's matches and messages into cards. It works for every connector listed in `CONNECTORS` there.
@@ -423,7 +499,7 @@ A connector's `read_matches` returns dicts with `id`, `name`, `has_messages` and
 
 ## Tinder connector
 
-`app/tinder.py` reads your own Tinder account with your own web session token. It supports `read_matches` and `read_messages` only. Tinder's terms do not allow this API use; see Risks in the spec.
+`app/tinder.py` reads your own Tinder account with your own web session token. It supports `read_matches`, `read_messages` and `send`. Nothing sends on its own: a message goes out only when the user taps send on a draft (see "Drafts"). Set `CONNECTOR_DISABLED_CAPABILITIES=tinder:send` to keep it read-only. Tinder's terms do not allow this API use; see Risks in the spec.
 
 ### Capture and submit your token
 
@@ -456,6 +532,9 @@ The connector was built from public write-ups of the web API and was never run a
 | `GET /v2/matches/{match_id}/messages?count=60` returns `{"data": {"messages": [...], "next_page_token": "..."}}` | `read_messages` |
 | A message has `_id`, `from` (a user ID), `message` (the text) and `sent_date` (ISO 8601) | Message `external_id`, sender, body, time |
 | A message whose `from` is not `person._id` is yours | `sender` |
+| `POST https://api.gotinder.com/user/matches/{match_id}` with the JSON body `{"message": "<text>"}` sends a message (no `/v2` prefix, no other body field such as a temporary message ID) | `send` |
+| That request answers `200` with the sent message as the whole body (not wrapped in `data`), with `_id` and `sent_date` as in a read message | Message `external_id` and time. If `_id` differs from the ID a later read gives, sync adds the message a second time |
+| Any answer other than `2xx` means the message may or may not have been sent | A failed send is never retried |
 | An expired token gives HTTP `401` | Fallback to copilot |
 | One sync every 15 minutes does not trip Tinder's rate limits or bot detection | `SYNC_INTERVAL` |
 
