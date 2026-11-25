@@ -13,7 +13,8 @@ from app import calendar
 from app import handover
 from app.auth import CurrentUser, Db
 from app.voice import queue_profile
-from app.jobs import handler
+from app.autopilot import autopilot_allowed
+from app.jobs import enqueue, handler
 
 router = APIRouter()
 
@@ -136,6 +137,13 @@ def has_message(db: Connection, card_id: int, external_id: str) -> bool:
     ).scalar_one()
 
 
+def _queue_reply(db: Connection, user_id: int, card_id: int) -> None:
+    """Call after each new message from the match: chat autopilot answers it, if it may act (`app/chat_autopilot.py`)."""
+    app = db.execute(text("SELECT app FROM cards WHERE id = :id"), {"id": card_id}).scalar_one()
+    if autopilot_allowed(db, user_id, app, "chat"):
+        enqueue(db, user_id, "chat_reply", {"app": app, "card_id": card_id})
+
+
 def upsert_message(
     db: Connection, user_id: int, card_id: int, external_id: str | None, sender: str, body: str, sent_at: datetime | str
 ) -> None:
@@ -183,6 +191,7 @@ def upsert_message(
         # shortcut: Jev is called inside the sync job, once per sentence and check, also for old messages
         # on a first sync. Move to its own job if a sync gets slow.
         handover.incoming(db, user_id, card_id, added.id, body)
+        _queue_reply(db, user_id, card_id)
 
 
 class CardChanges(BaseModel):
@@ -315,7 +324,9 @@ def add_message(card_id: int, message: NewMessage, user: CurrentUser, db: Db):
             text("UPDATE cards SET stalled_at = NULL WHERE id = :id AND user_id = :user_id"),
             {"id": card_id, "user_id": user.id},
         )
-        return {**row._mapping, "handover": handover.incoming(db, user.id, card_id, row.id, message.body)}
+        hits = handover.incoming(db, user.id, card_id, row.id, message.body)
+        _queue_reply(db, user.id, card_id)
+        return {**row._mapping, "handover": hits}
     return row
 
 
