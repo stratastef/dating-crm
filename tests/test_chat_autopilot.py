@@ -7,12 +7,12 @@ runs, and what was sent is read from the Tinder stub.
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from test_send import CLEO, tinder, user_id, work  # noqa: F401  (fixtures)
 
 from app.jev import GUARDRAIL, JevUnavailable
 from app.jobs import run_once
 from app.send import queue_send
 from app.vault import store_token
-from test_send import CLEO, tinder, user_id, work  # noqa: F401  (fixtures)
 
 REPLY = "both. badly."
 DISCLOSURE = "an AI assistant helps me write"

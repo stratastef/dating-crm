@@ -64,6 +64,8 @@ def _authorization(key: str, key_id: str, team_id: str) -> str:
     if not _provider_token or _provider_token[:3] != (key, key_id, team_id) or now - _provider_token[3] > 40 * 60:
         # A .env file cannot hold line breaks, so the key may be written with `\n` in their place.
         private_key = serialization.load_pem_private_key(key.replace("\\n", "\n").encode(), password=None)
+        if not isinstance(private_key, ec.EllipticCurvePrivateKey):
+            raise ValueError("APNS_KEY must be an elliptic-curve private key (the .p8 file from Apple)")
         signed = ".".join(
             _base64(json.dumps(part).encode())
             for part in ({"alg": "ES256", "kid": key_id}, {"iss": team_id, "iat": int(now)})

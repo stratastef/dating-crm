@@ -26,12 +26,12 @@ def own_card(db: Connection, user_id: int, card_id: int, columns: str = "app, na
 
 def conversation(db: Connection, user_id: int, card_id: int) -> list[Row]:
     """The card's messages as `(sender, body)`, oldest first."""
-    return db.execute(
+    return list(db.execute(
         text(
             "SELECT sender, body FROM messages WHERE card_id = :card_id AND user_id = :user_id ORDER BY sent_at, id"
         ),
         {"card_id": card_id, "user_id": user_id},
-    ).all()
+    ).all())
 
 
 def chat_lines(messages: Iterable) -> list[str]:
@@ -41,7 +41,7 @@ def chat_lines(messages: Iterable) -> list[str]:
 
 def unanswered(db: Connection, user_id: int, card_id: int) -> list[Row]:
     """The match's messages since the user's last one, oldest first: `id`, `body`, `handover`."""
-    return db.execute(
+    return list(db.execute(
         text(
             """
             SELECT id, body, handover FROM messages
@@ -52,4 +52,4 @@ def unanswered(db: Connection, user_id: int, card_id: int) -> list[Row]:
             """
         ),
         {"card_id": card_id, "user_id": user_id},
-    ).all()
+    ).all())

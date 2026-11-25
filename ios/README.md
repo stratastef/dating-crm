@@ -66,7 +66,7 @@ The extension uses the session of the app: the server URL from the defaults of a
 
 After sign-in the app asks for permission to notify, gets a device token from Apple and sends it to the server with `POST /devices`. It does this on every launch. Tapping a push that carries a `card_id` opens that card on top of the board.
 
-- Push needs a real iPhone, a paid Apple developer account and the server's `APNS_*` settings (see the root `README.md`). Run from Xcode, the app gets a sandbox token, so the server also needs `APNS_SANDBOX=1`.
+- Push needs a real iPhone, a paid Apple developer account and the server's `APNS_*` settings (see `docs/modules/push-notifications.md`). Run from Xcode, the app gets a sandbox token, so the server also needs `APNS_SANDBOX=1`.
 - The simulator gets no device token without an Apple account, so the tests cover only `Push`: the registration request and which card a tap opens. Not verified on a device: the permission prompt, the token arriving in `AppDelegate`, delivery of a push, and the tap opening the card on screen.
 - Signing out does not unregister the device. The phone keeps getting that user's pushes until someone else signs in on it.
 

@@ -49,6 +49,7 @@ def enqueue_recurring(engine: Engine, now: datetime | None = None) -> None:
     """Queue each recurring job for every user who has none queued and none scheduled within the last interval."""
     with engine.begin() as db:
         now = now or db.execute(text("SELECT now()")).scalar_one()
+        assert now
         for kind, every in _recurring.items():
             # shortcut: two workers polling at once can queue the same job twice, and one row is kept per run;
             # add a unique index on queued (user_id, kind) and prune `done` rows if either starts to matter.

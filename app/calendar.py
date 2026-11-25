@@ -235,14 +235,14 @@ def _release(db: Connection, user_id: int, app: str, card_id: int, holds, trigge
 
 def _held(db: Connection, user_id: int, card_id: int, draft_id: int | None = None) -> list:
     """The card's holds that are not confirmed, earliest first. With `draft_id`, only those that draft offered."""
-    return db.execute(
+    return list(db.execute(
         text(
             "SELECT id, event_id, lower(slot) AS start FROM calendar_holds"
             " WHERE user_id = :user_id AND card_id = :card_id AND status = 'held'"
             " AND (CAST(:draft_id AS bigint) IS NULL OR draft_id = :draft_id) ORDER BY lower(slot)"
         ),
         {"user_id": user_id, "card_id": card_id, "draft_id": draft_id},
-    ).all()
+    ).all())
 
 
 def release_holds(db: Connection, user_id: int, card_id: int, *, trigger: str, draft_id: int | None = None) -> None:

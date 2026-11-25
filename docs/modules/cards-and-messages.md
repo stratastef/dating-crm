@@ -1,0 +1,21 @@
+# Cards and messages
+
+A card is one match. Routes are in `app/cards.py`; tables are `cards` and `messages`. All routes need a token and see only the caller's rows; a card that is not yours is `404`.
+
+| Route | Does |
+| --- | --- |
+| `POST /cards` | Create a card. Body: `app`, `name`, optional `external_id`, `stage` (default `matched`), `notes`, `next_action`, `due_date`. |
+| `GET /cards?stage=&app=` | List cards, oldest first. Both filters are optional. |
+| `GET /cards/{id}` | Read one card. |
+| `PATCH /cards/{id}` | Change only the fields sent: `name`, `stage`, `notes`, `next_action`, `due_date`. `null` clears `next_action` or `due_date`. |
+| `POST /cards/{id}/messages` | Add a message. Body: `sender` (`me` or `them`), `body`, optional `sent_at` (default now), `external_id`. |
+| `GET /cards/{id}/messages` | List the card's messages by `sent_at`. |
+
+- `stage` is one of `matched`, `chatting`, `number_swapped`, `date_set`, `dated`, `seeing_them`, `archived`. Anything else is `422`. `stage_changed_at` on the card is the time of the last stage change; there is no stage history table.
+- Stalled is a flag on the card, not a stage. The hourly `mark_stalled` job sets `stalled: true` on a card in `chatting`, `number_swapped` or `date_set` whose last message, from either side, is older than the user's `stalled_after_days` (a card with no messages counts from `stage_changed_at`). A stalled card has `suggested_actions: ["revive", "archive"]`; otherwise the list is empty. A new message from `them` clears the flag, and so does moving the card out of those three stages; archive is `PATCH /cards/{id}` with `stage: archived`.
+- `GET /settings` and `PATCH /settings` read and change the user's settings. `stalled_after_days` is a whole number of days, at least 1, default 3.
+- `PATCH /cards/{id}` also takes `date_rating` (1 to 5) and `date_note`, both null until the user rates the date. A good date is a rating of 4 or 5: `is_good_date()` in `app/cards.py` is the only definition, and the card's `good_date` field is its result. The card's `led_to_date` is the chat's outcome label (see "Voice").
+- `app` is free text, for example `tinder` or `hinge`.
+- `external_id` is the ID the dating app gives the match or message. It is unique per user and app for cards, and per card for messages; a duplicate is `409`. Rows without one are never duplicates.
+- **Storing a message from other code:** `insert_message(db, user_id, card_id, external_id, sender, body, sent_at)` in `app/cards.py` is the one way to store a message. It runs everything a new message sets off: for `me`, the style profile is queued and a pending handover ends; for `them`, Stalled is cleared, the handover trigger runs and chat autopilot is asked to reply. The route and `upsert_message()` (which skips a message the card already has, and moves a Matched card to Chatting) both call it. Never insert into `messages` yourself.
+- **Reading a card from other code:** use `app/card_lookup.py`, which every module can import. `own_card(db, user_id, card_id)` returns the user's card or raises `404` (for a route); `find_card()` returns `None` instead (for a job). `conversation()` is the card's messages as `(sender, body)`, oldest first, `chat_lines()` turns them into `sender: body` prompt lines, and `unanswered()` is the match's messages since the user's last one. Do not write these queries again.

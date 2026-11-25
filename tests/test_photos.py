@@ -77,7 +77,7 @@ def test_ranking_shows_claude_the_photos_and_returns_them_best_first_with_a_reas
     # Claude saw both photos, in id order, as JPEGs of the uploaded pixels (so within a few levels of them).
     seen = [Image.open(io.BytesIO(data)).convert("RGB").getpixel((0, 0)) for _, data in llm.images[-1]]
     for pixel, uploaded in zip(seen, [(255, 0, 0), (0, 128, 0)], strict=True):
-        assert all(abs(got - want) <= 4 for got, want in zip(pixel, uploaded))
+        assert all(abs(got - want) <= 4 for got, want in zip(pixel, uploaded, strict=False))
     assert str(first) in llm.prompts[-1] and str(second) in llm.prompts[-1]
 
 
@@ -125,7 +125,7 @@ def test_exposure_and_colour_change_the_original_pixels_by_arithmetic(client, ll
     # then halfway between the pixel and its grey: (83, 19, 19). The same sum for blue gives (7, 7, 71).
     assert image.size == (40, 20)
     for at, want in [((0, 0), (83, 19, 19)), ((39, 0), (7, 7, 71))]:
-        assert all(abs(got - expected) <= 1 for got, expected in zip(image.getpixel(at), want))
+        assert all(abs(got - expected) <= 1 for got, expected in zip(image.getpixel(at), want, strict=False))
 
 
 def test_an_accepted_edit_is_applied_to_the_photo_and_the_offer_is_gone(client, llm):

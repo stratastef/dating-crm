@@ -67,7 +67,7 @@ def complete(
         max_tokens=max_tokens,
         system=system,
         messages=[
-            {
+            {  # pyright: ignore[reportArgumentType]  (content blocks are built as plain dicts)
                 "role": "user",
                 "content": [
                     *({"type": "image", "source": _source(image)} for image in images),

@@ -24,5 +24,26 @@ pythonpath = ["."]
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
+    "pyright>=1.1.414",
     "pytest>=9.2.0",
+    "ruff>=0.17.6",
 ]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# E501: no formatter is enforced yet. B904: routes turn lookup errors into HTTPException on purpose.
+ignore = ["E501", "B904"]
+
+[tool.ruff.lint.per-file-ignores]
+# pytest fixtures are imported by name and then shadowed by the test's parameter
+"tests/*" = ["F811"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI reads these calls in argument defaults at import time
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Body", "fastapi.Header"]
+
+[tool.pyright]
+include = ["app"]

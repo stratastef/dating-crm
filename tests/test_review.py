@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from tests.test_drafts import write_profile
 
@@ -6,7 +6,7 @@ from tests.test_drafts import write_profile
 def card_with_reply(client, name: str, minutes_ago: int) -> int:
     """A card whose match replied that many minutes ago."""
     card_id = client.post("/cards", json={"app": "hinge", "name": name}).json()["id"]
-    sent_at = (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)).isoformat()
+    sent_at = (datetime.now(UTC) - timedelta(minutes=minutes_ago)).isoformat()
     client.post(f"/cards/{card_id}/messages", json={"sender": "them", "body": "saturday works", "sent_at": sent_at})
     return card_id
 

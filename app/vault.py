@@ -19,6 +19,7 @@ def _master() -> Fernet:
 
 
 def _user_key(db: Connection, user_id: int, create: bool = False) -> Fernet | None:
+    """The user's key, or None if they have none and `create` is false."""
     if create:
         # ON CONFLICT keeps the existing key when two requests race to create it.
         db.execute(
@@ -28,17 +29,19 @@ def _user_key(db: Connection, user_id: int, create: bool = False) -> Fernet | No
     wrapped = db.execute(
         text("SELECT wrapped_key FROM vault_keys WHERE user_id = :user_id"), {"user_id": user_id}
     ).scalar_one_or_none()
-    return wrapped and Fernet(_master().decrypt(wrapped.encode()))
+    return Fernet(_master().decrypt(wrapped.encode())) if wrapped else None
 
 
 def store_token(db: Connection, user_id: int, app: str, token: str) -> None:
     """Store the user's session token for a dating app, replacing any previous one."""
+    key = _user_key(db, user_id, create=True)
+    assert key  # create=True always leaves a key
     db.execute(
         text(
             "INSERT INTO session_tokens (user_id, app, ciphertext) VALUES (:user_id, :app, :ciphertext) "
             "ON CONFLICT (user_id, app) DO UPDATE SET ciphertext = EXCLUDED.ciphertext"
         ),
-        {"user_id": user_id, "app": app, "ciphertext": _user_key(db, user_id, create=True).encrypt(token.encode()).decode()},
+        {"user_id": user_id, "app": app, "ciphertext": key.encrypt(token.encode()).decode()},
     )
 
 
@@ -48,7 +51,8 @@ def read_token(db: Connection, user_id: int, app: str) -> str | None:
         text("SELECT ciphertext FROM session_tokens WHERE user_id = :user_id AND app = :app"),
         {"user_id": user_id, "app": app},
     ).scalar_one_or_none()
-    return ciphertext and _user_key(db, user_id).decrypt(ciphertext.encode()).decode()
+    key = _user_key(db, user_id)
+    return key.decrypt(ciphertext.encode()).decode() if ciphertext and key else None
 
 
 def delete_token(db: Connection, user_id: int, app: str) -> None:

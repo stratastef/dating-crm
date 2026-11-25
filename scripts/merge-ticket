@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Merge one ticket branch into the current (integration) branch:
+#   scripts/merge-ticket ticket/42-holds
+# It merges, re-points the ticket's new migration when the merge left two Alembic heads, runs the tests, commits,
+# and removes the branch's worktree. It stops, with the merge left open, on a conflict or a red test.
+set -euo pipefail
+
+branch=${1:?usage: scripts/merge-ticket <branch>}
+test_cmd=${MERGE_TEST_CMD:-uv run pytest -q}
+
+git diff --quiet && git diff --cached --quiet || { echo "working tree is not clean" >&2; exit 1; }
+new_migrations=$(git diff --name-only --diff-filter=A "HEAD...$branch" -- migrations/versions)
+
+git merge --no-ff --no-commit "$branch" || { echo "conflicts: resolve them, then run the tests and commit" >&2; exit 1; }
+
+heads=$(uv run alembic heads | awk '{print $1}')
+if [ "$(echo "$heads" | wc -l)" -gt 1 ]; then
+  [ "$(echo "$new_migrations" | grep -c .)" -eq 1 ] || { echo "several heads and not exactly one new migration: re-point by hand" >&2; exit 1; }
+  mine=$(sed -nE 's/^revision = "(.*)"/\1/p' "$new_migrations")
+  other=$(echo "$heads" | grep -vx "$mine")
+  sed -i.bak -E "s/^down_revision = .*/down_revision = \"$other\"/; s/^Revises: .*/Revises: $other/" "$new_migrations"
+  rm "$new_migrations.bak"
+  git add "$new_migrations"
+  echo "re-pointed $mine onto $other"
+fi
+
+$test_cmd
+git commit -q -m "Merge $branch"
+worktree=$(git worktree list --porcelain | awk -v b="refs/heads/$branch" '/^worktree /{p=$2} $0=="branch " b{print p}')
+[ -z "$worktree" ] || git worktree remove --force "$worktree"
+echo "merged $branch"

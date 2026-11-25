@@ -80,7 +80,9 @@ def classify(error: Exception) -> Reason:
     """What a connector's error means: HTTP 401 is an auth failure, HTTP 403 a ban signal, anything else transient."""
     # shortcut: status codes only, upgrade when an app signals a ban some other way (an error code in the body).
     status = error.response.status_code if isinstance(error, httpx.HTTPStatusError) else None
-    return {401: "auth failure", 403: "ban signal"}.get(status, "transient")
+    if status == 401:
+        return "auth failure"
+    return "ban signal" if status == 403 else "transient"
 
 
 def disabled_capabilities() -> set[str]:

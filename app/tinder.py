@@ -2,7 +2,7 @@
 passes, and spends a Super Like or Boost the account holds, with their web session token.
 
 The API is unofficial. The request and response shapes here follow public write-ups of the web client and are
-not confirmed against a real account: see "Tinder connector" in the README for the list of assumptions.
+not confirmed against a real account: see docs/modules/tinder-connector.md for the list of assumptions.
 """
 
 from collections.abc import Iterator
