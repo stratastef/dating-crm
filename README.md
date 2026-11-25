@@ -15,6 +15,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/tenancy.py` | `user_id_column()` for tenant tables |
 | `app/vault.py` | `store_token()`, `read_token()`, `delete_token()` for encrypted dating-app session tokens |
 | `app/audit.py` | `record_action()` and `GET /audit-log` |
+| `app/autopilot.py` | Autonomy per job and the kill switch: `autopilot_allowed()`, `pause()`, `resume()` |
 | `migrations/versions/` | Alembic migrations |
 | `tests/` | pytest suite |
 | `compose.yaml` | `db`, `api` and `worker` services |
@@ -110,7 +111,7 @@ def sync_matches(db: Connection, user_id: int, payload: dict) -> None: ...
 
 `db` is the job's own transaction. If the handler raises, its writes are rolled back and the job is retried after 30s, 1m, 2m and 4m. After 5 attempts its status is `failed` and `last_error` holds the exception. Workers claim jobs with `FOR UPDATE SKIP LOCKED`, so several workers can run. A worker that crashes mid-job releases it, so make handlers safe to run twice.
 
-In a test, call `run_once(app.state.engine)` to run the next due job; pass `now=` to move the clock. `POST /jobs/ping` queues a no-op job and `GET /jobs/{id}` returns its `status` (`queued`, `done` or `failed`).
+In a test, call `run_once(app.state.engine)` to run the next due job; pass `now=` to move the clock. `POST /jobs/ping` queues a no-op job and `GET /jobs/{id}` returns its `status` (`queued`, `done`, `failed` or `skipped`) and `last_error`.
 
 ## Session token vault
 
@@ -128,6 +129,36 @@ Compose passes `TOKEN_VAULT_MASTER_KEY` from your shell or `.env` to the API and
 
 Every autopilot action must call `record_action(connection, user_id, type=..., app=..., target=..., trigger=...)` from `app.audit`, in the same transaction as the action. `type` is one of `message`, `like`, `pass`, `profile_change`, `calendar_hold`.
 The `audit_log` table is append-only (a trigger rejects `UPDATE` and `DELETE`). `GET /audit-log?app=&type=` lists the current user's entries, newest first.
+
+## Autonomy and kill switch
+
+All in `app/autopilot.py`. Each job (`chat`, `profile`, `swipe`) has a level: `off`, `copilot`, `guardrails` or `full`. Chat and profile default to `copilot`, swipe to `off`. A pause stops autopilot for one app or for all apps.
+
+| Route | Does |
+| --- | --- |
+| `GET /autonomy` | Level per job |
+| `PUT /autonomy/{job}` with `{"level": "full"}` | Sets one level |
+| `GET /autopilot/pause` | `{"all": false, "apps": ["tinder"]}` |
+| `POST /autopilot/pause?app=tinder`, `POST /autopilot/resume?app=tinder` | Pauses or resumes one app. Without `app`: all apps. |
+
+From code, with `app=None` meaning all apps:
+
+```python
+pause(db, user_id, "tinder", reason="ban signal")  # the reason is recorded on skipped jobs
+resume(db, user_id, "tinder")
+autopilot_allowed(db, user_id, "tinder", "chat")   # False if paused, or if chat autonomy is off or copilot
+```
+
+Resuming all apps lifts only the pause on all apps. An app paused on its own stays paused until it is resumed by name.
+
+Mark a job handler as autopilot with the job it acts for, and put the app in the payload as `"app"`:
+
+```python
+@handler("send_reply", autopilot="chat")
+def send_reply(db: Connection, user_id: int, payload: dict) -> None: ...
+```
+
+The worker runs such a job only if `autopilot_allowed()` is true at that moment. Otherwise it sets the job's status to `skipped` and writes the reason to `last_error`. Skipped jobs are not retried. Handlers that draft for copilot are not autopilot jobs: leave `autopilot` unset.
 
 ## Add a migration
 
