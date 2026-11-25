@@ -10,7 +10,7 @@ from sqlalchemy import Connection, text
 from sqlalchemy.exc import IntegrityError
 
 from app import calendar
-from app import jev
+from app import handover
 from app.auth import CurrentUser, Db
 from app.voice import queue_profile
 from app.jobs import handler
@@ -22,7 +22,7 @@ Stage = Literal["matched", "chatting", "number_swapped", "date_set", "dated", "s
 
 _COLUMNS = (
     "id, app, external_id, name, stage, stage_changed_at, notes, next_action, due_date, created_at,"
-    " stalled_at IS NOT NULL AS stalled, date_rating, date_note"
+    " stalled_at IS NOT NULL AS stalled, date_rating, date_note, handover, handover_suggestions"
 )
 
 # Only cards in these stages can be Stalled. Stalled is a flag (`cards.stalled_at`), not a stage.
@@ -68,6 +68,9 @@ class Card(BaseModel):
     stalled: bool
     date_rating: int | None
     date_note: str | None
+    # Paused for handover (see `app/handover.py`): `pending`, `taken_over` or null.
+    handover: str | None
+    handover_suggestions: list[str]
 
     @computed_field
     @property
@@ -170,6 +173,7 @@ def upsert_message(
     )
     if sender == "me":
         queue_profile(db, user_id)
+        handover.answered(db, card_id)
     else:
         # A reply clears Stalled, as in `add_message`.
         db.execute(
@@ -178,7 +182,7 @@ def upsert_message(
         )
         # shortcut: Jev is called inside the sync job, once per sentence and check, also for old messages
         # on a first sync. Move to its own job if a sync gets slow.
-        jev.record_handover(db, added.id, body)
+        handover.incoming(db, user_id, card_id, added.id, body)
 
 
 class CardChanges(BaseModel):
@@ -304,13 +308,14 @@ def add_message(card_id: int, message: NewMessage, user: CurrentUser, db: Db):
         raise HTTPException(status_code=404, detail="card not found")
     if message.sender == "me":
         queue_profile(db, user.id)  # the style profile is written from the user's own messages
+        handover.answered(db, card_id)
     if message.sender == "them":
         # A reply clears Stalled. If it was an old message added late, the next `mark_stalled` run sets the flag again.
         db.execute(
             text("UPDATE cards SET stalled_at = NULL WHERE id = :id AND user_id = :user_id"),
             {"id": card_id, "user_id": user.id},
         )
-        return {**row._mapping, "handover": jev.record_handover(db, row.id, message.body)}
+        return {**row._mapping, "handover": handover.incoming(db, user.id, card_id, row.id, message.body)}
     return row
 
 

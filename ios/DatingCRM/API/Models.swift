@@ -24,6 +24,13 @@ enum Stage: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// Why autopilot is paused for one card. `pending`: a handover trigger hit and the user has not answered.
+/// `takenOver`: the user keeps the chat manual until they hand it back.
+enum Handover: String, Codable {
+    case pending
+    case takenOver = "taken_over"
+}
+
 struct Card: Codable, Identifiable, Hashable {
     let id: Int
     var app: String
@@ -36,6 +43,10 @@ struct Card: Codable, Identifiable, Hashable {
     /// 1 to 5, nil until the user rates the date.
     var dateRating: Int?
     var dateNote: String?
+    /// nil while autopilot may chat on this card.
+    var handover: Handover?
+    /// The replies suggested for the handover.
+    var handoverSuggestions: [String]?
 
     /// True when the card is in Dated and has no rating yet: the app then asks for one.
     var needsDateRating: Bool { stage == .dated && dateRating == nil }
@@ -94,7 +105,7 @@ struct Inference: Codable, Identifiable, Hashable {
     }
 }
 
-/// One thing that waits for the user's review. `kind` is `draft` so far; the server adds more kinds later.
+/// One thing that waits for the user's review. `kind` is `draft` or `handover`; the server adds more kinds later.
 struct QueueItem: Codable, Identifiable, Hashable {
     var kind: String
     /// A hot lead: the server pushed it at once.
@@ -103,12 +114,14 @@ struct QueueItem: Codable, Identifiable, Hashable {
     var cardName: String
     /// Set when `kind` is `draft`.
     var draft: Draft?
+    /// Set when `kind` is `handover`: the suggested replies.
+    var suggestions: [String]?
 
     var id: String { "\(kind)-\(draft?.id ?? cardID)" }
 
     // The key strategy turns `card_id` into `cardId`.
     enum CodingKeys: String, CodingKey {
-        case kind, hot, draft
+        case kind, hot, draft, suggestions
         case cardID = "cardId"
         case cardName
     }

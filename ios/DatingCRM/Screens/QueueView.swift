@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The review queue: pending drafts to approve, edit or dismiss. Hot leads come first.
+/// The review queue: pending drafts to approve, edit or dismiss, and handovers to take over. Hot leads come first.
 struct QueueView: View {
     let client: APIClient
 
@@ -22,6 +22,12 @@ struct QueueView: View {
                     DraftRow(item: item, draft: draft) { text, approve in
                         await decide(item, draft: draft, text: text, approve: approve)
                     }
+                } else if item.kind == "handover" {
+                    HandoverSection(
+                        client: client, cardID: item.cardID, title: item.cardName, suggestions: item.suggestions ?? [],
+                        // Taken over, the chat no longer waits in the queue.
+                        state: Binding(get: { .pending }, set: { _ in items.removeAll { $0.id == item.id } })
+                    )
                 }
             }
         }

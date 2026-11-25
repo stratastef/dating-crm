@@ -82,6 +82,16 @@ struct APIClient {
         try await data("POST", "drafts/\(draftID)/dismiss")
     }
 
+    /// Keeps the card's chat manual: autopilot stays out until `handBack`.
+    func takeOver(cardID: Int) async throws {
+        try await data("POST", "cards/\(cardID)/take-over")
+    }
+
+    /// Ends the card's handover pause: autopilot may chat on it again.
+    func handBack(cardID: Int) async throws {
+        try await data("POST", "cards/\(cardID)/hand-back")
+    }
+
     func card(id: Int) async throws -> Card {
         try await send("GET", "cards/\(id)")
     }
