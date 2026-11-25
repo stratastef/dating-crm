@@ -1,6 +1,8 @@
 """The one place that calls Claude. Features call `llm.call(...)`, which records what each call cost."""
 
+import base64
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -34,9 +36,24 @@ class Completion:
     output_tokens: int
 
 
-def complete(system: str, prompt: str, max_tokens: int = 16000, model: str | None = None) -> Completion:
-    """Send one prompt to Claude and return its text and token usage.
+def _source(image: str | tuple[str, bytes]) -> dict:
+    """The API's `source` for an image: a URL, or the bytes in base64."""
+    if isinstance(image, str):
+        return {"type": "url", "url": image}
+    media_type, data = image
+    return {"type": "base64", "media_type": media_type, "data": base64.standard_b64encode(data).decode()}
 
+
+def complete(
+    system: str,
+    prompt: str,
+    max_tokens: int = 16000,
+    images: Sequence[str | tuple[str, bytes]] = (),
+    model: str | None = None,
+) -> Completion:
+    """Send one prompt to Claude and return its text and token usage. Claude sees `images` before the prompt.
+
+    An image is a URL Claude fetches, or `(media_type, data)` such as `("image/png", b"...")` to send the picture.
     The model is `model`, else `ANTHROPIC_MODEL` (default `claude-fable-5-2`); the key is read from
     `ANTHROPIC_API_KEY`.
     """
@@ -44,7 +61,15 @@ def complete(system: str, prompt: str, max_tokens: int = 16000, model: str | Non
         model=model or os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL),
         max_tokens=max_tokens,
         system=system,
-        messages=[{"role": "user", "content": prompt}],
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    *({"type": "image", "source": _source(image)} for image in images),
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ],
     )
     if message.stop_reason == "refusal":
         # A refusal carries no usable text. Raising lets a job retry and then fail visibly.
@@ -64,20 +89,22 @@ def call(
     system: str,
     prompt: str,
     max_tokens: int = 16000,
+    images: Sequence[str | tuple[str, bytes]] = (),
     model: str | None = None,
 ) -> Completion:
     """Send one prompt to Claude for a user and record what the call cost. Every feature calls Claude through this.
 
-    `purpose` names the feature, for example `draft`. `model` picks a model other than the default. Raises `BudgetReached`, without calling Claude, while the
-    user's spend this month is at their cap. The call that reaches the cap sends the user a push.
+    `purpose` names the feature, for example `draft`. `images` are images to show Claude: URLs, or
+    `(media_type, data)` pairs. `model` picks a model other than the default. Raises `BudgetReached`, without calling Claude, while the user's spend this
+    month is at their cap. The call that reaches the cap sends the user a push.
     """
     # shortcut: two calls at the same moment can both pass this check, so spend can pass the cap by the cost
     # of the calls in flight. Lock the user row here if that ever matters.
     if budget_reached(db, user_id):
         raise BudgetReached("AI budget reached")
     # `complete` is looked up at call time so tests can replace it with a stub.
-    # `model` is passed only when set, so a stub that takes the first three arguments still works.
-    completion = complete(system, prompt, max_tokens, **({"model": model} if model else {}))
+    # `model` is passed only when set, so a stub that does not take it still works.
+    completion = complete(system, prompt, max_tokens, images, **({"model": model} if model else {}))
     # A model missing from the table is charged at the default model's price, so its cost is never zero.
     # shortcut: cache reads and writes are not priced apart, add them when a caller turns on prompt caching.
     input_price, output_price = PRICES.get(completion.model, PRICES[DEFAULT_MODEL])

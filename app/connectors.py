@@ -36,7 +36,8 @@ class Connector:
     def read_candidates(self, token: str) -> list[dict]:
         raise NotImplementedError
 
-    def send(self, token: str, match_id: str, text: str) -> None:
+    def send(self, token: str, match_id: str, text: str) -> dict:
+        """Returns the sent message: `id` (the app's ID for it) and `sent_at` (ISO 8601)."""
         raise NotImplementedError
 
     def like(self, token: str, profile_id: str) -> None:
@@ -66,6 +67,20 @@ def disabled_capabilities() -> set[str]:
     return {item.strip() for item in os.environ.get("CONNECTOR_DISABLED_CAPABILITIES", "").split(",") if item.strip()}
 
 
+def unavailable(db: Connection, user_id: int, connector: Connector, capability: Capability) -> str | None:
+    """Why `call()` would not attempt this capability for the user, or None if it would."""
+    name = f"{connector.app}:{capability}"
+    if capability not in connector.capabilities:
+        return f"{connector.app} does not support {capability}"
+    if name in disabled_capabilities():
+        return f"{name} is disabled by configuration"
+    if is_copilot_only(db, user_id, connector.app):
+        return f"{connector.app} is copilot-only"
+    if read_token(db, user_id, connector.app) is None:
+        return f"no {connector.app} session token is stored"
+    return None
+
+
 def call(db: Connection, user_id: int, connector: Connector, capability: Capability, *args):
     """Run one capability of a connector for a user and return its result.
 
@@ -76,15 +91,10 @@ def call(db: Connection, user_id: int, connector: Connector, capability: Capabil
     also pauses the app's autopilot for this user.
     """
     name = f"{connector.app}:{capability}"
-    if capability not in connector.capabilities:
-        raise CapabilityUnavailable(f"{connector.app} does not support {capability}")
-    if name in disabled_capabilities():
-        raise CapabilityUnavailable(f"{name} is disabled by configuration")
-    if is_copilot_only(db, user_id, connector.app):
-        raise CapabilityUnavailable(f"{connector.app} is copilot-only")
+    why = unavailable(db, user_id, connector, capability)
+    if why:
+        raise CapabilityUnavailable(why)
     token = read_token(db, user_id, connector.app)
-    if token is None:
-        raise CapabilityUnavailable(f"no {connector.app} session token is stored")
     try:
         return getattr(connector, "pass_" if capability == "pass" else capability)(token, *args)
     except Exception as error:

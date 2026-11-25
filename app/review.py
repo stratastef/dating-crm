@@ -56,7 +56,10 @@ def notify_if_hot(db: Connection, user_id: int, card_id: int, name: str) -> None
 
 
 def hand_on_approved_draft(db: Connection, user_id: int, draft: Draft) -> None:
-    """Called once for each draft the user approves. Sending it through the app's connector goes here."""
+    """Called once for each draft the user approves: queues its send when the card's app can send."""
+    from app.send import send_approved  # imported here: app.send imports app.drafts, which imports this module
+
+    send_approved(db, user_id, draft.id, trigger=f"copilot: user approved draft {draft.id}")
 
 
 @router.get("/queue", response_model=list[QueueItem])
