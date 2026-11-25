@@ -164,6 +164,36 @@ struct SwipeCandidate: Codable, Identifiable, Hashable {
     var source: String
 }
 
+/// The kill switch: what autopilot is paused for. `all` pauses every app; `apps` are paused on their own.
+struct Pauses: Codable, Equatable {
+    var all = false
+    var apps: [String] = []
+}
+
+/// How much the app may do alone for one job (`chat`, `profile`, `swipe`). Raw values match the server's.
+enum AutonomyLevel: String, Codable, CaseIterable, Identifiable {
+    case off, copilot, guardrails, full
+
+    var id: Self { self }
+    var title: String { rawValue.capitalized }
+}
+
+/// The AI budget of the current month, in USD. `paused`: the spend is at the cap, so autopilot is paused.
+struct Budget: Codable, Equatable {
+    var spendUsd: Double
+    var capUsd: Double
+    var paused: Bool
+}
+
+/// A purge cannot be undone, so the user types the word before the button works.
+enum PurgeConfirmation {
+    static let word = "purge"
+
+    static func allows(typed: String, chosen: Int) -> Bool {
+        chosen > 0 && typed.trimmingCharacters(in: .whitespaces).lowercased() == word
+    }
+}
+
 /// What the user wants: wishes in plain words, plus must-haves and dealbreakers.
 struct Preferences: Codable, Equatable {
     var wishes = ""
