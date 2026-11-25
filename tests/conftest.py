@@ -77,9 +77,11 @@ class StubLlm:
     def __init__(self):
         self.reply = "stub reply"
         self.prompts: list[str] = []
+        self.images: list[list[tuple[str, bytes]]] = []  # per call: the (content type, bytes) pairs sent
 
-    def __call__(self, system: str, prompt: str, max_tokens: int = 16000) -> Completion:
+    def __call__(self, system: str, prompt: str, max_tokens: int = 16000, images=()) -> Completion:
         self.prompts.append(prompt)
+        self.images.append(list(images))
         return Completion(text=self.reply, model="stub", input_tokens=1, output_tokens=1)
 
 

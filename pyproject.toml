@@ -8,6 +8,7 @@ dependencies = [
     "cryptography>=50.0.2",
     "fastapi>=0.165.0",
     "httpx[http2]>=0.28.1",
+    "pillow>=13.0.0",
     "psycopg[binary]>=3.3.9",
     "sqlalchemy>=2.1.9",
     "uvicorn[standard]>=0.54.0",

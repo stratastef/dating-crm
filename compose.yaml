@@ -11,6 +11,9 @@ x-app: &app
     APNS_TEAM_ID: ${APNS_TEAM_ID:-}
     APNS_BUNDLE_ID: ${APNS_BUNDLE_ID:-}
     APNS_SANDBOX: ${APNS_SANDBOX:-}
+    PHOTOS_DIR: /data/photos
+  volumes:
+    - photos:/data/photos
   depends_on:
     db:
       condition: service_healthy
@@ -48,3 +51,4 @@ services:
 
 volumes:
   pgdata:
+  photos:

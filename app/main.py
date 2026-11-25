@@ -13,6 +13,7 @@ from app.db import database_url
 from app.drafts import router as drafts_router
 from app.jobs import enqueue
 from app.llm import BudgetReached
+from app.photos import router as photos_router
 from app.push import router as push_router
 from app.preferences import router as preferences_router
 from app.sync import router as sync_router
@@ -60,6 +61,7 @@ def create_app(url: str | None = None) -> FastAPI:
     app.include_router(cards_router)
     app.include_router(dashboard_router)
     app.include_router(drafts_router)
+    app.include_router(photos_router)
     app.include_router(push_router)
     app.include_router(preferences_router)
     app.include_router(sync_router)
