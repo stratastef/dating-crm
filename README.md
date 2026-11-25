@@ -11,6 +11,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/db.py` | `database_url()`, read from `DATABASE_URL` |
 | `app/auth.py` | `CurrentUser` and `Db` route dependencies, `create_user()` |
 | `app/tenancy.py` | `user_id_column()` for tenant tables |
+| `app/audit.py` | `record_action()` and `GET /audit-log` |
 | `migrations/versions/` | Alembic migrations |
 | `tests/` | pytest suite |
 | `compose.yaml` | `db`, `api` and `worker` services |
@@ -69,6 +70,11 @@ Every table except `users` is a tenant table. Declare its owner with `user_id_co
 ```python
 op.create_table("matches", sa.Column("id", sa.BigInteger, sa.Identity(), primary_key=True), user_id_column(), ...)
 ```
+
+## Audit log
+
+Every autopilot action must call `record_action(connection, user_id, type=..., app=..., target=..., trigger=...)` from `app.audit`, in the same transaction as the action. `type` is one of `message`, `like`, `pass`, `profile_change`, `calendar_hold`.
+The `audit_log` table is append-only (a trigger rejects `UPDATE` and `DELETE`). `GET /audit-log?app=&type=` lists the current user's entries, newest first.
 
 ## Add a migration
 
