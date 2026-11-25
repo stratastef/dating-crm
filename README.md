@@ -14,6 +14,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/cards.py` | Match cards and their messages: routes under `/cards` |
 | `app/llm.py` | `complete()`, the only function that calls Claude |
 | `app/voice.py` | Questionnaire, style profile and similar past chats: routes under `/voice` |
+| `app/bios.py` | Bio and prompt rewrites per dating app: routes under `/bios` |
 | `app/settings.py` | User settings: `GET` and `PATCH /settings` |
 | `app/tenancy.py` | `user_id_column()` for tenant tables |
 | `app/vault.py` | `store_token()`, `read_token()`, `delete_token()` for encrypted dating-app session tokens |
@@ -155,6 +156,20 @@ Routes and the job are in `app/voice.py`; the table is `voice_profiles` (one row
 - The `voice_profile` job writes the style profile from the answers and the user's own messages (the newest 200). Saving answers and `POST /cards/{id}/messages` with `sender: me` queue it. Code that stores messages another way must call `queue_profile(db, user_id)`.
 - A chat led to a date if its card's stage is `date_set`, `dated` or `seeing_them`.
 - Similarity is `similarity()` from the Postgres `pg_trgm` extension over the whole chat text, so it measures shared wording, not meaning. Other code calls `similar_chats(db, user_id, card_id, limit)`.
+
+## Bios
+
+Routes are in `app/bios.py`; the table is `bios` (one row per user and app). A bio is `{"bio": "...", "prompts": {"<prompt>": "<answer>"}}`.
+
+| Route | Does |
+| --- | --- |
+| `POST /bios/{app}/rewrite` | Rewrite the bio in the body for that app from the style profile. Returns the rewrite and stores nothing. |
+| `PUT /bios/{app}` | Store the version the user accepted for that app, replacing the previous one. |
+| `GET /bios/{app}` | Read the accepted version. Empty until one is accepted. |
+
+- To regenerate, call the rewrite route again. To regenerate from an edit, send the edited text as the body.
+- The rewrite route returns `409` until the style profile is written, and `502` if Claude's reply is not a bio; the client can retry.
+- Nothing is written to a dating app: in copilot the user copies the accepted text.
 
 ## Session token vault
 
