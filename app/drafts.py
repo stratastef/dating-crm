@@ -17,7 +17,7 @@ class Draft(BaseModel):
     id: int
     card_id: int
     kind: str  # `opener` when the card had no messages, else `reply`
-    status: str  # `pending` until a later step sends or discards it
+    status: str  # `pending`, then `approved`, `sending` and `sent` or `failed`: see `app/send.py`
     original: str  # what Claude wrote; never changes
     edited: str | None  # the user's version; null until they edit
 
