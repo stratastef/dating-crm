@@ -5,6 +5,7 @@ x-app: &app
     TOKEN_VAULT_MASTER_KEY: ${TOKEN_VAULT_MASTER_KEY:-}
     ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-fable-5-2}
+    CONNECTOR_DISABLED_CAPABILITIES: ${CONNECTOR_DISABLED_CAPABILITIES:-}
   depends_on:
     db:
       condition: service_healthy

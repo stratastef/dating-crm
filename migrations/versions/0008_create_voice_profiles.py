@@ -1,7 +1,7 @@
 """create voice_profiles table
 
-Revision ID: 0006_voice
-Revises: 0005_cards
+Revision ID: 0008_voice
+Revises: 0007_connector_alerts
 """
 
 import sqlalchemy as sa
@@ -10,8 +10,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 from app.tenancy import user_id_column
 
-revision = "0006_voice"
-down_revision = "0005_cards"
+revision = "0008_voice"
+down_revision = "0007_connector_alerts"
 branch_labels = None
 depends_on = None
 

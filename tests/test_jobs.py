@@ -54,7 +54,13 @@ def test_failing_job_retries_with_backoff_and_ends_failed(client, app, queue):
     later = datetime.now(UTC)
 
     assert run_once(app.state.engine) is True
-    assert client.get(f"/jobs/{job_id}").json() == {"id": job_id, "kind": "test_boom", "status": "queued", "attempts": 1}
+    assert client.get(f"/jobs/{job_id}").json() == {
+        "id": job_id,
+        "kind": "test_boom",
+        "status": "queued",
+        "attempts": 1,
+        "last_error": "RuntimeError('boom')",
+    }
     assert run_once(app.state.engine) is False  # backing off
 
     while run_once(app.state.engine, now=(later := later + timedelta(days=1))):
