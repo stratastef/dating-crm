@@ -8,6 +8,7 @@ import httpx
 from sqlalchemy import Connection, Row, text
 
 from app.autopilot import pause
+from app.push import send_push
 from app.vault import read_token
 
 log = logging.getLogger("connectors")
@@ -103,7 +104,7 @@ def call(db: Connection, user_id: int, connector: Connector, capability: Capabil
             )
             if reason != "transient":
                 pause(own, user_id, connector.app, reason=reason)
-                # PUSH (#18): send_push(own, user_id, f"{connector.app} autopilot paused", reason) goes here.
+                send_push(own, user_id, f"{connector.app} autopilot paused", reason)
         raise CapabilityFailed(name) from error
 
 

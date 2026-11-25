@@ -41,6 +41,15 @@ struct APIClient {
         try await send("PATCH", "drafts/\(draftID)", body: Self.encoder.encode(["edited": text]))
     }
 
+    func card(id: Int) async throws -> Card {
+        try await send("GET", "cards/\(id)")
+    }
+
+    /// Tells the server where to send this phone's push notifications. `token` is the APNs device token in hex.
+    func registerDevice(token: String) async throws {
+        try await data("POST", "devices", body: Self.encoder.encode(["token": token]))
+    }
+
     /// The preferences in force; empty until the user saves some.
     func preferences() async throws -> Preferences {
         try await send("GET", "preferences")
@@ -48,10 +57,15 @@ struct APIClient {
 
     /// Stores the preferences as a new version on the server and returns what it stored.
     func save(_ preferences: Preferences) async throws -> Preferences {
-        try await send("PUT", "preferences", body: Self.encoder.encode(preferences))
-    }
+        try await send("PUT", "preferences", body: Self.encoder.encode(preferences))    }
 
     private func send<Response: Decodable>(_ method: String, _ path: String, body: Data? = nil) async throws -> Response {
+        try Self.decoder.decode(Response.self, from: await data(method, path, body: body))
+    }
+
+    /// For routes that answer with no body, call this instead of `send`.
+    @discardableResult
+    private func data(_ method: String, _ path: String, body: Data? = nil) async throws -> Data {
         var request = URLRequest(url: baseURL.appending(path: path))
         request.httpMethod = method
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -62,7 +76,7 @@ struct APIClient {
         let (data, response) = try await transport(request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else { throw APIError(status: status) }
-        return try Self.decoder.decode(Response.self, from: data)
+        return data
     }
 
     // The only dates the app reads or writes are plain days such as `due_date`.

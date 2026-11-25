@@ -6,6 +6,11 @@ x-app: &app
     ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-fable-5-2}
     CONNECTOR_DISABLED_CAPABILITIES: ${CONNECTOR_DISABLED_CAPABILITIES:-}
+    APNS_KEY: ${APNS_KEY:-}
+    APNS_KEY_ID: ${APNS_KEY_ID:-}
+    APNS_TEAM_ID: ${APNS_TEAM_ID:-}
+    APNS_BUNDLE_ID: ${APNS_BUNDLE_ID:-}
+    APNS_SANDBOX: ${APNS_SANDBOX:-}
   depends_on:
     db:
       condition: service_healthy
