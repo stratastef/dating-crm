@@ -124,14 +124,14 @@ def test_approving_a_draft_in_the_review_queue_sends_it_once(app, client, draft,
     assert client.get("/audit-log").json()[0]["trigger"] == f"copilot: user approved draft {draft['id']}"
 
 
-def test_approving_a_draft_while_the_app_is_paused_sends_nothing(app, client, draft, tinder):
+def test_the_kill_switch_does_not_stop_a_draft_the_user_approves(app, client, draft, tinder):
     client.post("/autopilot/pause", params={"app": "tinder"})
 
     assert client.post(f"/drafts/{draft['id']}/approve").status_code == 200
     work(app)
 
-    assert tinder.sent == []
-    assert status(app, draft) == "approved"
+    assert len(tinder.sent) == 1
+    assert status(app, draft) == "sent"
 
 
 def test_a_second_tap_is_refused_and_the_draft_is_sent_once(app, client, draft, tinder):
@@ -178,16 +178,14 @@ def test_a_send_tinder_rejects_fails_the_draft_and_is_not_retried(app, client, d
 
 
 @pytest.mark.parametrize("scope", [{}, {"app": "tinder"}])
-def test_send_is_refused_while_the_app_is_paused(app, client, draft, tinder, scope):
+def test_the_kill_switch_pauses_autopilot_only_so_the_users_tap_still_sends(app, client, draft, tinder, scope):
     client.post("/autopilot/pause", params=scope)
 
-    refused = client.post(f"/drafts/{draft['id']}/send")
-
-    assert refused.status_code == 409
-    assert "paused" in refused.json()["detail"]
+    assert client.post(f"/drafts/{draft['id']}/send").status_code == 202
     work(app)
-    assert tinder.sent == []
-    assert status(app, draft) == "pending"
+
+    assert tinder.sent == [(f"/user/matches/{CLEO}", {"message": "both. badly."})]
+    assert status(app, draft) == "sent"
 
 
 def test_send_is_refused_while_the_send_capability_is_off(app, client, draft, tinder, monkeypatch):
@@ -202,9 +200,21 @@ def test_send_is_refused_while_the_send_capability_is_off(app, client, draft, ti
     assert status(app, draft) == "pending"
 
 
-def test_a_pause_after_the_tap_stops_the_send_and_the_draft_can_be_tapped_again(app, client, draft, tinder):
+def test_a_kill_switch_pulled_after_the_tap_does_not_stop_the_send(app, client, draft, tinder):
     client.post(f"/drafts/{draft['id']}/send")
     client.post("/autopilot/pause", params={"app": "tinder"})
+
+    work(app)
+
+    assert len(tinder.sent) == 1
+    assert status(app, draft) == "sent"
+
+
+def test_a_capability_switched_off_after_the_tap_stops_the_send_and_the_draft_can_be_tapped_again(
+    app, client, draft, tinder, monkeypatch
+):
+    client.post(f"/drafts/{draft['id']}/send")
+    monkeypatch.setenv("CONNECTOR_DISABLED_CAPABILITIES", "tinder:send")
 
     work(app)
 

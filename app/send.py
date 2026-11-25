@@ -6,7 +6,7 @@ from sqlalchemy import Connection, Row, text
 from app.audit import record_action
 from app.auth import CurrentUser, Db
 from app import handover
-from app.autopilot import autopilot_block, pauses
+from app.autopilot import autopilot_block
 from app.cards import upsert_message
 from app.connectors import CapabilityFailed, call, unavailable
 from app.drafts import _COLUMNS, Draft
@@ -95,7 +95,8 @@ def _card(db: Connection, user_id: int, draft_id: int) -> Row | None:
 def refusal(
     db: Connection, user_id: int, app: str, match_id: str | None, guardrail: list[str] | None = None
 ) -> str | None:
-    """Why a message cannot be sent to this match now, or None if it can. The kill switch stops tapped sends too.
+    """Why a message cannot be sent to this match now, or None if it can. The kill switch is not asked: it
+    pauses autopilot, and `unattended_block()` holds it for a send no user asked for. A tap still sends.
 
     `guardrail` is the draft's guardrail result. The user's tap may send a draft with any other hit, because
     they have read it; a draft that denies being AI is never sent, by a tap or alone, until it is edited.
@@ -106,9 +107,6 @@ def refusal(
         return f"{app} has no connector"
     if not match_id:
         return f"the card is not linked to a {app} match"
-    paused = pauses(db, user_id)
-    if paused["all"] or app in paused["apps"]:
-        return f"{app} is paused"
     return unavailable(db, user_id, CONNECTORS[app](), "send")
 
 
