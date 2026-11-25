@@ -3,9 +3,9 @@
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import Connection, Row, text
 
+from app import calendar, handover
 from app.audit import record_action
 from app.auth import CurrentUser, Db
-from app import calendar, handover
 from app.autopilot import autopilot_block
 from app.cards import upsert_message
 from app.connectors import CapabilityFailed, call, unavailable

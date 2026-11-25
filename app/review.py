@@ -111,7 +111,7 @@ def queue(user: CurrentUser, db: Db):
     ] + items
     # Paid items are never hot, so they come after the hot leads.
     items = [
-        QueueItem(kind="paid_item", hot=False, card_id=None, card_name=row.name, draft=None, paid_item=row._mapping)
+        QueueItem(kind="paid_item", hot=False, card_id=None, card_name=row.name, draft=None, paid_item=paid_items.Proposal(**row._mapping))
         for row in paid_items.waiting(db, user.id)
     ] + items
     return sorted(items, key=lambda item: not item.hot)  # stable, so each group stays oldest first

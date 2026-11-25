@@ -9,14 +9,12 @@ from pydantic import BaseModel, Field, computed_field, field_validator
 from sqlalchemy import Connection, text
 from sqlalchemy.exc import IntegrityError
 
-from app import calendar
-from app import handover
-from app import tombstones
+from app import calendar, handover, tombstones
 from app.auth import CurrentUser, Db
-from app.card_lookup import own_card
-from app.voice import queue_profile
 from app.autopilot import autopilot_allowed
+from app.card_lookup import own_card
 from app.jobs import enqueue, handler
+from app.voice import queue_profile
 
 router = APIRouter()
 

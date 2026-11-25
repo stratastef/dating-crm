@@ -103,13 +103,13 @@ def suggest(db: Connection, user_id: int, wants: PreferencesVersion, candidate: 
 
 def pending(db: Connection, user_id: int, app: str | None = None) -> list:
     """The candidates that wait for the user's swipe, oldest first."""
-    return db.execute(
+    return list(db.execute(
         text(
             f"SELECT {_COLUMNS} FROM swipe_candidates WHERE user_id = :user_id AND decision IS NULL"
             " AND (CAST(:app AS text) IS NULL OR app = :app) ORDER BY id"
         ),
         {"user_id": user_id, "app": app},
-    ).all()
+    ).all())
 
 
 def apply_decision(db: Connection, user_id: int, app: str, profile_id: str, decision: Swipe) -> bool:

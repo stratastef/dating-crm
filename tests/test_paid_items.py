@@ -210,5 +210,6 @@ def test_no_module_but_paid_items_can_reach_a_paid_capability():
 
     assert naming(r"\b_run\b") == {"connectors.py", "paid_items.py"}
     assert naming(r"\.(super_like|rose|boost)\(") == set()
-    assert naming(r"getattr\(") == {"connectors.py"}
+    # modules.py reads only the name `router` off each app module, to register its routes
+    assert naming(r"getattr\(") == {"connectors.py", "modules.py"}
     assert sources["paid_items.py"].count("_run(") == 1  # inside `spend()`, after the claim

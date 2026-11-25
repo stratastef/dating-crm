@@ -82,7 +82,7 @@ def upload(request: Request, data: Annotated[bytes, Depends(_upload)], user: Cur
     try:
         with Image.open(io.BytesIO(data), formats=[*_FORMATS]) as image:
             image.verify()
-            actual = _FORMATS[image.format]
+            actual = _FORMATS[image.format or ""]
     except Exception:  # Pillow raises many types for a broken file
         raise HTTPException(status_code=422, detail="the file is not a readable JPEG or PNG")
     if actual != content_type:

@@ -4,6 +4,8 @@ It composes existing pieces: `draft_for()` writes the reply, Jev checks it, `que
 sends it or leaves it in the review queue, and in full mode the calendar supplies and holds the times offered.
 """
 
+from collections.abc import Sequence
+
 from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlalchemy import Connection, text
@@ -32,7 +34,7 @@ _JUDGE = (
 )
 
 
-def _answer_to_offer(db: Connection, user_id: int, holds: list, message: str) -> int | str:
+def _answer_to_offer(db: Connection, user_id: int, holds: Sequence, message: str) -> int | str:
     """What the match's message says about the times held for them: the index of the one it accepts, `none`
     if it declines them all, else `other`."""
     times = "\n".join(f"{number}: {calendar.say(hold.start)}" for number, hold in enumerate(holds, 1))

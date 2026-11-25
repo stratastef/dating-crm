@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app import handover
 from app.cards import upsert_card, upsert_message
@@ -135,7 +135,7 @@ def test_a_first_sync_sends_neither_old_nor_answered_messages_to_jev(app, client
     """A first sync reads whole chats, newest message first: only what still waits for an answer is checked."""
     jev.yes["asks_if_ai"] = ["are you real"]
     client.post("/devices", json={"token": "abc123"})
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     with app.state.engine.begin() as db:
         user_id = db.exec_driver_sql("SELECT id FROM users").scalar_one()
         old = upsert_card(db, user_id, "tinder", "match-1", "Sam")
@@ -155,7 +155,7 @@ def test_a_pending_handover_is_a_hot_lead_in_the_queue_until_it_is_taken_over(cl
     jev.yes["logistics"] = ["saturday"]
     card_id = card(client, "Ada")
     llm.reply = "saturday works"
-    old = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()  # not hot as a recent reply
+    old = (datetime.now(UTC) - timedelta(hours=3)).isoformat()  # not hot as a recent reply
     client.post(f"/cards/{card_id}/messages", json={"sender": "them", "body": "Saturday at 8?", "sent_at": old})
 
     assert client.get("/queue").json() == [
@@ -184,7 +184,7 @@ def test_a_hit_on_an_earlier_message_of_one_batch_pauses_the_card(app, client, j
     """Tinder returns the newest message first, so the one that asks is stored after the one that followed it."""
     jev.yes["asks_if_ai"] = ["are you a bot"]
     card_id = card(client)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     at(client, card_id, "them", "??", now)
     at(client, card_id, "them", "are you a bot?", now - timedelta(minutes=1))
@@ -195,7 +195,7 @@ def test_a_hit_on_an_earlier_message_of_one_batch_pauses_the_card(app, client, j
 def test_a_hit_on_a_message_the_user_already_answered_does_not_pause_the_card(app, client, jev):
     jev.yes["asks_if_ai"] = ["are you a bot"]
     card_id = card(client)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     at(client, card_id, "me", "ask me anything", now)
     at(client, card_id, "them", "are you a bot?", now - timedelta(minutes=1))
