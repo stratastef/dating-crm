@@ -1,14 +1,14 @@
 """feedback loop: label each card with whether its chat led to a date
 
-Revision ID: 0026_feedback
-Revises: 0025_swipe_autopilot
+Revision ID: 0027_feedback
+Revises: 0026_ai_disclosure
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0026_feedback"
-down_revision = "0025_swipe_autopilot"
+revision = "0027_feedback"
+down_revision = "0026_ai_disclosure"
 branch_labels = None
 depends_on = None
 
