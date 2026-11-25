@@ -41,6 +41,21 @@ struct APIClient {
         try await send("PATCH", "drafts/\(draftID)", body: Self.encoder.encode(["edited": text]))
     }
 
+    /// Everything that waits for the user's review, hot leads first.
+    func queue() async throws -> [QueueItem] {
+        try await send("GET", "queue")
+    }
+
+    /// Approves a pending draft as the server holds it. Save an edit first.
+    func approve(draftID: Int) async throws {
+        try await data("POST", "drafts/\(draftID)/approve")
+    }
+
+    /// Drops a pending draft from the queue. Nothing is sent.
+    func dismiss(draftID: Int) async throws {
+        try await data("POST", "drafts/\(draftID)/dismiss")
+    }
+
     func card(id: Int) async throws -> Card {
         try await send("GET", "cards/\(id)")
     }
