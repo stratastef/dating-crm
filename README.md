@@ -11,6 +11,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/db.py` | `database_url()`, read from `DATABASE_URL` |
 | `app/auth.py` | `CurrentUser` and `Db` route dependencies, `create_user()` |
 | `app/tenancy.py` | `user_id_column()` for tenant tables |
+| `app/vault.py` | `store_token()`, `read_token()`, `delete_token()` for encrypted dating-app session tokens |
 | `migrations/versions/` | Alembic migrations |
 | `tests/` | pytest suite |
 | `compose.yaml` | `db`, `api` and `worker` services |
@@ -69,6 +70,18 @@ Every table except `users` is a tenant table. Declare its owner with `user_id_co
 ```python
 op.create_table("matches", sa.Column("id", sa.BigInteger, sa.Identity(), primary_key=True), user_id_column(), ...)
 ```
+
+## Session token vault
+
+Dating-app session tokens go through `app/vault.py` and nowhere else: `store_token(db, user.id, "tinder", token)`, `read_token(db, user.id, "tinder")` (returns `None` if absent), `delete_token(db, user.id, "tinder")`.
+
+Each user has their own key in `vault_keys`, encrypted with the master key. The master key is read from `TOKEN_VAULT_MASTER_KEY` and is never stored in the database. Without it the vault raises `KeyError`. If it is lost, stored tokens cannot be recovered. Generate one:
+
+```sh
+uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Compose passes `TOKEN_VAULT_MASTER_KEY` from your shell or `.env` to the API and worker. Never log a token value.
 
 ## Add a migration
 
