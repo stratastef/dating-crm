@@ -73,6 +73,36 @@ struct APIClientTests {
         ] as NSDictionary)
     }
 
+    @Test func asksForADraftOnACard() async throws {
+        server.respond(
+            #"{"id": 5, "card_id": 1, "kind": "opener", "status": "pending", "original": "is biscuit accepting visitors", "edited": null}"#,
+            status: 201
+        )
+
+        let draft = try await server.client().writeDraft(cardID: 1)
+
+        #expect(draft == Draft(id: 5, kind: .opener, original: "is biscuit accepting visitors", edited: nil))
+        #expect(draft.text == "is biscuit accepting visitors")
+        let request = try #require(server.requests.first)
+        #expect(request.httpMethod == "POST")
+        #expect(request.url?.absoluteString == "https://crm.test/cards/1/drafts")
+    }
+
+    @Test func savesTheUsersEditOfADraft() async throws {
+        server.respond(
+            #"{"id": 5, "card_id": 1, "kind": "reply", "status": "pending", "original": "both. badly.", "edited": "both, badly"}"#
+        )
+
+        let draft = try await server.client().saveEdit(draftID: 5, text: "both, badly")
+
+        #expect(draft == Draft(id: 5, kind: .reply, original: "both. badly.", edited: "both, badly"))
+        #expect(draft.text == "both, badly")
+        let request = try #require(server.requests.first)
+        #expect(request.httpMethod == "PATCH")
+        #expect(request.url?.absoluteString == "https://crm.test/drafts/5")
+        #expect(try sentJSON(request) == ["edited": "both, badly"] as NSDictionary)
+    }
+
     @Test func reportsTheStatusWhenTheServerRefuses() async {
         server.respond(#"{"detail": "invalid token"}"#, status: 401)
 

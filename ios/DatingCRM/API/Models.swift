@@ -42,3 +42,16 @@ struct Message: Codable, Identifiable, Hashable {
     var sender: Sender
     var body: String
 }
+
+/// A message Claude wrote for a card. `original` is Claude's text; `edited` is the user's version of it.
+struct Draft: Codable, Identifiable, Hashable {
+    enum Kind: String, Codable { case opener, reply }
+
+    let id: Int
+    var kind: Kind
+    var original: String
+    var edited: String?
+
+    /// What to show and copy: the user's edit when there is one.
+    var text: String { edited ?? original }
+}

@@ -31,6 +31,16 @@ struct APIClient {
         try await send("PATCH", "cards/\(card.id)", body: Self.encoder.encode(CardChanges(card: card)))
     }
 
+    /// Has Claude write a draft for the card: an opener when it has no messages, a reply otherwise.
+    func writeDraft(cardID: Int) async throws -> Draft {
+        try await send("POST", "cards/\(cardID)/drafts")
+    }
+
+    /// Stores the user's version of a draft. The server keeps Claude's original next to it.
+    func saveEdit(draftID: Int, text: String) async throws -> Draft {
+        try await send("PATCH", "drafts/\(draftID)", body: Self.encoder.encode(["edited": text]))
+    }
+
     private func send<Response: Decodable>(_ method: String, _ path: String, body: Data? = nil) async throws -> Response {
         var request = URLRequest(url: baseURL.appending(path: path))
         request.httpMethod = method
