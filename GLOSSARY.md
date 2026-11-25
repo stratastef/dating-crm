@@ -50,6 +50,21 @@ _Avoid_: Approve
 A draft the user copied that does not yet appear in the chat. It stays in view until a newer message from the user appears in the chat or the user clears it.
 _Avoid_: Approved draft
 
+**Send time**:
+When a draft goes out. For autopilot it is planned from the conversation; for the user's own drafts it is suggested and can be scheduled.
+_Avoid_: Delay, schedule (alone)
+
+**Planned send**:
+A draft autopilot will send alone at its send time. The user sees it with its reason and can send it now or hold it, which moves it to Review.
+_Avoid_: Queued message
+
+**Live**:
+A match who sent a message in the last five minutes.
+
+**Night window**:
+The hours in the user's time zone when nothing is sent, 01:00 to 07:00 by default.
+_Avoid_: Quiet hours, do not disturb
+
 **Suggested reply**:
 A reply the AI offers with a handover, for the user to copy.
 _Avoid_: Draft
