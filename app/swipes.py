@@ -115,7 +115,7 @@ def pending(db: Connection, user_id: int, app: str | None = None) -> list:
 def apply_decision(db: Connection, user_id: int, app: str, profile_id: str, decision: Swipe) -> bool:
     """Swipe on a profile through the app's connector. False when the app could not be reached.
 
-    A plain like or pass only: no paid item is ever spent. A failure makes the app copilot-only (see `call()`).
+    A plain like or pass only: no paid item is ever spent. An auth failure or ban signal makes the app copilot-only (see `call()`).
     """
     try:
         call(db, user_id, CONNECTORS[app](), decision, profile_id)
@@ -191,7 +191,7 @@ def suggestions(app: str, user: CurrentUser, db: Db):
     except CapabilityUnavailable as error:
         raise HTTPException(status_code=409, detail=str(error))
     except CapabilityFailed:
-        raise HTTPException(status_code=502, detail=f"{app} did not answer; it is now copilot-only")
+        raise HTTPException(status_code=502, detail=f"{app} did not answer; try again")
     return pending(db, user.id, app)
 
 
@@ -291,7 +291,7 @@ def swipe_autopilot(db: Connection, user_id: int, payload: dict) -> None:
                 except jev.JevUnavailable:
                     continue  # no dealbreaker check, no unattended swipe: the profile waits for the user
             if not apply_decision(db, user_id, app, candidate.profile_id, decision):
-                break  # the app was not reached and is now copilot-only; the candidate waits for the user
+                break  # the app was not reached: the candidate waits for the next run, or for the user
             db.execute(
                 text(
                     "UPDATE swipe_candidates SET decision = :decision, decided_at = now(), unattended = true"

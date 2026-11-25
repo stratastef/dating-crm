@@ -231,7 +231,7 @@ def test_nothing_is_swiped_in_tinder_until_the_user_decides(signed_in, tinder, l
 def test_when_tinder_refuses_the_swipe_it_is_still_stored_and_the_user_is_told(signed_in, tinder, llm):
     llm.reply = "like\nShe climbs."
     eve = suggestions(signed_in)["Eve"]
-    tinder.status = 500
+    tinder.status = 403
 
     swipe = decide(signed_in, eve, "like").json()
 

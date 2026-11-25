@@ -8,7 +8,7 @@ from app.vault import delete_token, store_token
 
 
 class FakeConnector(Connector):
-    """Supports every capability, in memory. `broken` names capabilities that raise."""
+    """Supports every capability, in memory. `broken` names capabilities the app refuses with HTTP 401."""
 
     app = "fake"
     capabilities = frozenset({"read_matches", "read_messages", "send", "like", "pass"})
@@ -19,7 +19,7 @@ class FakeConnector(Connector):
 
     def _check(self, capability):
         if capability in self.broken:
-            raise RuntimeError(f"{capability} is down")
+            raise http_error(401)
 
     def read_matches(self, token):
         self.token = token
@@ -119,11 +119,11 @@ def test_a_failing_capability_makes_the_app_copilot_only_and_raises_an_alert(db,
     with pytest.raises(CapabilityFailed) as failure:
         call(db, user_id, fake, "send", "m1", "hello")
 
-    assert isinstance(failure.value.__cause__, RuntimeError)
+    assert isinstance(failure.value.__cause__, httpx.HTTPStatusError)
     assert is_copilot_only(db, user_id, "fake")
     [alert] = alerts(db, user_id)
     assert (alert.app, alert.capability) == ("fake", "send")
-    assert alert.error == "RuntimeError"
+    assert alert.error == "HTTPStatusError 401"
     # Working capabilities stop too: the whole app is on copilot.
     with pytest.raises(CapabilityUnavailable):
         call(db, user_id, fake, "read_matches")
@@ -164,13 +164,13 @@ def http_error(status: int, url: str = "https://app.example/matches") -> httpx.H
 
 def test_a_stored_alert_holds_the_kind_of_error_and_no_match_or_profile_id(db, user_id):
     """An alert outlives a purge, so it must not name anyone: the app's URLs hold match and profile IDs."""
-    error = http_error(500, "https://app.example/matches/match-771/messages")
+    error = http_error(403, "https://app.example/matches/match-771/messages")
 
     with pytest.raises(CapabilityFailed):
         call(db, user_id, RefusingConnector(error), "read_messages", "match-771")
 
     [alert] = alerts(db, user_id)
-    assert alert.error == "HTTPStatusError 500"
+    assert alert.error == "HTTPStatusError 403"
 
 
 class RefusingConnector(FakeConnector):
@@ -197,12 +197,14 @@ def test_a_ban_signal_pauses_that_apps_autopilot_and_the_alert_names_the_reason(
 
 
 @pytest.mark.parametrize("error", [http_error(500), http_error(429), httpx.ConnectTimeout("timed out"), RuntimeError("bug")])
-def test_a_transient_error_does_not_pause_the_app(db, user_id, error):
+def test_a_transient_error_neither_pauses_the_app_nor_makes_it_copilot_only(db, user_id, error, apns):
     set_autonomy(db, user_id, "chat", "full")
 
     with pytest.raises(CapabilityFailed):
         call(db, user_id, RefusingConnector(error), "read_matches")
 
     assert autopilot_allowed(db, user_id, "fake", "chat")
-    [alert] = alerts(db, user_id)
-    assert alert.reason == "transient"
+    assert not is_copilot_only(db, user_id, "fake")
+    assert alerts(db, user_id) == []
+    # The next attempt reaches the app again, with no token resubmitted: a job's retry can succeed.
+    assert call(db, user_id, FakeConnector(), "read_matches") == [{"id": "m1", "name": "Sam"}]
