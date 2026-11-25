@@ -13,8 +13,10 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/auth.py` | `CurrentUser` and `Db` route dependencies, `create_user()` |
 | `app/cards.py` | Match cards and their messages: routes under `/cards` |
 | `app/llm.py` | `call()`, the only way to call Claude; records each call's cost |
+| `app/budget.py` | The monthly AI budget: `GET` and `PUT /budget` |
 | `app/drafts.py` | Copilot drafts for a card and the user's edits: `POST /cards/{id}/drafts`, `PATCH /drafts/{id}` |
 | `app/screenshots.py` | Screenshot copilot: `POST /screenshots` reads a shared screenshot into a card and a draft |
+| `app/reads.py` | The match read: inferences about a match, the user's corrections, card photos and the protected-trait opt-in |
 | `app/voice.py` | Questionnaire, style profile and similar past chats: routes under `/voice` |
 | `app/bios.py` | Bio and prompt rewrites per dating app: routes under `/bios` |
 | `app/preferences.py` | What the user wants, versioned: routes under `/preferences`, `current_preferences()` |
@@ -26,6 +28,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/autopilot.py` | Autonomy per job and the kill switch: `autopilot_allowed()`, `pause()`, `resume()` |
 | `app/connectors.py` | `Connector` contract, `call()`, `is_copilot_only()`, `alerts()` |
 | `app/push.py` | `send_push()` and `POST /devices` |
+| `app/review.py` | Review queue: `GET /queue`, approve and dismiss a draft, `is_hot_lead()` |
 | `app/tinder.py` | `TinderConnector`: reads matches and messages from Tinder's unofficial web API |
 | `app/sync.py` | `PUT /connectors/{app}/token` and the `sync_matches` job |
 | `migrations/versions/` | Alembic migrations |
@@ -67,6 +70,7 @@ Fixtures in `tests/conftest.py`:
 | `app` | The FastAPI app, for unauthenticated requests: `TestClient(app)`. |
 | `llm` | The stub that replaces `app.llm.complete` in every test. See "Calling Claude". |
 | `apns` | The stub that replaces `app.push.post` in every test. See "Push notifications". |
+| `jev` | The stub that replaces `app.jev.ask` in every test. See "Jev checks". |
 
 ## Authentication and tenancy
 
@@ -148,13 +152,14 @@ from app import llm
 result = llm.call(db, user.id, "draft", system="...", prompt="...")  # result.text, result.model, result.input_tokens, result.output_tokens
 ```
 
-To have Claude look at a picture, add `image=("image/png", data)` (media type and bytes). Its tokens are in the recorded input tokens.
+- To show Claude images, pass `images=[...]`. An item is an `https` URL that Claude fetches, or `("image/png", data)` (media type and bytes) to send the picture itself.
 
 - The model is read from `ANTHROPIC_MODEL` (default `claude-fable-5-2`) and the key from `ANTHROPIC_API_KEY`. Compose passes both to the API and worker.
-- Every call inserts one row in `llm_calls`: `purpose` (the third argument, naming the feature), `model`, both token counts and `cost_usd`. The row is written in the caller's transaction. `llm.spend(db, user_id)` is the user's total in USD.
+- Every call inserts one row in `llm_calls`: `purpose` (the third argument, naming the feature), `model`, both token counts and `cost_usd`. The row is written in its own transaction, so it is kept when the calling job fails. `llm.spend(db, user_id)` is the user's total for the current calendar month (UTC) in USD.
+- **AI budget:** each user has a hard monthly cap, `users.ai_budget_usd`, default 50 USD. `GET /budget` returns `{"spend_usd", "cap_usd", "paused"}` and `PUT /budget` with `{"cap_usd": 20}` sets the cap (routes in `app/budget.py`). While the month's spend is at the cap, `call()` raises `llm.BudgetReached` without calling Claude (a route answers `402`; a job retries and then fails), and the worker skips autopilot jobs with the reason `AI budget reached`. The call that reaches the cap sends the user a push. The budget pause is computed, not a row in `autopilot_pauses`: a new month or a higher cap lifts it, `POST /autopilot/resume` does not, and it is not shown by `GET /autopilot/pause`. Pauses set for other reasons are untouched. Spend can pass the cap by the cost of calls already in flight.
 - Cost is tokens times the per-model price in `llm.PRICES` (USD per million tokens). The prices are copied by hand: confirm them against Anthropic's price list. A model missing from the table is charged at the default model's price.
 - A refusal raises `RuntimeError`. Server-side fallback models are not configured.
-- Tests never reach the API: the autouse `llm` fixture in `tests/conftest.py` replaces `complete()` with a stub. Set `llm.reply` to choose the text and read `llm.prompts` to see what was sent. For a route that calls Claude more than once, set `llm.replies` to a list; it is used up first, one per call. `llm.images` holds each image sent.
+- Tests never reach the API: the autouse `llm` fixture in `tests/conftest.py` replaces `complete()` with a stub. Set `llm.reply` to choose the text and read `llm.prompts`, `llm.systems` and `llm.images` to see what was sent. For a route that calls Claude more than once, set `llm.replies` to a list; it is used up first, one per call.
 
 ## Voice
 
@@ -194,9 +199,73 @@ Routes are in `app/drafts.py`; the table is `drafts` (one row per draft).
 | `PATCH /drafts/{id}` | Store the user's edit. Body: `{"edited": "..."}`. |
 
 - A draft is `{"id", "card_id", "kind", "status", "original", "edited"}`. `original` is Claude's text and never changes; `edited` is `null` until the user edits. The text to use is `edited` if set, else `original`.
-- `status` is `pending` for every draft so far. Nothing sends a draft yet: in copilot the user copies it.
-- The prompt holds the style profile, the card's app, name and notes, the conversation, and `similar_chats()` as examples.
+- `status` is `pending` until the user approves or dismisses the draft (see "Review queue"). Nothing sends a draft yet: in copilot the user copies it.
+- The prompt holds the style profile, the card's app, name and notes, the match read (its `tone` sets the draft's tone), the conversation, and `similar_chats()` as examples.
 - The write route returns `409` until the style profile is written, and `502` if Claude's reply is empty.
+- A draft also has `guardrail` and `hot_lead`, the results of its Jev checks (see below).
+
+## Jev checks
+
+Jev is a cheap yes/no classifier reached through treg. It judges one sentence at a time and never sees the rest of the chat. All of it is in `app/jev.py`; `ask()` is the one function that calls Jev.
+
+| Function | Use it for | Returns |
+| --- | --- | --- |
+| `jev.ask(sentence, check)` | One yes/no check on one sentence. `check` is a key of `jev.CHECKS`; add a key to add a check, for example a bio dealbreaker. | `bool`. Raises `JevUnavailable` when Jev is not configured or the call fails. |
+| `jev.guardrail_hits(text)` | Draft guardrail on an outgoing message. | The checks hit, from `denies_ai`, `protected_trait`, `overpromise`. Empty means safe to send. |
+| `jev.handover_hits(text)` | Handover trigger on an incoming message. | The checks hit, from `asks_if_ai`, `logistics`, `personal_info`, `sensitive`. Empty means no handover. |
+| `jev.is_hot_lead(text)` | Hot-lead triage on a draft. | `bool`: the draft deserves a live push. |
+
+- The three functions split the text into sentences and ask about each. A check is hit if any sentence hits it.
+- Results are stored with the row. `messages.handover` is set for every new message from `them`, by `POST /cards/{id}/messages` and by `upsert_message`; it is `null` for the user's own messages. `drafts.guardrail` and `drafts.hot_lead` are set when a draft is written, and `PATCH /drafts/{id}` runs the guardrail again on the edit. The routes return these fields.
+- Never send a draft whose `guardrail` is not an empty list. Code that sends any other text must call `jev.guardrail_hits()` on it first.
+- Fail closed: when Jev is not configured or a call fails, `guardrail_hits` and `handover_hits` return `["unavailable"]`, which counts as a hit, and `is_hot_lead` returns `False`. Nothing is sent unattended without Jev.
+- The owner must set three variables for the API and the worker; Compose passes them through from your shell or `.env`. Until all three are set, every check fails closed as above.
+
+| Variable | Fill in |
+| --- | --- |
+| `JEV_BASE_URL` | The treg server, for example `https://treg.to`. |
+| `JEV_API_KEY` | Your treg token. It is sent as the `X-Treg-Token` header. |
+| `JEV_TOOL` | The treg endpoint that reaches Jev, for example `openrouter.ai-judge.decide`. |
+| `JEV_MODEL` | Optional. The Jev model, default `typesafe/jev-1.13`. |
+
+- The request is `POST {JEV_BASE_URL}/call/{JEV_TOOL}` with one question of type `noul`; the answer is read from `answers.q1.noul` (a probability; 0.5 or more is yes). This shape is copied from treg's `jev-memory` example and has not been run against the real service: confirm it with one real call before relying on the checks.
+- Jev calls are not recorded in `llm_calls`.
+- Tests never reach Jev: the autouse `jev` fixture in `tests/conftest.py` replaces `ask()`. It answers no unless the sentence contains a phrase you list, `jev.yes["logistics"] = ["saturday"]`; `jev.asked` records each call.
+
+## Review queue
+
+All in `app/review.py`. A pending draft waits in the queue until the user approves or dismisses it; editing is `PATCH /drafts/{id}`.
+
+| Route | Does |
+| --- | --- |
+| `GET /queue` | List what waits for the user, hot leads first, then oldest first. |
+| `POST /drafts/{id}/approve` | Set the draft's `status` to `approved` and return it. `409` if it is no longer pending. |
+| `POST /drafts/{id}/dismiss` | Set the draft's `status` to `dismissed` and return it. `409` if it is no longer pending. |
+
+- A queue item is `{"kind", "hot", "card_id", "card_name", "draft"}`. `kind` is `draft` so far and `draft` holds the draft; a new kind of item adds its own `kind` and may leave `draft` null.
+- `is_hot_lead(db, card_id)` is the only definition of a hot lead. So far: the match sent a message within the last hour, or Jev's hot-lead triage flagged a pending draft of the card (`drafts.hot_lead`). Add date-coordination and handover signals there.
+- `POST /cards/{id}/drafts` calls `notify_if_hot()`, which sends one push at once for a hot lead and nothing otherwise. Call it wherever else an item joins the queue.
+- Approving sends nothing yet. `hand_on_approved_draft(db, user_id, draft)` is called once per approved draft and does nothing: sending through a connector goes there.
+
+## Match read
+
+Routes are in `app/reads.py`; the tables are `inferences` (one row per card and kind) and `card_photos`. Both are keyed by card, and deleting a card deletes its rows.
+
+| Route | Does |
+| --- | --- |
+| `POST /cards/{id}/read` | Have Claude read the match from the notes, the conversation and the card's photos, and store the inferences. |
+| `GET /cards/{id}/read` | The card's inferences. Empty until a read is made. |
+| `PATCH /inferences/{id}` | Store the user's correction. Body: `{"corrected": "..."}`. |
+| `POST /cards/{id}/photos` | Attach a photo of the match by `https` URL. Body: `{"url": "..."}`. Connectors and screenshot import can insert into `card_photos` directly. |
+| `GET` and `PUT /settings/protected-trait-guesses` | Read or set the opt-in. Body: `{"enabled": true}`. Off by default. |
+
+- An inference is `{"id", "card_id", "kind", "value", "evidence", "confidence", "corrected"}`. `kind` is `texting_style`, `interests`, `values`, `photos` or `tone`; `confidence` is 0 to 1. `value` is Claude's; the value to use is `corrected` if set, else `value`.
+- A new read replaces the uncorrected inferences. A corrected one keeps its correction and gets Claude's new `value` next to it.
+- `_allowed()` checks every inference Claude replies before it is stored, and drops it when: a field is missing, the evidence is empty or the confidence is outside 0 to 1; it is about anyone but the match (`about` is not `match`); it targets an insecurity; its kind is not listed above; or it guesses a protected trait (ethnicity, religion, health, sexuality, politics) and the user has not opted in. The `about`, `protected_trait` and `targets_insecurity` labels are Claude's own, so a mislabelled inference under an allowed kind gets through.
+- With the opt-in on, a protected trait may also be its own kind (`religion` and so on). Opting out hides stored protected-trait inferences from the read and from drafts; it does not delete them.
+- With no photos on the card the read is from text only.
+- Other server code reads the card's read with `read_lines(db, user_id, card_id)`.
+- The read route returns `502` if Claude's reply is not a JSON list; the last read is kept.
 
 ## Screenshot import
 
@@ -206,7 +275,7 @@ Routes are in `app/drafts.py`; the table is `drafts` (one row per draft).
 - **Read:** Claude reads the app, the match's name and the visible messages (`llm.call` with `purpose` `screenshot`). A reply that is not usable is `502`; the client can retry.
 - **Card:** the user's card with the same app and name, ignoring case, else a new card in `matched`. An existing card keeps everything but gains messages.
 - **Messages:** the screenshot usually repeats the end of the stored chat, so only what comes after that overlap is added, through `upsert_message()`.
-- **Answer:** `201` with a draft for the card, as `POST /cards/{id}/drafts` returns it, including its `409` until the style profile is written. On any error nothing is stored.
+- **Answer:** `201` with a draft for the card, as `POST /cards/{id}/drafts` returns it, including its `409` until the style profile is written. On any error no card, message or draft is stored.
 - **Limits:** two matches with the same name on one app share a card. A screenshot of an older part of a chat is added again at the end. Message times are not read: new messages are stamped with the time of the import. The image is not kept. Reading a real screenshot with the real Claude API has not been tried; the tests use the stub.
 
 ## Preferences

@@ -74,20 +74,21 @@ def client(client_for):
 class StubLlm:
     """Stands in for `app.llm.complete`. Set `reply` to choose the text; `prompts` records what was sent.
 
-    `replies` are used up first, one per call, for a route that calls Claude more than once. `images` records
-    each `(media_type, data)` sent.
+    `systems` and `images` record the system prompt and the images of each call.
+    `replies` are used up first, one per call, for a route that calls Claude more than once.
     """
 
     def __init__(self):
         self.reply = "stub reply"
         self.replies: list[str] = []
         self.prompts: list[str] = []
-        self.images: list[tuple[str, bytes]] = []
+        self.systems: list[str] = []
+        self.images: list[list] = []
 
-    def __call__(self, system: str, prompt: str, max_tokens: int = 16000, image=None) -> Completion:
+    def __call__(self, system: str, prompt: str, max_tokens: int = 16000, images=()) -> Completion:
         self.prompts.append(prompt)
-        if image:
-            self.images.append(image)
+        self.systems.append(system)
+        self.images.append(list(images))
         text = self.replies.pop(0) if self.replies else self.reply
         return Completion(text=text, model="stub", input_tokens=1, output_tokens=1)
 
@@ -132,4 +133,25 @@ def apns(monkeypatch):
     stub = StubApns()
     stub.key = APNS_KEY  # for checking the signature of a push
     monkeypatch.setattr("app.push.post", stub)
+    return stub
+
+
+class StubJev:
+    """Stands in for `app.jev.ask`. Jev answers yes when the sentence contains a phrase listed for that check
+    in `yes`, for example `jev.yes["logistics"] = ["saturday"]`; otherwise no. `asked` records each call."""
+
+    def __init__(self):
+        self.yes: dict[str, list[str]] = {}
+        self.asked: list[tuple[str, str]] = []
+
+    def __call__(self, sentence: str, check: str) -> bool:
+        self.asked.append((sentence, check))
+        return any(phrase in sentence.lower() for phrase in self.yes.get(check, []))
+
+
+@pytest.fixture(autouse=True)
+def jev(monkeypatch):
+    """Every test gets the stub, so no test can call Jev."""
+    stub = StubJev()
+    monkeypatch.setattr("app.jev.ask", stub)
     return stub

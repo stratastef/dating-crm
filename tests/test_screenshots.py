@@ -48,7 +48,7 @@ def test_a_shared_screenshot_becomes_a_new_card_with_its_messages_and_a_draft(ap
         ("me", "is biscuit accepting visitors"),
         ("them", "do you climb indoors or outdoors"),
     ]
-    assert llm.images == [("image/png", PNG)]  # Claude was sent the picture itself
+    assert [("image/png", PNG)] in llm.images  # Claude was sent the picture itself
     assert "them: do you climb indoors or outdoors" in llm.prompts[-1]  # the draft is written from what was read
 
 

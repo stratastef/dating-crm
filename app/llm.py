@@ -2,11 +2,14 @@
 
 import base64
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 
 import anthropic
 from sqlalchemy import Connection, text
+
+from app.push import send_push
 
 DEFAULT_MODEL = "claude-fable-5-2"
 
@@ -20,6 +23,10 @@ PRICES: dict[str, tuple[Decimal, Decimal]] = {
 }
 
 
+class BudgetReached(RuntimeError):
+    """The user's Claude spend this month is at their cap: no call is made."""
+
+
 @dataclass
 class Completion:
     text: str
@@ -29,24 +36,35 @@ class Completion:
     output_tokens: int
 
 
-def complete(
-    system: str, prompt: str, max_tokens: int = 16000, image: tuple[str, bytes] | None = None
-) -> Completion:
-    """Send one prompt to Claude and return its text and token usage.
+def _source(image: str | tuple[str, bytes]) -> dict:
+    """The API's `source` for an image: a URL, or the bytes in base64."""
+    if isinstance(image, str):
+        return {"type": "url", "url": image}
+    media_type, data = image
+    return {"type": "base64", "media_type": media_type, "data": base64.standard_b64encode(data).decode()}
 
+
+def complete(
+    system: str, prompt: str, max_tokens: int = 16000, images: Sequence[str | tuple[str, bytes]] = ()
+) -> Completion:
+    """Send one prompt to Claude and return its text and token usage. Claude sees `images` before the prompt.
+
+    An image is a URL Claude fetches, or `(media_type, data)` such as `("image/png", b"...")` to send the picture.
     The model is `ANTHROPIC_MODEL` (default `claude-fable-5-2`); the key is read from `ANTHROPIC_API_KEY`.
-    `image` is `(media_type, data)`, for example `("image/png", b"...")`; Claude sees it before the prompt.
     """
-    content: str | list = prompt
-    if image:
-        media_type, data = image
-        source = {"type": "base64", "media_type": media_type, "data": base64.standard_b64encode(data).decode()}
-        content = [{"type": "image", "source": source}, {"type": "text", "text": prompt}]
     message = anthropic.Anthropic().messages.create(
         model=os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL),
         max_tokens=max_tokens,
         system=system,
-        messages=[{"role": "user", "content": content}],
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    *({"type": "image", "source": _source(image)} for image in images),
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ],
     )
     if message.stop_reason == "refusal":
         # A refusal carries no usable text. Raising lets a job retry and then fail visibly.
@@ -66,42 +84,63 @@ def call(
     system: str,
     prompt: str,
     max_tokens: int = 16000,
-    image: tuple[str, bytes] | None = None,
+    images: Sequence[str | tuple[str, bytes]] = (),
 ) -> Completion:
     """Send one prompt to Claude for a user and record what the call cost. Every feature calls Claude through this.
 
-    `purpose` names the feature, for example `draft`. The cost row is written in the caller's transaction.
-    `image` is `(media_type, data)` for Claude to look at; its tokens are part of the recorded input tokens.
+    `purpose` names the feature, for example `draft`. `images` are images to show Claude: URLs, or
+    `(media_type, data)` pairs. Raises `BudgetReached`, without calling Claude, while the user's spend this
+    month is at their cap. The call that reaches the cap sends the user a push.
     """
+    # shortcut: two calls at the same moment can both pass this check, so spend can pass the cap by the cost
+    # of the calls in flight. Lock the user row here if that ever matters.
+    if budget_reached(db, user_id):
+        raise BudgetReached("AI budget reached")
     # `complete` is looked up at call time so tests can replace it with a stub.
-    completion = complete(system, prompt, max_tokens, image=image)
+    completion = complete(system, prompt, max_tokens, images)
     # A model missing from the table is charged at the default model's price, so its cost is never zero.
     # shortcut: cache reads and writes are not priced apart, add them when a caller turns on prompt caching.
     input_price, output_price = PRICES.get(completion.model, PRICES[DEFAULT_MODEL])
     cost = (completion.input_tokens * input_price + completion.output_tokens * output_price) / 1_000_000
-    # shortcut: if the caller's transaction rolls back (a job that fails after the call), the cost row is
-    # lost with it. Write it in its own transaction if the budget cap needs failed attempts counted.
-    db.execute(
-        text(
-            """
-            INSERT INTO llm_calls (user_id, purpose, model, input_tokens, output_tokens, cost_usd)
-            VALUES (:user_id, :purpose, :model, :input_tokens, :output_tokens, :cost)
-            """
-        ),
-        {
-            "user_id": user_id,
-            "purpose": purpose,
-            "model": completion.model,
-            "input_tokens": completion.input_tokens,
-            "output_tokens": completion.output_tokens,
-            "cost": cost,
-        },
-    )
+    # Own transaction: the money is spent even if the caller (a job handler) fails later and rolls back.
+    with db.engine.begin() as own:
+        own.execute(
+            text(
+                """
+                INSERT INTO llm_calls (user_id, purpose, model, input_tokens, output_tokens, cost_usd)
+                VALUES (:user_id, :purpose, :model, :input_tokens, :output_tokens, :cost)
+                """
+            ),
+            {
+                "user_id": user_id,
+                "purpose": purpose,
+                "model": completion.model,
+                "input_tokens": completion.input_tokens,
+                "output_tokens": completion.output_tokens,
+                "cost": cost,
+            },
+        )
+        if budget_reached(own, user_id):  # spend was below the cap before this call, so the alert is sent once
+            send_push(own, user_id, "AI budget reached", "Autopilot is paused until next month or a higher cap.")
     return completion
 
 
 def spend(db: Connection, user_id: int) -> Decimal:
-    """What the user's recorded Claude calls cost in total, in USD."""
+    """What the user's recorded Claude calls cost so far this calendar month (UTC), in USD."""
     return db.execute(
-        text("SELECT coalesce(sum(cost_usd), 0) FROM llm_calls WHERE user_id = :user_id"), {"user_id": user_id}
+        text(
+            "SELECT coalesce(sum(cost_usd), 0) FROM llm_calls WHERE user_id = :user_id"
+            " AND created_at >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"
+        ),
+        {"user_id": user_id},
     ).scalar_one()
+
+
+def cap(db: Connection, user_id: int) -> Decimal:
+    """The user's hard cap on Claude spend per calendar month, in USD."""
+    return db.execute(text("SELECT ai_budget_usd FROM users WHERE id = :id"), {"id": user_id}).scalar_one()
+
+
+def budget_reached(db: Connection, user_id: int) -> bool:
+    """True while this month's spend is at the cap: no Claude call is made and autopilot is paused."""
+    return spend(db, user_id) >= cap(db, user_id)

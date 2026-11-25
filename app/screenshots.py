@@ -65,7 +65,7 @@ def import_screenshot(image: Annotated[tuple[str, bytes], Depends(_image)], user
     """
     # shortcut: Claude is called inside the request, which holds a database connection meanwhile. Move
     # to a job if imports get slow or many users share at once.
-    reply = llm.call(db, user.id, "screenshot", _SYSTEM, "Read this screenshot.", image=image).text
+    reply = llm.call(db, user.id, "screenshot", _SYSTEM, "Read this screenshot.", images=[image]).text
     try:
         # Claude sometimes wraps JSON in a code fence or a sentence; take the outermost object.
         read = _Read.model_validate_json(reply[reply.find("{") : reply.rfind("}") + 1])

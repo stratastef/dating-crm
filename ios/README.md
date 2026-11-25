@@ -13,7 +13,7 @@ The SwiftUI client for the API in the repo root. It needs Xcode 27 and an iOS 18
 | `DatingCRM/Push.swift` | `Push` (device token, tapped card) and `AppDelegate`, which receives both from UIKit. |
 | `DatingCRM.entitlements` | The push notification entitlement. |
 | `DatingCRM/API/APIClient.swift` | Every call to the server. |
-| `DatingCRM/API/Models.swift` | `Stage`, `Card`, `Message`, `Preferences`, `DashboardWeek`: the JSON the server sends. |
+| `DatingCRM/API/Models.swift` | `Stage`, `Card`, `Message`, `Inference`, `Preferences`, `DashboardWeek`: the JSON the server sends. |
 | `DatingCRM/Screens/` | One file per screen. |
 | `DatingCRM/ScreenshotImport.swift` | Uploads a shared screenshot and holds the draft or error the share extension shows. |
 | `DatingCRMShare/` | The share extension: `ShareViewController` takes the picture from the share sheet, `ScreenshotImportView` shows the result. |
@@ -69,6 +69,10 @@ After sign-in the app asks for permission to notify, gets a device token from Ap
 - Push needs a real iPhone, a paid Apple developer account and the server's `APNS_*` settings (see the root `README.md`). Run from Xcode, the app gets a sandbox token, so the server also needs `APNS_SANDBOX=1`.
 - The simulator gets no device token without an Apple account, so the tests cover only `Push`: the registration request and which card a tap opens. Not verified on a device: the permission prompt, the token arriving in `AppDelegate`, delivery of a push, and the tap opening the card on screen.
 - Signing out does not unregister the device. The phone keeps getting that user's pushes until someone else signs in on it.
+
+## Review queue
+
+"Review" on the board opens `QueueView`: the pending drafts from `GET /queue`, hot leads first. Each can be edited in place, then approved or dismissed; approve saves the edit first. Items of a kind the app does not know are skipped.
 
 ## Call the API
 
