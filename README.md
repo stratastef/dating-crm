@@ -35,7 +35,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/handover.py` | Handover: pauses a card on a handover trigger, suggested replies, take-over and hand-back, `is_paused()` |
 | `app/tinder.py` | `TinderConnector`: reads matches and messages from Tinder's unofficial web API |
 | `app/sync.py` | `PUT /connectors/{app}/token` and the `sync_matches` job |
-| `app/swipes.py` | Swipe copilot: like or pass suggestions and the user's swipes, routes under `/swipes` |
+| `app/swipes.py` | Swipe copilot (like or pass suggestions and the user's swipes, routes under `/swipes`) and swipe autopilot (the `swipe_autopilot` job) |
 | `migrations/versions/` | Alembic migrations |
 | `tests/` | pytest suite |
 | `compose.yaml` | `db`, `api` and `worker` services |
@@ -245,7 +245,7 @@ Jev is a cheap yes/no classifier reached through treg. It judges one sentence at
 | `jev.guardrail_hits(text)` | Draft guardrail on an outgoing message. | The checks hit, from `denies_ai`, `protected_trait`, `overpromise`. Empty means safe to send. |
 | `jev.handover_hits(text)` | Handover trigger on an incoming message. | The checks hit, from `asks_if_ai`, `logistics`, `personal_info`, `sensitive`. Empty means no handover. |
 | `jev.is_hot_lead(text)` | Hot-lead triage on a draft. | `bool`: the draft deserves a live push. |
-| `jev.dealbreaker_hit(bio, dealbreakers)` | Swipe pre-filter on a candidate's bio. | The first dealbreaker the bio shows, else `None`. `None` too when Jev could not be asked: the cheap model then screens the profile. |
+| `jev.dealbreaker_hit(bio, dealbreakers)` | Swipe pre-filter on a candidate's bio. | The first dealbreaker the bio shows, else `None`. `None` too when Jev could not be asked: the cheap model then screens the profile. With `strict=True` it raises `JevUnavailable` instead; swipe autopilot uses that. |
 
 - The three functions split the text into sentences and ask about each. A check is hit if any sentence hits it.
 - Results are stored with the row. `messages.handover` is set for every new message from `them`, by `POST /cards/{id}/messages` and by `upsert_message`; it is `null` for the user's own messages. `drafts.guardrail` and `drafts.hot_lead` are set when a draft is written, and `PATCH /drafts/{id}` runs the guardrail again on the edit. The routes return these fields.
@@ -377,7 +377,8 @@ A match can ask for their data to be deleted. Routes are in `app/purge.py`.
 | Route | Does |
 | --- | --- |
 | `GET /people?q=` | The caller's cards, on every app, whose name or handle (`external_id`) contains `q`, ignoring case. |
-| `POST /people/purge` | Delete the cards in `card_ids` and everything stored about them. Body: `{"card_ids": [1, 2], "confirm": "purge"}`. Returns `{"purged": 2}`. |
+| `GET /people/candidates?q=` | The caller's swipe candidates, on every app, whose name or profile ID contains `q`, ignoring case. A person the user only swiped on is a candidate, not a card. |
+| `POST /people/purge` | Delete the cards in `card_ids` and the swipe candidates in `candidate_ids`, and everything stored about them. Body: `{"card_ids": [1, 2], "candidate_ids": [7], "confirm": "purge"}`; at least one ID. Returns `{"purged": 3}`. A purged candidate's audit entries (target `candidate:<id>`) are deleted by the `swipe_candidates_purge_audit_log` trigger, and one `purge` entry is added. |
 
 - The purge cannot be undone. Without `"confirm": "purge"` the request is `422`. It runs in one transaction: if any card is not the caller's it is `404` and nothing is deleted.
 - Every table that holds data about a match must reference `cards` (directly or through another table) with `ON DELETE CASCADE`; deleting the card is the purge. `tests/test_purge.py` reads the foreign keys from the database, so a new card table fails `test_no_row_for_a_purged_person_remains_in_any_table` until that test seeds a row in it. Anything kept outside Postgres needs its own delete in `purge_people()`: today that is the Google Calendar events of the card's holds, held or confirmed, whose titles carry the match's name. No file about a match is kept on disk: `card_photos` holds URLs, an imported screenshot is not stored, and the files under `PHOTOS_DIR` are the user's own photos.
@@ -554,12 +555,23 @@ All in `app/swipes.py`; the table is `swipe_candidates` (one row per profile an 
 - **Manual swipes:** a decided row is kept with both `suggestion` and `decision`. These rows are the manual-swipe preference signal; nothing reads them yet.
 - The decision route answers with the candidate plus `applied`. `applied: false` means the app was not reached (connector unavailable or failed, see "Connectors"): the swipe is stored and the user swipes in the dating app by hand.
 - `apply_decision(db, user_id, app, profile_id, decision)` is the one function that swipes through a connector. Swipe autopilot must call it and `record_action()`. It sends a plain like or pass and never spends a paid item.
-- Not built: the swipe autonomy level is not read (a request from the user is the consent), and swiping without confirmation.
-- Not covered by find and purge: a candidate is not a card, so `POST /people/purge` leaves its row (name, bio, photo URLs) in `swipe_candidates`.
+- The copilot routes do not read the swipe autonomy level: a request from the user is the consent.
+- Find and purge: a candidate is not a card. Find it with `GET /people/candidates` and purge it with `candidate_ids` (see "Find and purge"). The dating app may offer a purged profile again; it is then stored again.
+
+## Swipe autopilot
+
+The `swipe_autopilot` job in `app/swipes.py` likes and passes without the user. It is registered as `@handler("swipe_autopilot", autopilot="swipe", every=AUTOPILOT_INTERVAL)` (1 hour) and runs for every app in `CONNECTORS`.
+
+- **Off by default.** The worker skips the job unless the user's swipe autonomy is `guardrails` or `full` (`PUT /autonomy/swipe`). The two levels act the same here.
+- **What stops it:** `autopilot_allowed(db, user_id, app, "swipe")` is asked for each app and again before each swipe. So the kill switch (all apps or one), a ban or auth pause of the app and the AI budget cap all stop it, also in the middle of a run. A failed swipe ends the run for that app (it is then copilot-only).
+- **What it swipes:** the candidates that wait in `swipe_candidates`, oldest first, by their stored suggestion. It calls the copilot's `screen()` for new candidates only when fewer wait than it may swipe. It swipes with `apply_decision()`, so a paid item is never spent.
+- **Dealbreakers are checked again before each swipe**, with `jev.dealbreaker_hit(..., strict=True)`: a hit turns a stored like into a pass. If Jev cannot be asked the profile is not swiped and waits for the user. A profile with an empty bio has nothing to check and is swiped by its suggestion.
+- **Limits:** `GET /swipes/limits` and `PUT /swipes/limits` with `{"swipes_per_run": 5, "swipes_per_day": 20}` (the defaults; columns on `users`). They count unattended swipes per app: per run of the job, and in any 24 hours. Allowed values are 1 to 10 per run and 1 to 100 per day. Keep them low: fast swiping is a ban signal.
+- **Audit:** each swipe writes one entry: type `like` or `pass`, target `candidate:<swipe_candidates.id>`, trigger `swipe autopilot: jev dealbreaker` or `swipe autopilot: model pre-screen`. The row gets `unattended = true`, so it is not counted as a manual swipe.
 
 ## Tinder connector
 
-`app/tinder.py` reads your own Tinder account with your own web session token. It supports `read_matches`, `read_messages`, `send`, `read_candidates`, `like` and `pass`. Nothing sends or swipes on its own: a message goes out only when the user taps send on a draft (see "Drafts"), and a like or pass only when the user swipes on a candidate (see "Swipe copilot"). Set `CONNECTOR_DISABLED_CAPABILITIES=tinder:send` to keep it read-only. Tinder's terms do not allow this API use; see Risks in the spec.
+`app/tinder.py` reads your own Tinder account with your own web session token. It supports `read_matches`, `read_messages`, `send`, `read_candidates`, `like` and `pass`. Nothing sends or swipes on its own: a message goes out only when the user taps send on a draft (see "Drafts"), and a like or pass only when the user swipes on a candidate (see "Swipe copilot") or, once the user turns it on, from swipe autopilot (see "Swipe autopilot"). Set `CONNECTOR_DISABLED_CAPABILITIES=tinder:send` to keep it read-only. Tinder's terms do not allow this API use; see Risks in the spec.
 
 ### Capture and submit your token
 
