@@ -27,6 +27,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/connectors.py` | `Connector` contract, `call()`, `is_copilot_only()`, `alerts()` |
 | `app/push.py` | `send_push()` and `POST /devices` |
 | `app/review.py` | Review queue: `GET /queue`, approve and dismiss a draft, `is_hot_lead()` |
+| `app/handover.py` | Handover: pauses a card on a handover trigger, suggested replies, take-over and hand-back, `is_paused()` |
 | `app/tinder.py` | `TinderConnector`: reads matches and messages from Tinder's unofficial web API |
 | `app/sync.py` | `PUT /connectors/{app}/token` and the `sync_matches` job |
 | `migrations/versions/` | Alembic migrations |
@@ -238,10 +239,26 @@ All in `app/review.py`. A pending draft waits in the queue until the user approv
 | `POST /drafts/{id}/approve` | Set the draft's `status` to `approved` and return it. `409` if it is no longer pending. |
 | `POST /drafts/{id}/dismiss` | Set the draft's `status` to `dismissed` and return it. `409` if it is no longer pending. |
 
-- A queue item is `{"kind", "hot", "card_id", "card_name", "draft"}`. `kind` is `draft` so far and `draft` holds the draft; a new kind of item adds its own `kind` and may leave `draft` null.
-- `is_hot_lead(db, card_id)` is the only definition of a hot lead. So far: the match sent a message within the last hour, or Jev's hot-lead triage flagged a pending draft of the card (`drafts.hot_lead`). Add date-coordination and handover signals there.
+- A queue item is `{"kind", "hot", "card_id", "card_name", "draft", "suggestions"}`. For kind `draft`, `draft` holds the draft. For kind `handover` (a card whose handover is pending, see "Handover"), `suggestions` holds the suggested replies and `draft` is null. A new kind of item adds its own `kind`.
+- `is_hot_lead(db, card_id)` is the only definition of a hot lead. So far: the match sent a message within the last hour, Jev's hot-lead triage flagged a pending draft of the card (`drafts.hot_lead`), or the card's handover is pending. Add the date-coordination signal there.
 - `POST /cards/{id}/drafts` calls `notify_if_hot()`, which sends one push at once for a hot lead and nothing otherwise. Call it wherever else an item joins the queue.
 - Approving sends nothing yet. `hand_on_approved_draft(db, user_id, draft)` is called once per approved draft and does nothing: sending through a connector goes there.
+
+## Handover
+
+All in `app/handover.py`. When a new message from the match hits the handover trigger (`messages.handover` is not empty, see "Jev checks"), autopilot is paused for that card only and the user gets a push with suggested replies.
+
+| Route | Does |
+| --- | --- |
+| `POST /cards/{id}/take-over` | Keep the chat manual until `hand-back`. Returns `{"handover", "handover_suggestions"}`. |
+| `POST /cards/{id}/hand-back` | End the pause, pending or taken over. Returns the same two fields. |
+
+- A card has `handover` and `handover_suggestions`. `handover` is null (autopilot may chat), `pending` (a trigger hit and the user has not answered) or `taken_over`. A new message from `me` ends `pending`; only `hand-back` ends `taken_over`.
+- Before autopilot sends to a card, it must call `handover.is_paused(db, card_id)` and send nothing when it is true. This is next to `autopilot_allowed()`, which knows apps and jobs but not cards.
+- `POST /cards/{id}/messages` and `upsert_message` call `handover.incoming()` for a message from `them` and `handover.answered()` for one from `me`. Code that adds messages another way must call them too.
+- Suggested replies: one Claude call (purpose `handover`) writes up to three. Each goes through `jev.guardrail_hits()` and is dropped on any hit, so no suggestion denies being AI. There are none when Jev is unavailable, the AI budget is reached or Claude fails; the card is paused and the push is sent all the same.
+- The push goes through `notify_if_hot()`; a pending handover is a hot lead. Its body is the suggestions, one per line.
+- A hit on a message that is not the card's newest does nothing. A hit on a message older than a day pauses the card without a Claude call or a push, so a first sync of old chats costs nothing and sends nothing. A hit on a card that is already paused changes nothing.
 
 ## Preferences
 
