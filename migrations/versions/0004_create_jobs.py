@@ -1,7 +1,7 @@
 """create jobs table
 
-Revision ID: 0008_jobs
-Revises: 0001
+Revision ID: 0004_jobs
+Revises: 0003_token_vault
 """
 
 import sqlalchemy as sa
@@ -10,8 +10,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 from app.tenancy import user_id_column
 
-revision = "0008_jobs"
-down_revision = "0001"
+revision = "0004_jobs"
+down_revision = "0003_token_vault"
 branch_labels = None
 depends_on = None
 

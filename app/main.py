@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.audit import router as audit_router
 from app.auth import CurrentUser, Db
 from app.db import database_url
 from app.jobs import enqueue
@@ -38,5 +39,7 @@ def create_app(url: str | None = None) -> FastAPI:
         if not row:
             raise HTTPException(status_code=404, detail="job not found")
         return dict(row._mapping)
+
+    app.include_router(audit_router)
 
     return app
