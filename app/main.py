@@ -5,10 +5,13 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.audit import router as audit_router
 from app.auth import CurrentUser, Db
 from app.autopilot import router as autopilot_router
+from app.bios import router as bios_router
 from app.cards import router as cards_router
 from app.db import database_url
 from app.jobs import enqueue
 from app.sync import router as sync_router
+from app.voice import router as voice_router
+from app.settings import router as settings_router
 
 
 def create_app(url: str | None = None) -> FastAPI:
@@ -45,7 +48,10 @@ def create_app(url: str | None = None) -> FastAPI:
 
     app.include_router(audit_router)
     app.include_router(autopilot_router)
+    app.include_router(bios_router)
     app.include_router(cards_router)
     app.include_router(sync_router)
+    app.include_router(voice_router)
+    app.include_router(settings_router)
 
     return app

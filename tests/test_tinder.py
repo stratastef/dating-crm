@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import text
 
 from app.connectors import alerts, call
-from app.jobs import run_once
+from app.jobs import enqueue_recurring, run_once
 from app.sync import SYNC_INTERVAL
 from app.tinder import TinderConnector
 from app.vault import read_token, store_token
@@ -119,8 +119,16 @@ def messages(client, card) -> list[tuple]:
     return [(row["external_id"], row["sender"], row["body"]) for row in rows]
 
 
+def run_jobs(app, now=None):
+    while run_once(app.state.engine, now=now):
+        pass
+
+
 def sync_again(app):
-    assert run_once(app.state.engine, now=datetime.now(UTC) + SYNC_INTERVAL) is True
+    """What the worker does once the sync interval has passed."""
+    later = datetime.now(UTC) + SYNC_INTERVAL + timedelta(seconds=1)
+    enqueue_recurring(app.state.engine, now=later)
+    run_jobs(app, now=later)
 
 
 def test_the_submitted_token_is_stored_in_the_vault_and_not_echoed(client, app):
@@ -140,7 +148,7 @@ def test_a_token_for_an_app_without_a_connector_is_refused(client):
 def test_first_sync_puts_new_matches_in_matched_and_matches_with_messages_in_chatting(client, app, tinder):
     submit_token(client)
 
-    assert run_once(app.state.engine) is True
+    run_jobs(app)
 
     synced = cards(client)
     assert {name: (card["external_id"], card["stage"]) for name, card in synced.items()} == {
@@ -157,7 +165,7 @@ def test_first_sync_puts_new_matches_in_matched_and_matches_with_messages_in_cha
 
 def test_a_later_sync_adds_what_is_new_without_duplicates(client, app, tinder):
     submit_token(client)
-    run_once(app.state.engine)
+    run_jobs(app)
     tinder.later = True
 
     sync_again(app)
@@ -178,7 +186,7 @@ def test_a_later_sync_adds_what_is_new_without_duplicates(client, app, tinder):
 
 def test_sync_keeps_the_stage_and_notes_the_user_set(client, app, tinder):
     submit_token(client)
-    run_once(app.state.engine)
+    run_jobs(app)
     before = cards(client)
     client.patch(f"/cards/{before['Cleo']['id']}", json={"stage": "number_swapped", "notes": "likes climbing"})
     client.patch(f"/cards/{before['Ana']['id']}", json={"stage": "archived"})
@@ -193,7 +201,7 @@ def test_sync_keeps_the_stage_and_notes_the_user_set(client, app, tinder):
 
 def test_messages_are_fetched_only_for_matches_with_a_new_message(client, app, tinder):
     submit_token(client)
-    run_once(app.state.engine)
+    run_jobs(app)
     assert tinder.paths().count(f"/v2/matches/{CLEO}/messages") == 1
 
     sync_again(app)  # nothing changed on Tinder
@@ -201,26 +209,50 @@ def test_messages_are_fetched_only_for_matches_with_a_new_message(client, app, t
     assert [path for path in tinder.paths() if path.endswith("/messages")] == [f"/v2/matches/{CLEO}/messages"]
 
 
-def test_sync_runs_again_on_a_schedule_and_only_once_per_interval(client, app, tinder):
+def test_sync_runs_again_only_once_the_interval_has_passed(client, app, tinder):
     submit_token(client)
-    submit_token(client)  # a second submit must not start a second schedule
-    while run_once(app.state.engine):
-        pass
-    soon = datetime.now(UTC) + SYNC_INTERVAL - timedelta(minutes=1)
-    assert run_once(app.state.engine, now=soon) is False
+    run_jobs(app)
     requests_so_far = len(tinder.requests)
 
-    due = datetime.now(UTC) + SYNC_INTERVAL
-    assert run_once(app.state.engine, now=due) is True
-    assert run_once(app.state.engine, now=due) is False
+    soon = datetime.now(UTC) + SYNC_INTERVAL - timedelta(minutes=1)
+    enqueue_recurring(app.state.engine, now=soon)
+    run_jobs(app, now=soon)
+    assert len(tinder.requests) == requests_so_far
+
+    sync_again(app)
     assert len(tinder.requests) > requests_so_far
+
+
+def test_the_recurring_sync_does_nothing_for_a_user_without_a_token(client, app, tinder):
+    sync_again(app)
+
+    assert tinder.requests == []
+    assert cards(client) == {}
+    with app.state.engine.begin() as db:
+        assert db.execute(text("SELECT status FROM jobs WHERE kind = 'sync_matches'")).scalars().all() == ["done"]
+        assert alerts(db, db.execute(text("SELECT id FROM users")).scalar_one()) == []
+
+
+def test_a_synced_message_counts_like_one_added_by_hand(client, app, tinder):
+    submit_token(client)
+    run_jobs(app)
+    with app.state.engine.begin() as db:
+        # My synced message queued a rewrite of the style profile.
+        assert db.execute(text("SELECT count(*) FROM jobs WHERE kind = 'voice_profile'")).scalar_one() == 1
+        db.execute(text("UPDATE cards SET stalled_at = now() WHERE name = 'Cleo'"))
+    assert cards(client)["Cleo"]["stalled"] is True
+    tinder.later = True
+
+    sync_again(app)  # Cleo replied
+
+    assert cards(client)["Cleo"]["stalled"] is False
 
 
 def test_each_user_gets_only_their_own_matches(client_for, app, tinder):
     alice, bob = client_for("alice@example.com"), client_for("bob@example.com")
     submit_token(alice)
 
-    run_once(app.state.engine)
+    run_jobs(app)
 
     assert len(cards(alice)) == 3
     assert cards(bob) == {}
@@ -230,7 +262,7 @@ def test_a_rejected_token_falls_back_to_copilot_without_leaking_the_token(client
     caplog.set_level(logging.DEBUG)
     submit_token(client, "expired-session-secret")
 
-    run_once(app.state.engine)
+    run_jobs(app)
 
     assert cards(client) == {}
     with app.state.engine.begin() as db:
@@ -244,9 +276,9 @@ def test_a_rejected_token_falls_back_to_copilot_without_leaking_the_token(client
 
 def test_submitting_a_fresh_token_turns_the_connector_back_on(client, app, tinder):
     submit_token(client, "expired-session-secret")
-    run_once(app.state.engine)
+    run_jobs(app)
 
     submit_token(client)
-    run_once(app.state.engine)
+    run_jobs(app)
 
     assert len(cards(client)) == 3

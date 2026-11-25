@@ -1,5 +1,5 @@
-"""Read sync: a submitted session token starts a `sync_matches` job that copies an app's matches and
-messages into cards, then queues its own next run."""
+"""Read sync: the recurring `sync_matches` job copies each app's matches and messages into cards.
+Submitting a session token also runs it at once."""
 
 from datetime import timedelta
 
@@ -9,7 +9,7 @@ from sqlalchemy import Connection, text
 
 from app.auth import CurrentUser, Db
 from app.cards import has_message, upsert_card, upsert_message
-from app.connectors import Connector, call
+from app.connectors import CapabilityUnavailable, Connector, call
 from app.jobs import enqueue, handler
 from app.tinder import TinderConnector
 from app.vault import store_token
@@ -39,10 +39,22 @@ def submit_token(app: str, session: SessionToken, user: CurrentUser, db: Db) -> 
     enqueue(db, user.id, "sync_matches", {"app": app})
 
 
-@handler("sync_matches")
+@handler("sync_matches", every=SYNC_INTERVAL)
 def sync_matches(db: Connection, user_id: int, payload: dict) -> None:
-    """Copy the app's matches and new messages into the user's cards. Safe to run twice."""
-    app = payload["app"]
+    """Copy matches and new messages into the user's cards. Safe to run twice.
+
+    It syncs the app in `payload["app"]`, or every app with a connector when the payload names none, which is
+    how the recurring run is queued.
+    """
+    for app in [payload["app"]] if "app" in payload else CONNECTORS:
+        try:
+            _sync_app(db, user_id, app)
+        except CapabilityUnavailable:
+            # No token, copilot-only or switched off: nothing to sync. The recurring job runs for every user.
+            continue
+
+
+def _sync_app(db: Connection, user_id: int, app: str) -> None:
     connector = CONNECTORS[app]()
     for match in call(db, user_id, connector, "read_matches"):
         card_id = upsert_card(db, user_id, app, match["id"], match["name"])
@@ -55,17 +67,3 @@ def sync_matches(db: Connection, user_id: int, payload: dict) -> None:
             upsert_message(
                 db, user_id, card_id, message["id"], message["sender"], message["body"], message["sent_at"]
             )
-
-    # shortcut: the job queues its own next run, so the schedule stops when a run fails 5 times (submitting a
-    # token restarts it). Replace with the queue's recurring jobs when it has them.
-    # This job is still `queued` while it runs, so a count above 1 means another run is already waiting.
-    waiting = db.execute(
-        text(
-            "SELECT count(*) FROM jobs WHERE user_id = :user_id AND kind = 'sync_matches'"
-            " AND status = 'queued' AND payload ->> 'app' = :app"
-        ),
-        {"user_id": user_id, "app": app},
-    ).scalar_one()
-    if waiting <= 1:
-        run_at = db.execute(text("SELECT now() + :interval"), {"interval": SYNC_INTERVAL}).scalar_one()
-        enqueue(db, user_id, "sync_matches", {"app": app}, run_at=run_at)

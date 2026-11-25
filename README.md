@@ -8,10 +8,14 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | --- | --- |
 | `app/main.py` | FastAPI app factory `create_app()` |
 | `app/worker.py` | Worker process entry point |
-| `app/jobs.py` | Job queue: `enqueue()`, `@handler`, `run_once()` |
+| `app/jobs.py` | Job queue: `enqueue()`, `@handler`, `run_once()`, `enqueue_recurring()` |
 | `app/db.py` | `database_url()`, read from `DATABASE_URL` |
 | `app/auth.py` | `CurrentUser` and `Db` route dependencies, `create_user()` |
 | `app/cards.py` | Match cards and their messages: routes under `/cards` |
+| `app/llm.py` | `complete()`, the only function that calls Claude |
+| `app/voice.py` | Questionnaire, style profile and similar past chats: routes under `/voice` |
+| `app/bios.py` | Bio and prompt rewrites per dating app: routes under `/bios` |
+| `app/settings.py` | User settings: `GET` and `PATCH /settings` |
 | `app/tenancy.py` | `user_id_column()` for tenant tables |
 | `app/vault.py` | `store_token()`, `read_token()`, `delete_token()` for encrypted dating-app session tokens |
 | `app/audit.py` | `record_action()` and `GET /audit-log` |
@@ -22,6 +26,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `migrations/versions/` | Alembic migrations |
 | `tests/` | pytest suite |
 | `compose.yaml` | `db`, `api` and `worker` services |
+| `ios/` | SwiftUI app. See [ios/README.md](ios/README.md). |
 
 Requirements: Docker, [uv](https://docs.astral.sh/uv/). Python 3.12 is pinned in `.python-version`.
 
@@ -55,6 +60,7 @@ Fixtures in `tests/conftest.py`:
 | `client` | `TestClient` authenticated as a fresh user. All tables are emptied after each test. |
 | `client_for(email)` | Same, for a named user. Use it when a test needs two users. |
 | `app` | The FastAPI app, for unauthenticated requests: `TestClient(app)`. |
+| `llm` | The stub that replaces `app.llm.complete` in every test. See "Calling Claude". |
 
 ## Authentication and tenancy
 
@@ -92,6 +98,8 @@ A card is one match. Routes are in `app/cards.py`; tables are `cards` and `messa
 | `GET /cards/{id}/messages` | List the card's messages by `sent_at`. |
 
 - `stage` is one of `matched`, `chatting`, `number_swapped`, `date_set`, `dated`, `seeing_them`, `archived`. Anything else is `422`. `stage_changed_at` on the card is the time of the last stage change; there is no stage history table.
+- Stalled is a flag on the card, not a stage. The hourly `mark_stalled` job sets `stalled: true` on a card in `chatting`, `number_swapped` or `date_set` whose last message, from either side, is older than the user's `stalled_after_days` (a card with no messages counts from `stage_changed_at`). A stalled card has `suggested_actions: ["revive", "archive"]`; otherwise the list is empty. A new message from `them` clears the flag, and so does moving the card out of those three stages; archive is `PATCH /cards/{id}` with `stage: archived`.
+- `GET /settings` and `PATCH /settings` read and change the user's settings. `stalled_after_days` is a whole number of days, at least 1, default 3.
 - `app` is free text, for example `tinder` or `hinge`.
 - `external_id` is the ID the dating app gives the match or message. It is unique per user and app for cards, and per card for messages; a duplicate is `409`. Rows without one are never duplicates.
 
@@ -114,7 +122,57 @@ def sync_matches(db: Connection, user_id: int, payload: dict) -> None: ...
 
 `db` is the job's own transaction. If the handler raises, its writes are rolled back and the job is retried after 30s, 1m, 2m and 4m. After 5 attempts its status is `failed` and `last_error` holds the exception. Workers claim jobs with `FOR UPDATE SKIP LOCKED`, so several workers can run. A worker that crashes mid-job releases it, so make handlers safe to run twice.
 
-In a test, call `run_once(app.state.engine)` to run the next due job; pass `now=` to move the clock. `POST /jobs/ping` queues a no-op job and `GET /jobs/{id}` returns its `status` (`queued`, `done`, `failed` or `skipped`) and `last_error`.
+A recurring job is a handler with `every=`. The worker calls `enqueue_recurring()` on each poll, which queues the job for every user who has none queued and none scheduled within the last interval. Users created later are picked up on the next poll.
+
+```python
+@handler("mark_stalled", every=timedelta(hours=1))
+def mark_stalled(db: Connection, user_id: int, payload: dict) -> None: ...
+```
+
+In a test, call `enqueue_recurring(app.state.engine)` to queue the recurring jobs, and `run_once(app.state.engine)` to run the next due job; pass `now=` to move the clock. `POST /jobs/ping` queues a no-op job and `GET /jobs/{id}` returns its `status` (`queued`, `done`, `failed` or `skipped`) and `last_error`.
+
+## Calling Claude
+
+All Claude calls go through one function, `complete()` in `app/llm.py`, which uses the `anthropic` SDK. Call it through the module so tests can replace it:
+
+```python
+from app import llm
+
+result = llm.complete(system="...", prompt="...")  # result.text, result.model, result.input_tokens, result.output_tokens
+```
+
+- The model is read from `ANTHROPIC_MODEL` (default `claude-fable-5-2`) and the key from `ANTHROPIC_API_KEY`. Compose passes both to the API and worker.
+- Every call returns its token usage. Nothing stores it yet.
+- A refusal raises `RuntimeError`. Server-side fallback models are not configured.
+- Tests never reach the API: the autouse `llm` fixture in `tests/conftest.py` replaces `complete()` with a stub. Set `llm.reply` to choose the text and read `llm.prompts` to see what was sent.
+
+## Voice
+
+Routes and the job are in `app/voice.py`; the table is `voice_profiles` (one row per user).
+
+| Route | Does |
+| --- | --- |
+| `PUT /voice/questionnaire` | Replace the questionnaire answers. Body: `{"answers": {"<question>": "<answer>"}}`. |
+| `GET /voice` | Read `answers` and `profile`. `profile` is `null` until the worker has written it. |
+| `GET /cards/{id}/similar-chats?limit=` | Past chats that led to a date, most similar to this card's conversation first. `limit` defaults to 3. |
+
+- The `voice_profile` job writes the style profile from the answers and the user's own messages (the newest 200). Saving answers and `POST /cards/{id}/messages` with `sender: me` queue it. Code that stores messages another way must call `queue_profile(db, user_id)`.
+- A chat led to a date if its card's stage is `date_set`, `dated` or `seeing_them`.
+- Similarity is `similarity()` from the Postgres `pg_trgm` extension over the whole chat text, so it measures shared wording, not meaning. Other code calls `similar_chats(db, user_id, card_id, limit)`.
+
+## Bios
+
+Routes are in `app/bios.py`; the table is `bios` (one row per user and app). A bio is `{"bio": "...", "prompts": {"<prompt>": "<answer>"}}`.
+
+| Route | Does |
+| --- | --- |
+| `POST /bios/{app}/rewrite` | Rewrite the bio in the body for that app from the style profile. Returns the rewrite and stores nothing. |
+| `PUT /bios/{app}` | Store the version the user accepted for that app, replacing the previous one. |
+| `GET /bios/{app}` | Read the accepted version. Empty until one is accepted. |
+
+- To regenerate, call the rewrite route again. To regenerate from an edit, send the edited text as the body.
+- The rewrite route returns `409` until the style profile is written, and `502` if Claude's reply is not a bio; the client can retry.
+- Nothing is written to a dating app: in copilot the user copies the accepted text.
 
 ## Session token vault
 
@@ -195,7 +253,7 @@ Test a connector's callers with a fake like `FakeConnector` in `tests/test_conne
 `app/sync.py` copies an app's matches and messages into cards. It works for every connector listed in `CONNECTORS` there.
 
 - **Start:** `PUT /connectors/{app}/token` with `{"token": "..."}` stores the token in the vault, deletes the user's alerts for the app (so the connector is on again) and queues a `sync_matches` job with payload `{"app": app}`. It returns `204`, or `404` if the app has no connector.
-- **Schedule:** each run queues the next one `SYNC_INTERVAL` (15 minutes) later. The job queue has no recurring jobs, so this chain is the schedule. It stops when a run fails 5 times, for example after the token expires. Submit a token again to restart it.
+- **Schedule:** `sync_matches` is a recurring job (`every=SYNC_INTERVAL`, 15 minutes). The recurring run has an empty payload and syncs every app in `CONNECTORS`. It skips an app, without failing, when the user has no token for it, the app is copilot-only or a read capability is switched off.
 - **Cards:** a new match becomes a card in `matched`. `upsert_card()` in `app/cards.py` finds the card by `external_id`; on a later sync it changes only the name.
 - **Messages:** `upsert_message()` adds a message unless the card already has its `external_id`. A new message moves a card from `matched` to `chatting`. Sync never changes any other stage.
 - **Fewer requests:** sync reads a match's messages only when the match has messages and its newest one is not stored yet.
@@ -220,7 +278,7 @@ curl -X PUT http://localhost:8000/connectors/tinder/token \
   -d '{"token": "<the X-Auth-Token value>"}'
 ```
 
-The worker syncs within a second and then every 15 minutes. Check with `GET /cards?app=tinder`. The token is a password for your Tinder account: do not paste it anywhere else. When Tinder logs the web session out, sync fails, the app becomes copilot-only and an alert is stored; repeat the steps to resume.
+The worker syncs within a second and then every 15 minutes. Check with `GET /cards?app=tinder`. The token is a password for your Tinder account: do not paste it anywhere else. When Tinder logs the web session out, one sync fails, the app becomes copilot-only and an alert is stored. Later syncs skip Tinder until you repeat the steps.
 
 ### Assumptions to confirm against your real account
 

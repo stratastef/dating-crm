@@ -9,10 +9,12 @@ import time
 from sqlalchemy import create_engine, text
 
 from app.db import database_url
-from app.jobs import run_once
+from app.jobs import enqueue_recurring, run_once
 
 # Import every module that registers job handlers here, so the worker knows them.
 import app.sync  # noqa: F401
+import app.voice  # noqa: F401
+import app.cards  # noqa: F401  (mark_stalled)
 
 log = logging.getLogger("worker")
 
@@ -27,6 +29,7 @@ def main() -> None:
     log.info("worker started, database reachable")
     while True:
         try:
+            enqueue_recurring(engine)
             idle = not run_once(engine)
         except Exception:  # database unreachable: keep the worker alive and try again
             log.exception("could not poll for jobs")

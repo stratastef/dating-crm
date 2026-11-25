@@ -20,20 +20,46 @@ _handlers: dict[str, Handler] = {}
 _autopilot_jobs: dict[str, Job] = {}  # job kind -> the autonomy job it acts for
 
 
-def handler(kind: str, autopilot: Job | None = None) -> Callable[[Handler], Handler]:
+_recurring: dict[str, timedelta] = {}  # job kind -> how often it runs for each user
+
+
+def handler(
+    kind: str, autopilot: Job | None = None, every: timedelta | None = None
+) -> Callable[[Handler], Handler]:
     """Register the function that runs jobs of this kind: `@handler("sync_matches")`.
 
     `autopilot="chat"` marks an autopilot job: the worker skips it unless `autopilot_block()` allows it for
     the app in `payload["app"]`.
+
+    With `every=`, the job is recurring: `enqueue_recurring()` queues it for each user once per interval.
     """
 
     def register(function: Handler) -> Handler:
         _handlers[kind] = function
         if autopilot:
             _autopilot_jobs[kind] = autopilot
+        if every:
+            _recurring[kind] = every
         return function
 
     return register
+
+
+def enqueue_recurring(engine: Engine, now: datetime | None = None) -> None:
+    """Queue each recurring job for every user who has none queued and none scheduled within the last interval."""
+    with engine.begin() as db:
+        now = now or db.execute(text("SELECT now()")).scalar_one()
+        for kind, every in _recurring.items():
+            # shortcut: two workers polling at once can queue the same job twice, and one row is kept per run;
+            # add a unique index on queued (user_id, kind) and prune `done` rows if either starts to matter.
+            db.execute(
+                text(
+                    "INSERT INTO jobs (user_id, kind, payload, run_at) SELECT id, :kind, '{}', :now FROM users u"
+                    " WHERE NOT EXISTS (SELECT 1 FROM jobs j WHERE j.user_id = u.id AND j.kind = :kind"
+                    " AND (j.status = 'queued' OR j.run_at > :since))"
+                ),
+                {"kind": kind, "now": now, "since": now - every},
+            )
 
 
 def enqueue(
