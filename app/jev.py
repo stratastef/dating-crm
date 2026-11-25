@@ -117,6 +117,12 @@ def handover_hits(message: str) -> list[str]:
     return _hits(message, HANDOVER)
 
 
+def names_logistics(message: str) -> bool:
+    """Whether an outgoing message is about a time, a place to meet or exclusivity. True when Jev could not be
+    asked. Autopilot must not send such a text alone: the user, or a slot from the calendar, settles a date."""
+    return bool(_hits(message, ("logistics",)))
+
+
 def is_hot_lead(message: str) -> bool:
     """Hot-lead triage for a draft: whether it deserves a live push. False when Jev could not be asked."""
     try:

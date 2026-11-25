@@ -9,6 +9,7 @@ from app.bios import router as bios_router
 from app.calendar import router as calendar_router
 from app.budget import budget_reached_response, router as budget_router
 from app.cards import router as cards_router
+from app.chat_autopilot import router as chat_autopilot_router
 from app.dashboard import router as dashboard_router
 from app.db import database_url
 from app.drafts import router as drafts_router
@@ -67,6 +68,7 @@ def create_app(url: str | None = None) -> FastAPI:
     app.include_router(budget_router)
     app.add_exception_handler(BudgetReached, budget_reached_response)
     app.include_router(cards_router)
+    app.include_router(chat_autopilot_router)
     app.include_router(dashboard_router)
     app.include_router(drafts_router)
     app.include_router(photos_router)

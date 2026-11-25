@@ -18,6 +18,7 @@ x-app: &app
     JEV_API_KEY: ${JEV_API_KEY:-}
     JEV_TOOL: ${JEV_TOOL:-}
     JEV_MODEL: ${JEV_MODEL:-}
+    USER_TIMEZONE: ${USER_TIMEZONE:-}
     PHOTOS_DIR: /data/photos
   volumes:
     - photos:/data/photos
