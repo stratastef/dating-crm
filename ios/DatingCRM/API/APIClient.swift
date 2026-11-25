@@ -41,6 +41,12 @@ struct APIClient {
         try await send("PATCH", "drafts/\(draftID)", body: Self.encoder.encode(["edited": text]))
     }
 
+    /// Approves a draft: the server queues it and its worker sends it through the dating app. `409` means the
+    /// server refused: the app is paused, sending is off for it, or the draft was already sent.
+    func sendDraft(draftID: Int) async throws {
+        try await data("POST", "drafts/\(draftID)/send")
+    }
+
     func card(id: Int) async throws -> Card {
         try await send("GET", "cards/\(id)")
     }

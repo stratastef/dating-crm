@@ -14,6 +14,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/cards.py` | Match cards and their messages: routes under `/cards` |
 | `app/llm.py` | `call()`, the only way to call Claude; records each call's cost |
 | `app/drafts.py` | Copilot drafts for a card and the user's edits: `POST /cards/{id}/drafts`, `PATCH /drafts/{id}` |
+| `app/send.py` | Sending a draft: `POST /drafts/{id}/send`, `queue_send()` and the `send_draft` job |
 | `app/voice.py` | Questionnaire, style profile and similar past chats: routes under `/voice` |
 | `app/bios.py` | Bio and prompt rewrites per dating app: routes under `/bios` |
 | `app/preferences.py` | What the user wants, versioned: routes under `/preferences`, `current_preferences()` |
@@ -188,9 +189,14 @@ Routes are in `app/drafts.py`; the table is `drafts` (one row per draft).
 | --- | --- |
 | `POST /cards/{id}/drafts` | Have Claude write a draft for the card and store it. `kind` is `opener` when the card has no messages, else `reply`. |
 | `PATCH /drafts/{id}` | Store the user's edit. Body: `{"edited": "..."}`. |
+| `POST /drafts/{id}/send` | The user approves the draft: queue it for the worker to send. Returns `202` and the draft. In `app/send.py`. |
 
 - A draft is `{"id", "card_id", "kind", "status", "original", "edited"}`. `original` is Claude's text and never changes; `edited` is `null` until the user edits. The text to use is `edited` if set, else `original`.
-- `status` is `pending` for every draft so far. Nothing sends a draft yet: in copilot the user copies it.
+- `status` is `pending` until the user taps send, then `approved` (queued), `sending` (the worker is sending it) and `sent` or `failed`. A draft that was never tapped stays `pending`; the user can still copy it.
+- **Send:** the route answers `409` with the reason and queues nothing when the draft is not `pending`, the card's app is paused (the kill switch, for that app or all apps), the app has no connector, the card has no `external_id`, or `send` is unavailable (see "Connectors": not declared, switched off, copilot-only, no token).
+- **Queue a send from code:** `queue_send(db, user_id, draft_id, trigger)` in `app/send.py` is the one way to send a draft. It moves a `pending` draft to `approved` and queues a `send_draft` job in your transaction; it returns the draft, or `None` if the draft is not `pending`. `trigger` goes to the audit log. It does not check the pause or autonomy: the route checks the pause before it, and the job checks the pause again.
+- **The `send_draft` job** sends the text (`edited` if set, else `original`) with the connector's `send`, stores the message on the card under the app's message ID (so sync does not add it twice), writes an audit log entry (`type: message`, `target: card:<id>`) and sets `sent`. If the app became paused or `send` unavailable after the tap, nothing is sent and the draft goes back to `pending`.
+- **At most once:** the job commits `sending` before it calls the app. If the app answers with an error, or the worker dies before the job commits, the draft ends as `failed` and is never sent again, because the message may have gone out. A `failed` draft whose message did go out appears on the card at the next sync. To try again, write another draft.
 - The prompt holds the style profile, the card's app, name and notes, the conversation, and `similar_chats()` as examples.
 - The write route returns `409` until the style profile is written, and `502` if Claude's reply is empty.
 
@@ -261,10 +267,11 @@ Add a connector: subclass `Connector`, set `app`, declare the `capabilities` it 
 ```python
 class TinderConnector(Connector):
     app = "tinder"
-    capabilities = frozenset({"read_matches", "read_messages"})
+    capabilities = frozenset({"read_matches", "read_messages", "send"})
 
     def read_matches(self, token: str) -> list[dict]: ...
     def read_messages(self, token: str, match_id: str) -> list[dict]: ...
+    def send(self, token: str, match_id: str, text: str) -> dict: ...  # the sent message: `id`, `sent_at`
 ```
 
 Never call a connector method directly. Go through `call()`, which reads the user's token from the vault, passes it to the method and enforces the rules below:
@@ -275,7 +282,7 @@ messages = call(db, user_id, TinderConnector(), "read_messages", match_id)
 ```
 
 - **Switch a capability off:** set `CONNECTOR_DISABLED_CAPABILITIES=tinder:send,hinge:like` (comma-separated `app:capability`).
-- **Unavailable:** `call()` raises `CapabilityUnavailable` and does not touch the app when the capability is not declared, is disabled, the app is copilot-only, or the user has no stored token for the app.
+- **Unavailable:** `unavailable(db, user_id, connector, capability)` returns the reason, or `None`. `call()` raises `CapabilityUnavailable` and does not touch the app when the capability is not declared, is disabled, the app is copilot-only, or the user has no stored token for the app.
 - **Fallback to copilot:** if the connector method raises, `call()` inserts a row in `connector_alerts` (`user_id`, `app`, `capability`, `error` = `repr()` of the exception) and raises `CapabilityFailed`, with the connector's exception as `__cause__`. The row is written in its own transaction, so it survives the failed job's rollback. That row is both the alert and the fallback: `is_copilot_only(db, user_id, app)` is true while the user has any alert for the app, and every capability of that app is then unavailable for that user. `alerts(db, user_id)` lists them. Delete the user's rows for an app to re-enable its connector.
 - **Ban detection:** `classify(error)` sorts the connector's exception into `auth failure` (HTTP 401), `ban signal` (HTTP 403) or `transient` (anything else), stored in the alert's `reason`. An auth failure or ban signal also calls `pause(user_id, app, reason)` in the same transaction as the alert, so that app's autopilot stops for that user; a transient error does not pause. `GET /connectors/alerts` returns the user's alerts (`id`, `app`, `capability`, `reason`, `error`, `created_at`), newest first. A fresh token lifts the copilot-only fallback but not the pause: resume with `POST /autopilot/resume?app=...`.
 
@@ -322,7 +329,7 @@ A connector's `read_matches` returns dicts with `id`, `name`, `has_messages` and
 
 ## Tinder connector
 
-`app/tinder.py` reads your own Tinder account with your own web session token. It supports `read_matches` and `read_messages` only. Tinder's terms do not allow this API use; see Risks in the spec.
+`app/tinder.py` reads your own Tinder account with your own web session token. It supports `read_matches`, `read_messages` and `send`. Nothing sends on its own: a message goes out only when the user taps send on a draft (see "Drafts"). Set `CONNECTOR_DISABLED_CAPABILITIES=tinder:send` to keep it read-only. Tinder's terms do not allow this API use; see Risks in the spec.
 
 ### Capture and submit your token
 
@@ -355,6 +362,9 @@ The connector was built from public write-ups of the web API and was never run a
 | `GET /v2/matches/{match_id}/messages?count=60` returns `{"data": {"messages": [...], "next_page_token": "..."}}` | `read_messages` |
 | A message has `_id`, `from` (a user ID), `message` (the text) and `sent_date` (ISO 8601) | Message `external_id`, sender, body, time |
 | A message whose `from` is not `person._id` is yours | `sender` |
+| `POST https://api.gotinder.com/user/matches/{match_id}` with the JSON body `{"message": "<text>"}` sends a message (no `/v2` prefix, no other body field such as a temporary message ID) | `send` |
+| That request answers `200` with the sent message as the whole body (not wrapped in `data`), with `_id` and `sent_date` as in a read message | Message `external_id` and time. If `_id` differs from the ID a later read gives, sync adds the message a second time |
+| Any answer other than `2xx` means the message may or may not have been sent | A failed send is never retried |
 | An expired token gives HTTP `401` | Fallback to copilot |
 | One sync every 15 minutes does not trip Tinder's rate limits or bot detection | `SYNC_INTERVAL` |
 
