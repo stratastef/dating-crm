@@ -8,6 +8,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | --- | --- |
 | `app/main.py` | FastAPI app factory `create_app()` |
 | `app/worker.py` | Worker process entry point |
+| `app/jobs.py` | Job queue: `enqueue()`, `@handler`, `run_once()` |
 | `app/db.py` | `database_url()`, read from `DATABASE_URL` |
 | `app/auth.py` | `CurrentUser` and `Db` route dependencies, `create_user()` |
 | `app/cards.py` | Match cards and their messages: routes under `/cards` |
@@ -89,6 +90,27 @@ A card is one match. Routes are in `app/cards.py`; tables are `cards` and `messa
 - `stage` is one of `matched`, `chatting`, `number_swapped`, `date_set`, `dated`, `seeing_them`, `archived`. Anything else is `422`. `stage_changed_at` on the card is the time of the last stage change; there is no stage history table.
 - `app` is free text, for example `tinder` or `hinge`.
 - `external_id` is the ID the dating app gives the match or message. It is unique per user and app for cards, and per card for messages; a duplicate is `409`. Rows without one are never duplicates.
+
+## Background jobs
+
+Jobs are rows in the `jobs` table. The API enqueues them and only the worker runs them. Both functions are in `app/jobs.py`.
+
+Enqueue inside the request transaction. The job is queued only if the request commits. `run_at` is optional and schedules the job for later:
+
+```python
+job_id = enqueue(db, user.id, "sync_matches", {"app": "tinder"}, run_at=tomorrow)
+```
+
+Register one handler per kind, and import its module in `app/worker.py`:
+
+```python
+@handler("sync_matches")
+def sync_matches(db: Connection, user_id: int, payload: dict) -> None: ...
+```
+
+`db` is the job's own transaction. If the handler raises, its writes are rolled back and the job is retried after 30s, 1m, 2m and 4m. After 5 attempts its status is `failed` and `last_error` holds the exception. Workers claim jobs with `FOR UPDATE SKIP LOCKED`, so several workers can run. A worker that crashes mid-job releases it, so make handlers safe to run twice.
+
+In a test, call `run_once(app.state.engine)` to run the next due job; pass `now=` to move the clock. `POST /jobs/ping` queues a no-op job and `GET /jobs/{id}` returns its `status` (`queued`, `done` or `failed`).
 
 ## Session token vault
 
