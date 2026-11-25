@@ -15,6 +15,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/llm.py` | `complete()`, the only function that calls Claude |
 | `app/voice.py` | Questionnaire, style profile and similar past chats: routes under `/voice` |
 | `app/bios.py` | Bio and prompt rewrites per dating app: routes under `/bios` |
+| `app/preferences.py` | What the user wants, versioned: routes under `/preferences`, `current_preferences()` |
 | `app/settings.py` | User settings: `GET` and `PATCH /settings` |
 | `app/tenancy.py` | `user_id_column()` for tenant tables |
 | `app/vault.py` | `store_token()`, `read_token()`, `delete_token()` for encrypted dating-app session tokens |
@@ -173,6 +174,18 @@ Routes are in `app/bios.py`; the table is `bios` (one row per user and app). A b
 - To regenerate, call the rewrite route again. To regenerate from an edit, send the edited text as the body.
 - The rewrite route returns `409` until the style profile is written, and `502` if Claude's reply is not a bio; the client can retry.
 - Nothing is written to a dating app: in copilot the user copies the accepted text.
+
+## Preferences
+
+Routes are in `app/preferences.py`; the table is `preferences` (append-only, one row per saved version). Preferences are `{"wishes": "...", "must_haves": ["..."], "dealbreakers": ["..."]}`.
+
+| Route | Does |
+| --- | --- |
+| `GET /preferences` | The version in force, with its `version` number. Version `0` and empty until the first save. |
+| `PUT /preferences` | Store the body as the next version. Earlier versions are kept. |
+| `GET /preferences/versions` | Every version, oldest first, each with `created_at`: the moment it came into force. |
+
+Server code reads the version in force with `current_preferences(db, user_id)` from `app.preferences`; it returns `version`, `wishes`, `must_haves` and `dealbreakers`.
 
 ## Session token vault
 

@@ -42,3 +42,10 @@ struct Message: Codable, Identifiable, Hashable {
     var sender: Sender
     var body: String
 }
+
+/// What the user wants: wishes in plain words, plus must-haves and dealbreakers.
+struct Preferences: Codable, Equatable {
+    var wishes = ""
+    var mustHaves: [String] = []
+    var dealbreakers: [String] = []
+}
