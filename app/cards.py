@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, computed_field, field_validator
+from pydantic import BaseModel, Field, computed_field, field_validator
 from sqlalchemy import Connection, text
 from sqlalchemy.exc import IntegrityError
 
@@ -19,7 +19,7 @@ Stage = Literal["matched", "chatting", "number_swapped", "date_set", "dated", "s
 
 _COLUMNS = (
     "id, app, external_id, name, stage, stage_changed_at, notes, next_action, due_date, created_at,"
-    " stalled_at IS NOT NULL AS stalled"
+    " stalled_at IS NOT NULL AS stalled, date_rating, date_note"
 )
 
 # Only cards in these stages can be Stalled. Stalled is a flag (`cards.stalled_at`), not a stage.
@@ -46,6 +46,11 @@ def mark_stalled(db: Connection, user_id: int, payload: dict) -> None:
     )
 
 
+def is_good_date(rating: int | None) -> bool:
+    """The only definition of a good date: a rating of 4 or 5. An unrated date is not one."""
+    return rating is not None and rating >= 4
+
+
 class Card(BaseModel):
     id: int
     app: str
@@ -58,12 +63,19 @@ class Card(BaseModel):
     due_date: date | None
     created_at: datetime
     stalled: bool
+    date_rating: int | None
+    date_note: str | None
 
     @computed_field
     @property
     def suggested_actions(self) -> list[str]:
         """What the app offers on a Stalled card. `archive` is `PATCH /cards/{id}` with `stage: archived`."""
         return ["revive", "archive"] if self.stalled else []
+
+    @computed_field
+    @property
+    def good_date(self) -> bool:
+        return is_good_date(self.date_rating)
 
 
 class NewCard(BaseModel):
@@ -99,6 +111,8 @@ class CardChanges(BaseModel):
     notes: str | None = None
     next_action: str | None = None
     due_date: date | None = None
+    date_rating: int | None = Field(default=None, ge=1, le=5)
+    date_note: str | None = None
 
     @field_validator("name", "stage", "notes")
     @classmethod
