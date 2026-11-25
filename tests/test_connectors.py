@@ -1,6 +1,8 @@
+import httpx
 import pytest
 from sqlalchemy import text
 
+from app.autopilot import autopilot_allowed, autopilot_block, set_autonomy
 from app.connectors import CapabilityFailed, CapabilityUnavailable, Connector, alerts, call, is_copilot_only
 from app.vault import delete_token, store_token
 
@@ -153,3 +155,43 @@ def test_fallback_is_per_user_and_per_app(app, client_for):
         assert not is_copilot_only(db, alice, "tinder")
         assert not is_copilot_only(db, bob, "fake")
         assert alerts(db, bob) == []
+
+
+def http_error(status: int) -> httpx.HTTPStatusError:
+    request = httpx.Request("GET", "https://app.example/matches")
+    return httpx.HTTPStatusError(f"{status} from app", request=request, response=httpx.Response(status, request=request))
+
+
+class RefusingConnector(FakeConnector):
+    """Every capability raises `error`."""
+
+    def __init__(self, error: Exception):
+        super().__init__()
+        self.error = error
+
+    def _check(self, capability):
+        raise self.error
+
+
+def test_a_ban_signal_pauses_that_apps_autopilot_and_the_alert_names_the_reason(db, user_id):
+    set_autonomy(db, user_id, "chat", "full")
+
+    with pytest.raises(CapabilityFailed):
+        call(db, user_id, RefusingConnector(http_error(403)), "read_matches")
+
+    assert autopilot_block(db, user_id, "fake", "chat") == "autopilot paused for fake: ban signal"
+    assert autopilot_allowed(db, user_id, "tinder", "chat")
+    [alert] = alerts(db, user_id)
+    assert (alert.app, alert.reason) == ("fake", "ban signal")
+
+
+@pytest.mark.parametrize("error", [http_error(500), http_error(429), httpx.ConnectTimeout("timed out"), RuntimeError("bug")])
+def test_a_transient_error_does_not_pause_the_app(db, user_id, error):
+    set_autonomy(db, user_id, "chat", "full")
+
+    with pytest.raises(CapabilityFailed):
+        call(db, user_id, RefusingConnector(error), "read_matches")
+
+    assert autopilot_allowed(db, user_id, "fake", "chat")
+    [alert] = alerts(db, user_id)
+    assert alert.reason == "transient"
