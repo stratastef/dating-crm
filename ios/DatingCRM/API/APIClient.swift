@@ -41,6 +41,21 @@ struct APIClient {
         try await send("PATCH", "drafts/\(draftID)", body: Self.encoder.encode(["edited": text]))
     }
 
+    /// The match read of a card: empty until one is made.
+    func read(cardID: Int) async throws -> [Inference] {
+        try await send("GET", "cards/\(cardID)/read")
+    }
+
+    /// Has Claude read the match again. Corrections are kept.
+    func makeRead(cardID: Int) async throws -> [Inference] {
+        try await send("POST", "cards/\(cardID)/read")
+    }
+
+    /// Stores the user's correction of an inference. The server keeps Claude's value next to it.
+    func correct(inferenceID: Int, text: String) async throws -> Inference {
+        try await send("PATCH", "inferences/\(inferenceID)", body: Self.encoder.encode(["corrected": text]))
+    }
+
     /// Everything that waits for the user's review, hot leads first.
     func queue() async throws -> [QueueItem] {
         try await send("GET", "queue")

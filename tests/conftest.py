@@ -72,14 +72,21 @@ def client(client_for):
 
 
 class StubLlm:
-    """Stands in for `app.llm.complete`. Set `reply` to choose the text; `prompts` records what was sent."""
+    """Stands in for `app.llm.complete`. Set `reply` to choose the text; `prompts` records what was sent.
+
+    `systems` and `images` record the system prompt and the image URLs of each call.
+    """
 
     def __init__(self):
         self.reply = "stub reply"
         self.prompts: list[str] = []
+        self.systems: list[str] = []
+        self.images: list[list[str]] = []
 
-    def __call__(self, system: str, prompt: str, max_tokens: int = 16000) -> Completion:
+    def __call__(self, system: str, prompt: str, max_tokens: int = 16000, images=()) -> Completion:
         self.prompts.append(prompt)
+        self.systems.append(system)
+        self.images.append(list(images))
         return Completion(text=self.reply, model="stub", input_tokens=1, output_tokens=1)
 
 
