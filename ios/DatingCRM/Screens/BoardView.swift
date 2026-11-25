@@ -251,9 +251,9 @@ private struct BadgeView: View {
 
 // MARK: - Data the variants derive
 
-/// Who acts next on a card, in the order variant B lists the groups.
+/// Who acts next on a card, in the order variant B lists the groups: the owner wants Waiting for you first.
 private enum WhoActs: CaseIterable {
-    case autopilot, you, offApp, archived
+    case you, autopilot, offApp, archived
 
     var title: String {
         switch self {
@@ -336,6 +336,16 @@ private struct PipelineFacts {
         }
         if hasCopiedDraft(card) {
             return CardStatus(actor: .you, text: Text("Copied draft · not sent yet"))
+        }
+        // Owner's rule: a card blocked on the user is theirs whatever its stage. Due today is not blocked yet.
+        if card.stalled == true {
+            return CardStatus(actor: .you, text: Text("Stalled · revive or archive"))
+        }
+        if overdueDays(card) != nil, let action = card.nextAction {
+            return CardStatus(actor: .you, text: Text(action))
+        }
+        if card.needsDateRating {
+            return CardStatus(actor: .you, text: Text("Rate the date"))
         }
         switch card.stage {
         case .numberSwapped, .dateSet, .dated, .seeingThem:
