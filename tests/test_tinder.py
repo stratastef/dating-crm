@@ -282,3 +282,14 @@ def test_submitting_a_fresh_token_turns_the_connector_back_on(client, app, tinde
     run_jobs(app)
 
     assert len(cards(client)) == 3
+
+
+def test_a_rejected_token_pauses_tinder_autopilot_and_alerts_with_app_and_reason(client, app, tinder):
+    submit_token(client, "expired-session-secret")
+
+    run_jobs(app)
+
+    assert client.get("/autopilot/pause").json() == {"all": False, "apps": ["tinder"]}
+    [alert] = client.get("/connectors/alerts").json()
+    assert (alert["app"], alert["reason"], alert["capability"]) == ("tinder", "auth failure", "read_matches")
+    assert "expired-session-secret" not in str(alert)
