@@ -158,3 +158,16 @@ def test_editing_a_draft_runs_the_guardrail_on_the_edit(app, client, llm, jev):
     edited = client.patch(f"/drafts/{draft['id']}", json={"edited": "i am not a bot. thursday then"}).json()
 
     assert edited["guardrail"] == ["denies_ai"]
+
+
+def test_a_draft_jev_calls_a_hot_lead_is_pushed_at_once_and_is_hot_in_the_review_queue(app, client, llm, jev, apns):
+    write_profile(app, client, llm, "Short, lowercase, teasing.")
+    client.post("/devices", json={"token": "abc123"})
+    card_id = client.post("/cards", json={"app": "hinge", "name": "Sam"}).json()["id"]  # no recent reply
+    jev.yes["hot_lead"] = ["thursday"]
+
+    llm.reply = "thursday then"
+    client.post(f"/cards/{card_id}/drafts")
+
+    assert len(apns.sent) == 1
+    assert [item["hot"] for item in client.get("/queue").json()] == [True]

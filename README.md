@@ -26,6 +26,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/autopilot.py` | Autonomy per job and the kill switch: `autopilot_allowed()`, `pause()`, `resume()` |
 | `app/connectors.py` | `Connector` contract, `call()`, `is_copilot_only()`, `alerts()` |
 | `app/push.py` | `send_push()` and `POST /devices` |
+| `app/review.py` | Review queue: `GET /queue`, approve and dismiss a draft, `is_hot_lead()` |
 | `app/tinder.py` | `TinderConnector`: reads matches and messages from Tinder's unofficial web API |
 | `app/sync.py` | `PUT /connectors/{app}/token` and the `sync_matches` job |
 | `migrations/versions/` | Alembic migrations |
@@ -194,7 +195,7 @@ Routes are in `app/drafts.py`; the table is `drafts` (one row per draft).
 | `PATCH /drafts/{id}` | Store the user's edit. Body: `{"edited": "..."}`. |
 
 - A draft is `{"id", "card_id", "kind", "status", "original", "edited"}`. `original` is Claude's text and never changes; `edited` is `null` until the user edits. The text to use is `edited` if set, else `original`.
-- `status` is `pending` for every draft so far. Nothing sends a draft yet: in copilot the user copies it.
+- `status` is `pending` until the user approves or dismisses the draft (see "Review queue"). Nothing sends a draft yet: in copilot the user copies it.
 - The prompt holds the style profile, the card's app, name and notes, the conversation, and `similar_chats()` as examples.
 - The write route returns `409` until the style profile is written, and `502` if Claude's reply is empty.
 - A draft also has `guardrail` and `hot_lead`, the results of its Jev checks (see below).
@@ -226,6 +227,21 @@ Jev is a cheap yes/no classifier reached through treg. It judges one sentence at
 - The request is `POST {JEV_BASE_URL}/call/{JEV_TOOL}` with one question of type `noul`; the answer is read from `answers.q1.noul` (a probability; 0.5 or more is yes). This shape is copied from treg's `jev-memory` example and has not been run against the real service: confirm it with one real call before relying on the checks.
 - Jev calls are not recorded in `llm_calls`.
 - Tests never reach Jev: the autouse `jev` fixture in `tests/conftest.py` replaces `ask()`. It answers no unless the sentence contains a phrase you list, `jev.yes["logistics"] = ["saturday"]`; `jev.asked` records each call.
+
+## Review queue
+
+All in `app/review.py`. A pending draft waits in the queue until the user approves or dismisses it; editing is `PATCH /drafts/{id}`.
+
+| Route | Does |
+| --- | --- |
+| `GET /queue` | List what waits for the user, hot leads first, then oldest first. |
+| `POST /drafts/{id}/approve` | Set the draft's `status` to `approved` and return it. `409` if it is no longer pending. |
+| `POST /drafts/{id}/dismiss` | Set the draft's `status` to `dismissed` and return it. `409` if it is no longer pending. |
+
+- A queue item is `{"kind", "hot", "card_id", "card_name", "draft"}`. `kind` is `draft` so far and `draft` holds the draft; a new kind of item adds its own `kind` and may leave `draft` null.
+- `is_hot_lead(db, card_id)` is the only definition of a hot lead. So far: the match sent a message within the last hour, or Jev's hot-lead triage flagged a pending draft of the card (`drafts.hot_lead`). Add date-coordination and handover signals there.
+- `POST /cards/{id}/drafts` calls `notify_if_hot()`, which sends one push at once for a hot lead and nothing otherwise. Call it wherever else an item joins the queue.
+- Approving sends nothing yet. `hand_on_approved_draft(db, user_id, draft)` is called once per approved draft and does nothing: sending through a connector goes there.
 
 ## Preferences
 

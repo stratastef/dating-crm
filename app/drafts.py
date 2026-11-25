@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from app import jev, llm
+from app import jev, llm, review
 from app.auth import CurrentUser, Db
 from app.voice import similar_chats
 
@@ -83,7 +83,7 @@ def write_draft(card_id: int, user: CurrentUser, db: Db):
     original = llm.call(db, user.id, "draft", _SYSTEM, prompt).text.strip()
     if not original:
         raise HTTPException(status_code=502, detail="the draft was empty, try again")
-    return db.execute(
+    draft = db.execute(
         text(
             f"""
             INSERT INTO drafts (user_id, card_id, kind, original, guardrail, hot_lead)
@@ -100,6 +100,8 @@ def write_draft(card_id: int, user: CurrentUser, db: Db):
             "hot_lead": jev.is_hot_lead(original),
         },
     ).one()
+    review.notify_if_hot(db, user.id, card_id, card.name)
+    return draft
 
 
 @router.patch("/drafts/{draft_id}", response_model=Draft)
