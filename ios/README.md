@@ -13,7 +13,7 @@ The SwiftUI client for the API in the repo root. It needs Xcode 27 and an iOS 18
 | `DatingCRM/Push.swift` | `Push` (device token, tapped card) and `AppDelegate`, which receives both from UIKit. |
 | `DatingCRM.entitlements` | The push notification entitlement. |
 | `DatingCRM/API/APIClient.swift` | Every call to the server. |
-| `DatingCRM/API/Models.swift` | `Stage`, `Card`, `Message`, `Inference`, `Preferences`, `DashboardWeek`, `ProfilePhoto`, `PhotoEdit`, `SwipeCandidate`: the JSON the server sends. |
+| `DatingCRM/API/Models.swift` | `Stage`, `Card`, `Message`, `Inference`, `Preferences`, `DashboardWeek`, `ProfilePhoto`, `PhotoEdit`, `SwipeCandidate`, `Pauses`, `AutonomyLevel`, `Budget`: the JSON the server sends. |
 | `DatingCRM/Screens/` | One file per screen. `PhotosView` uploads photos from the photo library as JPEG, ranks them and shows each offered edit as a preview to accept or reject. The server makes every preview from the uploaded pixels. |
 | `DatingCRM/ScreenshotImport.swift` | Uploads a shared screenshot and holds the draft or error the share extension shows. |
 | `DatingCRMShare/` | The share extension: `ShareViewController` takes the picture from the share sheet, `ScreenshotImportView` shows the result. |
@@ -75,6 +75,20 @@ After sign-in the app asks for permission to notify, gets a device token from Ap
 "Review" on the board opens `QueueView`: the pending drafts from `GET /queue`, hot leads first. Each can be edited in place, then approved or dismissed; approve saves the edit first. A handover item shows its suggested replies (tap one to copy it) and a "Take over" button. A proposed paid item (Super Like, Rose, Boost; `Screens/PaidItemSection.swift`) shows the item, the reason and "Approve" and "Decline"; the server spends it only on approve, and the row says so when the dating app did not spend it. Items of a kind the app does not know are skipped.
 
 A card that is paused for handover shows the same section on top of `CardDetailView` (`Screens/HandoverSection.swift`): "Take over" while the handover is pending, "Hand back to autopilot" once the user took over.
+
+## Settings
+
+"Settings" on the board opens `SettingsView` (`Screens/SettingsView.swift`). Every switch calls the server at once and shows the state the server answers with; a failed call shows its error and leaves the switch as it was.
+
+| Section | Does | Routes |
+| --- | --- | --- |
+| Kill switch | "Pause all autopilot", and one switch per dating app the user has a card on or that is paused. A pause stops only what the server does alone. | `GET /autopilot/pause`, `POST /autopilot/pause`, `POST /autopilot/resume`, each with `?app=` for one app |
+| Autonomy | One picker per job (chat, profile, swipe): Off, Copilot, Guardrails, Full. | `GET /autonomy`, `PUT /autonomy/{job}` |
+| AI budget | This month's spend, a note when the cap is reached, and the cap to set. | `GET /budget`, `PUT /budget` |
+| Privacy | The protected-trait opt-in and the AI disclosure. | `GET` and `PUT /settings/protected-trait-guesses`, `/settings/ai-disclosure` |
+| Find and purge | Search by name or handle, tick the cards and swiped profiles of the person, type `purge`, then delete. The button works only once someone is ticked and the word is typed (`PurgeConfirmation`). | `GET /people`, `GET /people/candidates`, `POST /people/purge` |
+
+Not built: the swipe limits (`/swipes/limits`), connector alerts and the audit log have no screen.
 
 ## Swipe copilot
 

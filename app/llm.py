@@ -27,6 +27,11 @@ class BudgetReached(RuntimeError):
     """The user's Claude spend this month is at their cap: no call is made."""
 
 
+# What `call()` raises when Claude gives no usable answer: the budget cap, a refusal, or an error of the API.
+# A caller that can go on without Claude catches `llm.Failed`, and never imports `anthropic` itself.
+Failed = (RuntimeError, anthropic.AnthropicError)
+
+
 @dataclass
 class Completion:
     text: str
@@ -109,6 +114,15 @@ def call(
     # shortcut: cache reads and writes are not priced apart, add them when a caller turns on prompt caching.
     input_price, output_price = PRICES.get(completion.model, PRICES[DEFAULT_MODEL])
     cost = (completion.input_tokens * input_price + completion.output_tokens * output_price) / 1_000_000
+    record(db, user_id, purpose, completion.model, cost, completion.input_tokens, completion.output_tokens)
+    return completion
+
+
+def record(
+    db: Connection, user_id: int, purpose: str, model: str, cost: Decimal, input_tokens: int = 0, output_tokens: int = 0
+) -> None:
+    """Add what a model call cost to the user's spend. `call()` does it for Claude; a caller of another paid
+    model (Jev, see `app/jev.py`) calls it itself, after asking `budget_reached()` before its call."""
     # Own transaction: the money is spent even if the caller (a job handler) fails later and rolls back.
     with db.engine.begin() as own:
         own.execute(
@@ -121,15 +135,14 @@ def call(
             {
                 "user_id": user_id,
                 "purpose": purpose,
-                "model": completion.model,
-                "input_tokens": completion.input_tokens,
-                "output_tokens": completion.output_tokens,
+                "model": model,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
                 "cost": cost,
             },
         )
         if budget_reached(own, user_id):  # spend was below the cap before this call, so the alert is sent once
             send_push(own, user_id, "AI budget reached", "Autopilot is paused until next month or a higher cap.")
-    return completion
 
 
 def spend(db: Connection, user_id: int) -> Decimal:

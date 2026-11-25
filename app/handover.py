@@ -6,7 +6,6 @@ replies, takes over or hands back. `taken_over`: the chat stays manual until the
 
 from typing import Literal
 
-import anthropic
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import Connection, text
@@ -14,6 +13,7 @@ from sqlalchemy import Connection, text
 from app import jev, llm, review
 from app.auth import CurrentUser, Db
 from app.autopilot import autonomy_levels, autopilot_allowed
+from app.card_lookup import chat_lines, conversation, unanswered
 
 router = APIRouter()
 
@@ -28,9 +28,12 @@ _SYSTEM = (
 )
 
 
-def is_paused(db: Connection, card_id: int) -> bool:
+def is_paused(db: Connection, user_id: int, card_id: int) -> bool:
     """True while the card is paused for handover (pending or taken over): autopilot must not send to it."""
-    return db.execute(text("SELECT handover IS NOT NULL FROM cards WHERE id = :id"), {"id": card_id}).scalar_one()
+    return db.execute(
+        text("SELECT handover IS NOT NULL FROM cards WHERE id = :id AND user_id = :user_id"),
+        {"id": card_id, "user_id": user_id},
+    ).scalar_one()
 
 
 def suggest_replies(db: Connection, user_id: int, card_id: int, hits: list[str]) -> list[str]:
@@ -41,64 +44,76 @@ def suggest_replies(db: Connection, user_id: int, card_id: int, hits: list[str])
     profile = db.execute(
         text("SELECT profile FROM voice_profiles WHERE user_id = :user_id"), {"user_id": user_id}
     ).scalar_one_or_none()
-    messages = db.execute(
-        text("SELECT sender, body FROM messages WHERE card_id = :card_id ORDER BY sent_at, id"), {"card_id": card_id}
-    ).all()
     prompt = "\n".join(
         [
             f"<reasons>{', '.join(hits)}</reasons>",
             f"<style_profile>\n{profile or ''}\n</style_profile>",
             "<conversation>",
-            *(f"{sender}: {body}" for sender, body in messages),
+            *chat_lines(conversation(db, user_id, card_id)),
             "</conversation>",
         ]
     )
     try:
         reply = llm.call(db, user_id, "handover", _SYSTEM, prompt).text
-    except (RuntimeError, anthropic.AnthropicError):
+    except llm.Failed:
         return []  # budget reached, a refusal or an API error: the chat is still handed over
     lines = [line.strip() for line in reply.splitlines() if line.strip()][:MAX_SUGGESTIONS]
-    return [line for line in lines if not jev.guardrail_hits(line)]
+    # Each suggestion is also judged as the answer to what the match asked: alone, "Nope, why?" denies nothing.
+    question = " ".join(message.body for message in unanswered(db, user_id, card_id))
+    return [
+        line
+        for line in lines
+        if not jev.guardrail_hits(db, user_id, line) and not jev.answer_denies_ai(db, user_id, question, line)
+    ]
 
 
-def incoming(db: Connection, user_id: int, card_id: int, message_id: int, body: str) -> list[str]:
+def incoming(db: Connection, user_id: int, card_id: int, message_id: int, body: str) -> list[str] | None:
     """Call for each new message from the match. Runs the handover trigger, stores its result on the message
     and returns it. On a hit the card is paused for handover and the user gets a push with suggested replies.
+
+    A message the user has already answered, or one older than a day, is not checked: None is returned and
+    `messages.handover` stays null. A first sync reads whole chats, and must not pay Jev for their history.
     """
-    hits = jev.record_handover(db, message_id, body)
-    if not hits:
-        return hits
-    # Full mode coordinates a date alone (see `app/chat_autopilot.py`), so logistics alone do not hand over
-    # while it may act. Every other trigger does, in every mode.
-    app = db.execute(text("SELECT app FROM cards WHERE id = :id"), {"id": card_id}).scalar_one()
-    full = autonomy_levels(db, user_id)["chat"] == "full" and autopilot_allowed(db, user_id, app, "chat")
-    if full and hits == ["logistics"]:
-        return hits
+    # Unanswered, not newest: an app may hand over a batch newest first, so the message that hits is often
+    # stored after the ones that followed it.
     message = db.execute(
         text(
             """
             SELECT NOT EXISTS (SELECT 1 FROM messages later WHERE later.card_id = :card_id
-                               AND later.sent_at > messages.sent_at) AS newest,
+                               AND later.user_id = :user_id AND later.sender = 'me'
+                               AND later.sent_at > messages.sent_at) AS unanswered,
                    sent_at > now() - interval '1 day' AS recent
-            FROM messages WHERE id = :id
+            FROM messages WHERE id = :id AND user_id = :user_id
             """
         ),
-        {"id": message_id, "card_id": card_id},
+        {"id": message_id, "card_id": card_id, "user_id": user_id},
     ).one()
-    if not message.newest:
-        return hits  # an old message added late: the chat has moved on
-    name = db.execute(
-        text("UPDATE cards SET handover = 'pending' WHERE id = :id AND handover IS NULL RETURNING name"),
-        {"id": card_id},
-    ).scalar_one_or_none()
-    # Nothing more for a card that was paused before, and none for an old message: a first sync reads whole
-    # chats, and must not call Claude or push once per old hit.
-    if name is None or not message.recent:
+    if not (message.unanswered and message.recent):
+        return None
+    hits = jev.record_handover(db, user_id, message_id, body)
+    if not hits:
         return hits
+    # Full mode coordinates a time alone (see `app/chat_autopilot.py`), so logistics alone do not hand over
+    # while it may act. Every other trigger does, in every mode: a place or exclusivity is its own hit.
+    app = db.execute(
+        text("SELECT app FROM cards WHERE id = :id AND user_id = :user_id"), {"id": card_id, "user_id": user_id}
+    ).scalar_one()
+    full = autonomy_levels(db, user_id)["chat"] == "full" and autopilot_allowed(db, user_id, app, "chat")
+    if full and hits == ["logistics"]:
+        return hits
+    name = db.execute(
+        text(
+            "UPDATE cards SET handover = 'pending'"
+            " WHERE id = :id AND user_id = :user_id AND handover IS NULL RETURNING name"
+        ),
+        {"id": card_id, "user_id": user_id},
+    ).scalar_one_or_none()
+    if name is None:
+        return hits  # nothing more for a card that was paused before
     suggestions = suggest_replies(db, user_id, card_id, hits)
     db.execute(
-        text("UPDATE cards SET handover_suggestions = :suggestions WHERE id = :id"),
-        {"id": card_id, "suggestions": suggestions},
+        text("UPDATE cards SET handover_suggestions = :suggestions WHERE id = :id AND user_id = :user_id"),
+        {"id": card_id, "user_id": user_id, "suggestions": suggestions},
     )
     review.notify_if_hot(
         db,
@@ -111,11 +126,14 @@ def incoming(db: Connection, user_id: int, card_id: int, message_id: int, body: 
     return hits
 
 
-def answered(db: Connection, card_id: int) -> None:
+def answered(db: Connection, user_id: int, card_id: int) -> None:
     """Call for each new message from the user: their reply ends a pending handover. A taken-over card stays."""
     db.execute(
-        text("UPDATE cards SET handover = NULL, handover_suggestions = '{}' WHERE id = :id AND handover = 'pending'"),
-        {"id": card_id},
+        text(
+            "UPDATE cards SET handover = NULL, handover_suggestions = '{}'"
+            " WHERE id = :id AND user_id = :user_id AND handover = 'pending'"
+        ),
+        {"id": card_id, "user_id": user_id},
     )
 
 

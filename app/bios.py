@@ -7,6 +7,7 @@ from pydantic import BaseModel, ValidationError
 from sqlalchemy import text
 
 from app import llm
+from app.audit import record_action
 from app.auth import CurrentUser, Db
 
 router = APIRouter()
@@ -58,6 +59,7 @@ def rewrite(app: str, current: Bio, user: CurrentUser, db: Db):
 @router.put("/bios/{app}", response_model=Bio)
 def accept(app: str, accepted: Bio, user: CurrentUser, db: Db):
     """Store the version the user accepted for one app, replacing the previous one."""
+    record_action(db, user.id, type="profile_change", app=app, target="bio", trigger="copilot: user accepted a bio")
     return db.execute(
         text(
             """

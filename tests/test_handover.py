@@ -15,7 +15,8 @@ def incoming(client, card_id: int, body: str):
 
 def paused(app, card_id: int) -> bool:
     with app.state.engine.begin() as db:
-        return handover.is_paused(db, card_id)
+        user_id = db.exec_driver_sql("SELECT user_id FROM cards WHERE id = %s", (card_id,)).scalar_one()
+        return handover.is_paused(db, user_id, card_id)
 
 
 def test_a_handover_hit_pauses_autopilot_for_that_card_only(app, client, jev):
@@ -59,6 +60,17 @@ def test_no_suggestion_for_a_bot_or_ai_question_denies_being_ai(client, jev, llm
 
     assert client.get(f"/cards/{card_id}").json()["handover_suggestions"] == ["would a bot be this bad at replying"]
     assert apns.sent[0]["payload"]["aps"]["alert"]["body"] == "would a bot be this bad at replying"
+
+
+def test_no_suggestion_denies_being_ai_when_read_with_the_question_it_answers(client, jev, llm):
+    """"Nope, why?" denies nothing on its own; as the answer to "are you a bot?" it is a flat denial."""
+    jev.yes = {"asks_if_ai": ["are you a bot"], "answer_denies_ai": ["are you a bot? answer: nope"]}
+    card_id = card(client)
+    llm.reply = "Nope, why?\nwould a bot be this bad at replying"
+
+    incoming(client, card_id, "wait, are you a bot?")
+
+    assert client.get(f"/cards/{card_id}").json()["handover_suggestions"] == ["would a bot be this bad at replying"]
 
 
 def test_the_chat_is_handed_over_without_suggestions_when_claude_or_jev_cannot_be_asked(
@@ -119,19 +131,22 @@ def test_take_over_keeps_the_chat_manual_until_the_user_hands_it_back(app, clien
     assert not paused(app, card_id)
 
 
-def test_an_old_hit_from_a_first_sync_pauses_the_card_without_a_push_or_a_claude_call(app, client, jev, llm, apns):
+def test_a_first_sync_sends_neither_old_nor_answered_messages_to_jev(app, client, jev, llm, apns):
+    """A first sync reads whole chats, newest message first: only what still waits for an answer is checked."""
     jev.yes["asks_if_ai"] = ["are you real"]
     client.post("/devices", json={"token": "abc123"})
+    now = datetime.now(timezone.utc)
     with app.state.engine.begin() as db:
         user_id = db.exec_driver_sql("SELECT id FROM users").scalar_one()
-        answered = upsert_card(db, user_id, "tinder", "match-1", "Sam")
-        upsert_message(db, user_id, answered, "m1", "them", "are you real", "2026-01-01T10:00:00Z")
-        upsert_message(db, user_id, answered, "m2", "me", "ask me something", "2026-01-01T10:05:00Z")
-        unanswered = upsert_card(db, user_id, "tinder", "match-2", "Kim")
-        upsert_message(db, user_id, unanswered, "m1", "them", "are you real", "2026-01-01T10:00:00Z")
+        old = upsert_card(db, user_id, "tinder", "match-1", "Sam")
+        upsert_message(db, user_id, old, "m1", "them", "are you real", "2026-01-01T10:00:00Z")
+        answered = upsert_card(db, user_id, "tinder", "match-2", "Kim")
+        upsert_message(db, user_id, answered, "m2", "me", "ask me something", now)
+        upsert_message(db, user_id, answered, "m1", "them", "are you real", now - timedelta(minutes=5))
 
-    assert not paused(app, answered)
-    assert paused(app, unanswered)
+    assert jev.asked == []
+    assert not paused(app, old) and not paused(app, answered)
+    assert [message["handover"] for message in client.get(f"/cards/{old}/messages").json()] == [None]
     assert llm.prompts == []
     assert apns.sent == []
 
@@ -158,3 +173,31 @@ def test_a_pending_handover_is_a_hot_lead_in_the_queue_until_it_is_taken_over(cl
     client.post(f"/cards/{card_id}/take-over")
 
     assert client.get("/queue").json() == []
+
+
+def at(client, card_id: int, sender: str, body: str, sent_at: datetime) -> None:
+    message = {"sender": sender, "body": body, "sent_at": sent_at.isoformat()}
+    assert client.post(f"/cards/{card_id}/messages", json=message).status_code == 201
+
+
+def test_a_hit_on_an_earlier_message_of_one_batch_pauses_the_card(app, client, jev):
+    """Tinder returns the newest message first, so the one that asks is stored after the one that followed it."""
+    jev.yes["asks_if_ai"] = ["are you a bot"]
+    card_id = card(client)
+    now = datetime.now(timezone.utc)
+
+    at(client, card_id, "them", "??", now)
+    at(client, card_id, "them", "are you a bot?", now - timedelta(minutes=1))
+
+    assert paused(app, card_id)
+
+
+def test_a_hit_on_a_message_the_user_already_answered_does_not_pause_the_card(app, client, jev):
+    jev.yes["asks_if_ai"] = ["are you a bot"]
+    card_id = card(client)
+    now = datetime.now(timezone.utc)
+
+    at(client, card_id, "me", "ask me anything", now)
+    at(client, card_id, "them", "are you a bot?", now - timedelta(minutes=1))
+
+    assert not paused(app, card_id)

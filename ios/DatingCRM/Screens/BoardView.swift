@@ -41,6 +41,7 @@ struct BoardView: View {
                 NavigationLink("Dashboard") { DashboardView(client: client) }
                 NavigationLink("Preferences") { PreferencesView(client: client) }
                 NavigationLink("Photos") { PhotosView(client: client) }
+                NavigationLink("Settings") { SettingsView(client: client, apps: Set(cards.map(\.app)).sorted()) }
                 Button("Sign out", action: signOut)
             }
             .refreshable { await load() }

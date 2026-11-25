@@ -388,6 +388,25 @@ def test_full_mode_books_the_date_the_match_agrees_to_and_then_stops(
     assert len(sent(tinder)) == 1
 
 
+def test_booking_a_date_tells_the_calendar_that_the_cards_stage_changed(
+    app, client, card_id, tinder, jev, gcal, evenings, llm, monkeypatch  # noqa: F811
+):
+    """Code that sets a stage without the PATCH route must call `calendar.stage_changed()`."""
+    changes = []
+    monkeypatch.setattr("app.calendar.stage_changed", lambda db, user_id, card, stage: changes.append((card, stage)))
+    autonomy(client, "full")
+    jev.yes["logistics"] = ["when are you free", "works for me"]
+    incoming(client, card_id, "when are you free?")
+    work(app)
+    llm.replies = ["2", "can't wait"]
+
+    incoming(client, card_id, "the second one works for me")
+    work(app)
+
+    assert client.get(f"/cards/{card_id}").json()["stage"] == "date_set"
+    assert changes == [(card_id, "date_set")]
+
+
 def test_full_mode_releases_the_holds_a_match_declines_and_offers_other_times(
     app, client, card_id, tinder, jev, gcal, evenings, llm  # noqa: F811
 ):
@@ -424,6 +443,97 @@ def test_full_mode_hands_over_an_answer_that_neither_accepts_nor_declines(
     assert [draft["guardrail"] for draft in queued_for_review(client)] == [["logistics"]]
 
 
+# Every slot a draft offers is held, in every mode, and the hold goes when the draft is dismissed or fails.
+
+
+def test_a_copilot_draft_that_answers_a_question_about_time_offers_free_slots_and_holds_each(
+    app, client, card_id, jev, gcal, evenings  # noqa: F811
+):
+    jev.yes["logistics"] = ["when are you free"]
+    incoming(client, card_id, "when are you free?")  # chat autonomy is copilot
+
+    draft = client.post(f"/cards/{card_id}/drafts").json()
+
+    assert draft["original"] == f"{REPLY} I'm free {said(evenings[0])} or {said(evenings[1])}."
+    assert sorted(event["start"] for event in gcal.events.values()) == evenings[:2]
+    assert {event["status"] for event in gcal.events.values()} == {"tentative"}
+
+    assert client.post(f"/drafts/{draft['id']}/dismiss").status_code == 200
+    assert gcal.events == {}
+
+
+def test_dismissing_a_reply_autopilot_kept_for_the_user_releases_the_slots_it_offered(
+    app, client, card_id, tinder, jev, gcal, evenings  # noqa: F811
+):
+    autonomy(client, "full")
+    jev.yes = {"logistics": ["when are you free"], "overpromise": ["badly"]}
+    incoming(client, card_id, "when are you free?")
+    work(app)
+    (draft,) = queued_for_review(client)
+    assert len(gcal.events) == 2
+
+    client.post(f"/drafts/{draft['id']}/dismiss")
+
+    assert gcal.events == {}
+
+
+def test_a_send_that_fails_releases_the_slots_the_message_offered(app, client, card_id, tinder, jev, gcal, evenings):  # noqa: F811
+    autonomy(client, "full")
+    jev.yes["logistics"] = ["when are you free"]
+    tinder.status = 500
+
+    incoming(client, card_id, "when are you free?")
+    work(app)
+
+    assert gcal.events == {}
+
+
+def test_dismissing_a_later_draft_keeps_the_slots_an_earlier_message_offered(
+    app, client, card_id, tinder, jev, gcal, evenings, llm  # noqa: F811
+):
+    autonomy(client, "full")
+    jev.yes["logistics"] = ["when are you free", "where"]
+    incoming(client, card_id, "when are you free?")
+    work(app)
+    llm.replies = ["other", "good question"]
+    incoming(client, card_id, "where would we go?")
+    work(app)
+    (draft,) = queued_for_review(client)
+
+    client.post(f"/drafts/{draft['id']}/dismiss")
+
+    assert len(gcal.events) == 2
+
+
+@pytest.mark.parametrize("message", ["let's meet at joe's bar", "are we exclusive?"])
+def test_full_mode_hands_a_place_or_exclusivity_to_the_user(
+    app, client, card_id, tinder, jev, gcal, evenings, message  # noqa: F811
+):
+    autonomy(client, "full")
+    jev.yes["logistics"] = jev.yes["place_or_exclusivity"] = ["joe's bar", "exclusive"]
+
+    incoming(client, card_id, message)
+    work(app)
+
+    assert sent(tinder) == []
+    assert gcal.events == {}
+    assert client.get(f"/cards/{card_id}").json()["handover"] == "pending"
+
+
+def test_full_mode_offers_times_when_the_question_is_not_the_newest_message(
+    app, client, card_id, tinder, jev, gcal, evenings  # noqa: F811
+):
+    client.put("/settings/ai-disclosure", json={"enabled": False})
+    autonomy(client, "full")
+    jev.yes["logistics"] = ["when are you free"]
+
+    incoming(client, card_id, "when are you free?")
+    incoming(client, card_id, "??")
+    work(app)
+
+    assert sent(tinder) == [f"{REPLY} I'm free {said(evenings[0])} or {said(evenings[1])}."]
+
+
 # (g) AI disclosure.
 
 
@@ -439,6 +549,32 @@ def test_the_first_unattended_message_to_a_match_discloses_the_ai_by_default(app
     first, second = sent(tinder)
     assert first.startswith(REPLY) and DISCLOSURE in first
     assert second == REPLY
+
+
+def test_the_card_says_whether_the_ai_was_disclosed_to_the_match(app, client, card_id, tinder):  # noqa: F811
+    autonomy(client, "guardrails")
+    assert client.get(f"/cards/{card_id}").json()["ai_disclosed"] is False
+
+    incoming(client, card_id)
+    work(app)
+
+    assert client.get(f"/cards/{card_id}").json()["ai_disclosed"] is True
+
+
+def test_a_match_who_got_undisclosed_replies_is_told_once_the_disclosure_is_turned_on(
+    app, client, card_id, tinder  # noqa: F811
+):
+    client.put("/settings/ai-disclosure", json={"enabled": False})
+    autonomy(client, "guardrails")
+    incoming(client, card_id)
+    work(app)
+    assert client.get(f"/cards/{card_id}").json()["ai_disclosed"] is False
+
+    client.put("/settings/ai-disclosure", json={"enabled": True})
+    incoming(client, card_id, "and bouldering?")
+    work(app)
+
+    assert DISCLOSURE not in sent(tinder)[0] and DISCLOSURE in sent(tinder)[1]
 
 
 def test_the_disclosure_is_checked_by_the_guardrail_like_the_rest_of_the_message(
@@ -463,6 +599,22 @@ def test_two_messages_in_a_row_get_one_reply(app, client, card_id, tinder):  # n
     work(app)
 
     assert len(sent(tinder)) == 1
+
+
+def test_a_reply_waits_for_the_user_when_an_older_unanswered_message_was_never_checked(
+    app, client, card_id, tinder, jev  # noqa: F811
+):
+    """Old messages are not sent to Jev, so autopilot cannot know that one of them was a handover trigger."""
+    autonomy(client, "full")
+    jev.yes["asks_if_ai"] = ["are you a bot"]
+    old = (datetime.now(UTC) - timedelta(days=2)).isoformat()
+    client.post(f"/cards/{card_id}/messages", json={"sender": "them", "body": "are you a bot?", "sent_at": old})
+
+    incoming(client, card_id, "hello?")
+    work(app)
+
+    assert sent(tinder) == []
+    assert [draft["guardrail"] for draft in queued_for_review(client)] == [["unchecked"]]
 
 
 def test_an_old_message_is_not_answered(app, client, card_id, tinder):  # noqa: F811

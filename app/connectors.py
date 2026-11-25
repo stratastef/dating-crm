@@ -72,7 +72,8 @@ class PaidItemNeedsApproval(Exception):
 
 
 class CapabilityFailed(Exception):
-    """The connector raised. The app is now copilot-only for this user; `__cause__` is the connector's error."""
+    """The connector raised; `__cause__` is its error. Unless the error was transient, the app is now
+    copilot-only for this user."""
 
 
 def classify(error: Exception) -> Reason:
@@ -106,9 +107,10 @@ def call(db: Connection, user_id: int, connector: Connector, capability: Capabil
 
     The user's session token is read from the vault and passed to the connector as its first argument;
     `args` are the rest. Raises `CapabilityUnavailable` without touching the app when the capability is not
-    declared, is disabled, the app is copilot-only, or the user has no stored token. If the connector raises, the app becomes copilot-only for this user, an alert
-    is stored with the reason from `classify()`, and `CapabilityFailed` is raised. An auth failure or ban signal
-    also pauses the app's autopilot for this user.
+    declared, is disabled, the app is copilot-only, or the user has no stored token. If the connector raises,
+    `CapabilityFailed` is raised. For an auth failure or ban signal (see `classify()`) the app also becomes
+    copilot-only for this user, an alert is stored, and the app's autopilot is paused. A transient error
+    changes nothing: the next call reaches the app again.
 
     Never spends a paid item: asked for one, it raises `PaidItemNeedsApproval` before anything else.
     """
@@ -129,7 +131,11 @@ def _run(db: Connection, user_id: int, connector: Connector, capability: Capabil
         return getattr(connector, "pass_" if capability == "pass" else capability)(token, *args)
     except Exception as error:
         reason = classify(error)
-        log.warning("%s failed for user %s (%s), falling back to copilot: %r", name, user_id, reason, error)
+        log.warning("%s failed for user %s (%s): %r", name, user_id, reason, error)
+        if reason == "transient":
+            # A timeout or a 5xx passes by itself: nothing is stored, the app stays on, and the caller (a
+            # job) fails and is retried.
+            raise CapabilityFailed(name) from error
         # Own transaction: the caller (a job handler) rolls back when this raises, and the fallback must survive that.
         with db.engine.begin() as own:
             own.execute(
@@ -141,13 +147,15 @@ def _run(db: Connection, user_id: int, connector: Connector, capability: Capabil
                     "user_id": user_id,
                     "app": connector.app,
                     "capability": capability,
-                    "error": repr(error),
+                    # The kind of error only. Its text and URL can hold match and profile IDs, and an alert
+                    # outlives a purge of that person. The full error is in the log line above.
+                    "error": type(error).__name__
+                    + (f" {error.response.status_code}" if isinstance(error, httpx.HTTPStatusError) else ""),
                     "reason": reason,
                 },
             )
-            if reason != "transient":
-                pause(own, user_id, connector.app, reason=reason)
-                send_push(own, user_id, f"{connector.app} autopilot paused", reason)
+            pause(own, user_id, connector.app, reason=reason)
+            send_push(own, user_id, f"{connector.app} autopilot paused", reason)
         raise CapabilityFailed(name) from error
 
 
@@ -166,7 +174,11 @@ def alerts(db: Connection, user_id: int) -> list[Row]:
 
 def is_copilot_only(db: Connection, user_id: int, app: str) -> bool:
     """True while the user has an alert for this app. Delete the app's alerts to re-enable its connector."""
+    # Transient errors are no longer stored; a row left from before must not keep the app off.
     return db.execute(
-        text("SELECT EXISTS (SELECT 1 FROM connector_alerts WHERE user_id = :user_id AND app = :app)"),
+        text(
+            "SELECT EXISTS (SELECT 1 FROM connector_alerts"
+            " WHERE user_id = :user_id AND app = :app AND reason <> 'transient')"
+        ),
         {"user_id": user_id, "app": app},
     ).scalar_one()

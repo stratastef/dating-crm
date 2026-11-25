@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, model_validator
 from sqlalchemy import text
 
-from app import calendar, swipes
+from app import calendar, swipes, tombstones
 from app.audit import record_action
 from app.auth import CurrentUser, Db
 from app.cards import _COLUMNS, Card
@@ -74,12 +74,15 @@ def purge_people(purge: Purge, user: CurrentUser, db: Db) -> dict[str, int]:
     """
     params = {"user_id": user.id, "ids": list(set(purge.card_ids)), "candidate_ids": list(set(purge.candidate_ids))}
     cards = db.execute(
-        text("SELECT id, app FROM cards WHERE user_id = :user_id AND id = ANY(:ids) FOR UPDATE"), params
+        text("SELECT id, app, external_id FROM cards WHERE user_id = :user_id AND id = ANY(:ids) FOR UPDATE"), params
     ).all()
     if len(cards) != len(params["ids"]):
         raise HTTPException(status_code=404, detail="card not found")
     candidates = db.execute(
-        text("SELECT id, app FROM swipe_candidates WHERE user_id = :user_id AND id = ANY(:candidate_ids) FOR UPDATE"),
+        text(
+            "SELECT id, app, profile_id FROM swipe_candidates"
+            " WHERE user_id = :user_id AND id = ANY(:candidate_ids) FOR UPDATE"
+        ),
         params,
     ).all()
     if len(candidates) != len(params["candidate_ids"]):
@@ -87,6 +90,13 @@ def purge_people(purge: Purge, user: CurrentUser, db: Db) -> dict[str, int]:
     # The calendar events carry the match's name. They go first, while the holds still say which they are:
     # if Google fails, the transaction rolls back and the purge can be sent again.
     calendar.delete_events(db, user.id, params["ids"])
+    # While the match or profile exists in the dating app, the next sync would store it again. The tombstone
+    # stops that. A card without an `external_id` came from no app and needs none.
+    for card in cards:
+        if card.external_id:
+            tombstones.bury(db, user.id, "match", card.app, card.external_id)
+    for candidate in candidates:
+        tombstones.bury(db, user.id, "profile", candidate.app, candidate.profile_id)
     db.execute(text("DELETE FROM cards WHERE user_id = :user_id AND id = ANY(:ids)"), params)
     db.execute(text("DELETE FROM swipe_candidates WHERE user_id = :user_id AND id = ANY(:candidate_ids)"), params)
     for kind, rows in (("card", cards), ("candidate", candidates)):

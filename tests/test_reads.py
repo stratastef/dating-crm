@@ -1,5 +1,6 @@
 import json
 
+from app.jev import JevUnavailable
 from tests.test_drafts import write_profile
 
 
@@ -150,6 +151,62 @@ def test_an_inference_that_targets_an_insecurity_is_never_stored(client, llm):
 
     assert kinds(made) == ["tone"]
     assert "Never infer insecurities" in llm.systems[-1]
+
+
+def test_an_inference_claude_mislabelled_is_dropped_by_the_independent_check(client, llm, jev):
+    """Claude's own `about`, `protected_trait` and `targets_insecurity` labels all say these are fine."""
+    card_id = new_card(client)
+    jev.yes = {
+        "about_other_person": ["her sister"],
+        "guesses_protected_trait": ["mass"],
+        "targets_insecurity": ["ashamed"],
+    }
+
+    made = read(
+        client,
+        llm,
+        card_id,
+        [
+            inference("values", "her sister is ambitious"),
+            inference("interests", "goes to mass every Sunday"),
+            inference("texting_style", "short replies", evidence="ashamed of her job, so press on it"),
+            inference("tone", "sincere"),
+        ],
+    )
+
+    assert kinds(made) == ["tone"]
+
+
+def test_an_unlabelled_protected_guess_is_kept_only_while_the_user_is_opted_in(client, llm, jev):
+    card_id = new_card(client)
+    jev.yes["guesses_protected_trait"] = ["mass"]
+    client.put("/settings/protected-trait-guesses", json={"enabled": True})
+
+    assert kinds(read(client, llm, card_id, [inference("interests", "goes to mass every Sunday")])) == ["interests"]
+
+    client.put("/settings/protected-trait-guesses", json={"enabled": False})
+    assert kinds(client.get(f"/cards/{card_id}/read")) == []
+
+
+def test_no_inference_is_stored_when_the_independent_check_cannot_be_asked(client, llm, monkeypatch):
+    def down(sentence, check, subject=""):
+        raise JevUnavailable("down")
+
+    monkeypatch.setattr("app.jev.ask", down)
+    card_id = new_card(client)
+
+    assert kinds(read(client, llm, card_id, [inference("tone", "sincere")])) == []
+
+
+def test_a_draft_that_plays_on_an_insecurity_hits_the_guardrail(app, client, llm, jev):
+    write_profile(app, client, llm, "Short, lowercase, teasing.")
+    card_id = new_card(client)
+    jev.yes["plays_on_insecurity"] = ["nobody else"]
+
+    llm.reply = "nobody else will put up with you"
+    draft = client.post(f"/cards/{card_id}/drafts").json()
+
+    assert draft["guardrail"] == ["plays_on_insecurity"]
 
 
 def test_inferences_without_evidence_or_a_valid_confidence_are_dropped_and_a_non_json_reply_is_reported(client, llm):

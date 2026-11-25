@@ -91,6 +91,29 @@ def test_reaching_the_cap_alerts_the_user_once(client, ask, apns):
     assert [push["payload"]["aps"]["alert"]["title"] for push in apns.sent] == ["AI budget reached"]
 
 
+def incoming(client, body: str) -> dict:
+    card_id = client.post("/cards", json={"app": "hinge", "name": "Sam"}).json()["id"]
+    return client.post(f"/cards/{card_id}/messages", json={"sender": "them", "body": body}).json()
+
+
+def test_jev_checks_are_recorded_under_the_same_budget(client, jev, monkeypatch):
+    monkeypatch.setattr("app.jev.PRICE_USD", Decimal("0.25"))
+
+    incoming(client, "hey")  # one sentence, asked about by the five handover checks
+
+    assert len(jev.asked) == 5
+    assert client.get("/budget").json()["spend_usd"] == 1.25
+
+
+def test_at_the_cap_jev_is_not_called_and_its_checks_fail_closed(client, jev):
+    client.put("/budget", json={"cap_usd": 0})
+
+    message = incoming(client, "hey")
+
+    assert jev.asked == []
+    assert message["handover"] == ["unavailable"]
+
+
 @pytest.fixture
 def swipe_job(client, app, user_id):
     """`swipe_job()` queues an autopilot job for the test user and returns its status once the worker ran it."""

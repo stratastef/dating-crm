@@ -10,8 +10,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import Connection, text
 
-from app import llm
+from app import jev, llm
 from app.auth import CurrentUser, Db
+from app.card_lookup import chat_lines, conversation, own_card
 
 router = APIRouter()
 
@@ -81,7 +82,7 @@ _SYSTEM = (
 )
 
 
-def _allowed(item: object, opted_in: bool) -> _Inferred | None:
+def _allowed(db: Connection, user_id: int, item: object, opted_in: bool) -> _Inferred | None:
     """The inference if it may be stored, else None. This is where the spec's limits are enforced."""
     try:
         inferred = _Inferred.model_validate(item)
@@ -95,17 +96,15 @@ def _allowed(item: object, opted_in: bool) -> _Inferred | None:
         return None
     if inferred.kind not in KINDS | PROTECTED:
         return None
+    # The labels above are Claude's own. Jev judges the text itself; when it cannot, the inference is dropped.
+    hits = set(jev.read_hits(db, user_id, f"{inferred.value}\n{inferred.evidence}"))
+    if hits - {"guesses_protected_trait"}:
+        return None
+    if hits and not inferred.protected_trait:
+        if not opted_in:
+            return None
+        inferred.protected_trait = "unlabelled"  # stored as protected, so opting out hides it
     return inferred
-
-
-def _own_card(db: Connection, user_id: int, card_id: int):
-    card = db.execute(
-        text("SELECT app, name, notes FROM cards WHERE id = :id AND user_id = :user_id"),
-        {"id": card_id, "user_id": user_id},
-    ).one_or_none()
-    if not card:
-        raise HTTPException(status_code=404, detail="card not found")
-    return card
 
 
 def _opted_in(db: Connection, user_id: int) -> bool:
@@ -129,7 +128,7 @@ def read_lines(db: Connection, user_id: int, card_id: int) -> list[str]:
 @router.get("/cards/{card_id}/read", response_model=list[Inference])
 def read(card_id: int, user: CurrentUser, db: Db):
     """The card's inferences; empty until a read is made."""
-    _own_card(db, user.id, card_id)
+    own_card(db, user.id, card_id)
     return db.execute(
         text(
             f"""
@@ -144,13 +143,11 @@ def read(card_id: int, user: CurrentUser, db: Db):
 @router.post("/cards/{card_id}/read", response_model=list[Inference])
 def make_read(card_id: int, user: CurrentUser, db: Db):
     """Have Claude read the match and store the inferences, replacing the last read but keeping corrections."""
-    card = _own_card(db, user.id, card_id)
+    card = own_card(db, user.id, card_id)
     opted_in = _opted_in(db, user.id)
-    messages = db.execute(
-        text("SELECT sender, body FROM messages WHERE card_id = :card_id ORDER BY sent_at, id"), {"card_id": card_id}
-    ).all()
     photos = db.execute(
-        text("SELECT url FROM card_photos WHERE card_id = :card_id ORDER BY id"), {"card_id": card_id}
+        text("SELECT url FROM card_photos WHERE card_id = :card_id AND user_id = :user_id ORDER BY id"),
+        {"card_id": card_id, "user_id": user.id},
     ).scalars().all()
     system = _SYSTEM.replace(
         "{protected_kinds}", ", and one kind per protected trait you can infer" if opted_in else ""
@@ -162,7 +159,7 @@ def make_read(card_id: int, user: CurrentUser, db: Db):
         [
             f"<match>\napp: {card.app}\nname: {card.name}\nnotes: {card.notes}\n</match>",
             "<conversation>",
-            *(f"{sender}: {body}" for sender, body in messages),
+            *chat_lines(conversation(db, user.id, card_id)),
             "</conversation>",
             f"<photos>{len(photos)} attached</photos>",
         ]
@@ -181,7 +178,7 @@ def make_read(card_id: int, user: CurrentUser, db: Db):
         text("DELETE FROM inferences WHERE card_id = :card_id AND user_id = :user_id AND corrected IS NULL"),
         {"card_id": card_id, "user_id": user.id},
     )
-    for inferred in filter(None, (_allowed(item, opted_in) for item in items)):
+    for inferred in filter(None, (_allowed(db, user.id, item, opted_in) for item in items)):
         db.execute(
             text(
                 """
@@ -216,7 +213,7 @@ def correct(inference_id: int, correction: Correction, user: CurrentUser, db: Db
 @router.post("/cards/{card_id}/photos", response_model=Photo, status_code=201)
 def add_photo(card_id: int, photo: Photo, user: CurrentUser, db: Db):
     """Attach a photo of the match to the card by URL. The next read looks at it."""
-    _own_card(db, user.id, card_id)
+    own_card(db, user.id, card_id)
     db.execute(
         text("INSERT INTO card_photos (user_id, card_id, url) VALUES (:user_id, :card_id, :url)"),
         {"user_id": user.id, "card_id": card_id, "url": photo.url},

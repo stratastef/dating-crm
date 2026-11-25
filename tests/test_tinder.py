@@ -258,6 +258,25 @@ def test_each_user_gets_only_their_own_matches(client_for, app, tinder):
     assert cards(bob) == {}
 
 
+def test_a_purged_match_is_not_synced_back_and_what_is_kept_does_not_name_them(client, app, tinder):
+    submit_token(client)
+    run_jobs(app)
+    cleo = cards(client)["Cleo"]
+
+    assert client.post("/people/purge", json={"card_ids": [cleo["id"]], "confirm": "purge"}).status_code == 200
+    sync_again(app)
+
+    assert sorted(cards(client)) == ["Ana", "Bea"]
+    # She cannot be added back by hand either.
+    again = client.post("/cards", json={"app": "tinder", "name": "Cleo", "external_id": CLEO})
+    assert again.status_code == 409
+    with app.state.engine.begin() as db:
+        tables = db.execute(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")).scalars().all()
+        for table in tables:
+            rows = db.execute(text(f'SELECT string_agg(r::text, \' \') FROM "{table}" r')).scalar_one() or ""
+            assert "cleo" not in rows.lower() and CLEO[len(ME) :] not in rows, table
+
+
 def test_a_rejected_token_falls_back_to_copilot_without_leaking_the_token(client, app, tinder, caplog):
     caplog.set_level(logging.DEBUG)
     submit_token(client, "expired-session-secret")

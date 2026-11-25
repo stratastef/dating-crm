@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -7,6 +8,13 @@ from app import jev as jev_module
 from app.cards import upsert_card, upsert_message
 from app.jev import ask as real_ask  # imported before the autouse stub replaces it
 from tests.test_drafts import write_profile
+
+
+@pytest.fixture
+def me(app, client):
+    """`(db, user_id)` of the test user: every check is made for a user, under their AI budget."""
+    with app.state.engine.begin() as db:
+        yield db, db.exec_driver_sql("SELECT id FROM users").scalar_one()
 
 
 @pytest.fixture
@@ -41,6 +49,16 @@ def test_a_check_sends_one_sentence_to_jev_and_returns_yes_or_no(real_jev):
     assert jev_module.ask("I like climbing.", "denies_ai") is False
 
 
+def test_the_protected_trait_guardrail_asks_jev_about_every_trait_the_spec_names(real_jev):
+    seen = real_jev(0.1)
+
+    jev_module.ask("Who did you vote for?", "protected_trait")
+
+    statement = json.loads(seen[0].content)["questions"]["q1"]["criteria"]["true"]
+    for trait in ("ethnicity", "religion", "health", "sexual", "politic"):
+        assert trait in statement
+
+
 def test_an_unknown_check_name_is_refused(real_jev):
     real_jev(0.9)
     with pytest.raises(KeyError):
@@ -55,11 +73,11 @@ def test_an_unknown_check_name_is_refused(real_jev):
         ("overpromise", "always", "Sure. I will always be there for you."),
     ],
 )
-def test_the_draft_guardrail_names_each_category_an_outgoing_message_hits(jev, check, phrase, message):
+def test_the_draft_guardrail_names_each_category_an_outgoing_message_hits(jev, me, check, phrase, message):
     jev.yes[check] = [phrase]
 
-    assert jev_module.guardrail_hits(message) == [check]
-    assert jev_module.guardrail_hits("See you at the wall.") == []
+    assert jev_module.guardrail_hits(*me, message) == [check]
+    assert jev_module.guardrail_hits(*me, "See you at the wall.") == []
     # Jev judged one sentence at a time, never the whole message.
     assert all(sentence != message for sentence, _ in jev.asked)
 
@@ -73,37 +91,37 @@ def test_the_draft_guardrail_names_each_category_an_outgoing_message_hits(jev, c
         ("sensitive", "my ex", "Honestly? My ex hit me."),
     ],
 )
-def test_the_handover_trigger_names_each_category_an_incoming_message_hits(jev, check, phrase, message):
+def test_the_handover_trigger_names_each_category_an_incoming_message_hits(jev, me, check, phrase, message):
     jev.yes[check] = [phrase]
 
-    assert jev_module.handover_hits(message) == [check]
-    assert jev_module.handover_hits("do you climb outdoors too") == []
+    assert jev_module.handover_hits(*me, message) == [check]
+    assert jev_module.handover_hits(*me, "do you climb outdoors too") == []
 
 
-def test_hot_lead_triage_answers_yes_or_no_for_a_draft(jev):
+def test_hot_lead_triage_answers_yes_or_no_for_a_draft(jev, me):
     jev.yes["hot_lead"] = ["thursday"]
 
-    assert jev_module.is_hot_lead("Yes! Thursday works, shall I book it?") is True
-    assert jev_module.is_hot_lead("haha same") is False
+    assert jev_module.is_hot_lead(*me, "Yes! Thursday works, shall I book it?") is True
+    assert jev_module.is_hot_lead(*me, "haha same") is False
 
 
-def test_without_jev_configured_the_guardrail_and_handover_hit_and_triage_says_no(monkeypatch):
+def test_without_jev_configured_the_guardrail_and_handover_hit_and_triage_says_no(monkeypatch, me):
     monkeypatch.setattr("app.jev.ask", real_ask)
     for name in ("JEV_BASE_URL", "JEV_API_KEY", "JEV_TOOL"):
         monkeypatch.delenv(name, raising=False)
 
-    assert jev_module.guardrail_hits("hello there") == ["unavailable"]
-    assert jev_module.handover_hits("hello there") == ["unavailable"]
-    assert jev_module.is_hot_lead("hello there") is False
+    assert jev_module.guardrail_hits(*me, "hello there") == ["unavailable"]
+    assert jev_module.handover_hits(*me, "hello there") == ["unavailable"]
+    assert jev_module.is_hot_lead(*me, "hello there") is False
 
 
-def test_a_failing_jev_counts_as_a_hit(real_jev, monkeypatch):
+def test_a_failing_jev_counts_as_a_hit(real_jev, monkeypatch, me):
     real_jev(0.0)
     monkeypatch.setattr("app.jev.transport", httpx.MockTransport(lambda request: httpx.Response(500)))
 
-    assert jev_module.guardrail_hits("hello there") == ["unavailable"]
-    assert jev_module.handover_hits("hello there") == ["unavailable"]
-    assert jev_module.is_hot_lead("hello there") is False
+    assert jev_module.guardrail_hits(*me, "hello there") == ["unavailable"]
+    assert jev_module.handover_hits(*me, "hello there") == ["unavailable"]
+    assert jev_module.is_hot_lead(*me, "hello there") is False
 
 
 def test_an_incoming_message_is_stored_with_its_handover_result(app, client, jev):
@@ -127,9 +145,10 @@ def test_a_synced_incoming_message_is_checked_once_and_stored_with_its_result(ap
     with app.state.engine.begin() as db:
         user_id = db.exec_driver_sql("SELECT id FROM users").scalar_one()
         card_id = upsert_card(db, user_id, "tinder", "match-1", "Sam")
-        upsert_message(db, user_id, card_id, "m1", "them", "are you real", "2026-01-01T10:00:00Z")
+        now = datetime.now(UTC)
+        upsert_message(db, user_id, card_id, "m1", "them", "are you real", now)
         asked = len(jev.asked)
-        upsert_message(db, user_id, card_id, "m1", "them", "are you real", "2026-01-01T10:00:00Z")
+        upsert_message(db, user_id, card_id, "m1", "them", "are you real", now)
 
     assert len(jev.asked) == asked  # a message already stored is not sent to Jev again
     assert client.get(f"/cards/{card_id}/messages").json()[0]["handover"] == ["asks_if_ai"]

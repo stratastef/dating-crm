@@ -1,29 +1,17 @@
 """The review queue: items that wait for the user, and the live push for the hot ones."""
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import Connection, text
 
-from app import paid_items
+from app import calendar, paid_items
 from app.auth import CurrentUser, Db
+from app.drafts import _COLUMNS as _DRAFT_COLUMNS
+from app.drafts import Draft
 from app.push import send_push
 
 router = APIRouter()
-
-_DRAFT_COLUMNS = ("id", "card_id", "kind", "status", "original", "edited", "guardrail", "hot_lead")
-
-
-class Draft(BaseModel):
-    """Same shape as the draft the routes in `app/drafts.py` return."""
-
-    id: int
-    card_id: int
-    kind: str
-    status: str
-    original: str
-    edited: str | None
-    guardrail: list[str] | None
-    hot_lead: bool
 
 
 class QueueItem(BaseModel):
@@ -36,21 +24,29 @@ class QueueItem(BaseModel):
     paid_item: paid_items.Proposal | None = None  # set when `kind` is `paid_item`
 
 
-def is_hot_lead(db: Connection, card_id: int) -> bool:
-    """The only definition of a hot lead. So far: the match replied within the last hour, Jev's hot-lead
-    triage flagged a pending draft of the card (`drafts.hot_lead`, see `app/jev.py`), or the card waits for
-    the user after a handover trigger (`cards.handover` is `pending`, see `app/handover.py`).
-
-    Date coordination is also hot (see the spec); add that signal here.
+def is_hot_lead(db: Connection, user_id: int, card_id: int) -> bool:
+    """The only definition of a hot lead: the match replied within the last hour, Jev's hot-lead triage
+    flagged a pending draft of the card (`drafts.hot_lead`, see `app/jev.py`), the card waits for the user
+    after a handover trigger (`cards.handover` is `pending`, see `app/handover.py`), or a date is being
+    coordinated: a slot is held for the match, or a message of theirs about logistics is unanswered.
     """
     return db.execute(
         text(
-            "SELECT EXISTS (SELECT 1 FROM messages WHERE card_id = :card_id AND sender = 'them'"
-            " AND sent_at > now() - interval '1 hour')"
-            " OR EXISTS (SELECT 1 FROM drafts WHERE card_id = :card_id AND status = 'pending' AND hot_lead)"
-            " OR EXISTS (SELECT 1 FROM cards WHERE id = :card_id AND handover = 'pending')"
+            """
+            SELECT EXISTS (SELECT 1 FROM messages WHERE card_id = :card_id AND user_id = :user_id
+                           AND sender = 'them' AND sent_at > now() - interval '1 hour')
+                OR EXISTS (SELECT 1 FROM drafts WHERE card_id = :card_id AND user_id = :user_id
+                           AND status = 'pending' AND hot_lead)
+                OR EXISTS (SELECT 1 FROM cards WHERE id = :card_id AND user_id = :user_id AND handover = 'pending')
+                OR EXISTS (SELECT 1 FROM calendar_holds WHERE card_id = :card_id AND user_id = :user_id
+                           AND status = 'held')
+                OR EXISTS (SELECT 1 FROM messages WHERE card_id = :card_id AND user_id = :user_id
+                           AND sender = 'them' AND 'logistics' = ANY(handover)
+                           AND sent_at > coalesce((SELECT max(sent_at) FROM messages WHERE card_id = :card_id
+                                                   AND user_id = :user_id AND sender = 'me'), '-infinity'))
+            """
         ),
-        {"card_id": card_id},
+        {"card_id": card_id, "user_id": user_id},
     ).scalar_one()
 
 
@@ -58,13 +54,13 @@ def notify_if_hot(
     db: Connection, user_id: int, card_id: int, name: str, title: str = "Hot lead", body: str | None = None
 ) -> None:
     """Call when an item joins the queue. A hot lead is pushed at once; the rest waits in the queue silently."""
-    if is_hot_lead(db, card_id):
+    if is_hot_lead(db, user_id, card_id):
         send_push(db, user_id, title, body or f"A draft for {name} is waiting for you", card_id=card_id)
 
 
 def hand_on_approved_draft(db: Connection, user_id: int, draft: Draft) -> None:
     """Called once for each draft the user approves: queues its send when the card's app can send."""
-    from app.send import send_approved  # imported here: app.send imports app.drafts, which imports this module
+    from app.send import send_approved  # imported here: app.send imports app.cards, which leads back to this module
 
     send_approved(db, user_id, draft.id, trigger=f"copilot: user approved draft {draft.id}")
 
@@ -75,7 +71,7 @@ def queue(user: CurrentUser, db: Db):
     rows = db.execute(
         text(
             f"""
-            SELECT {", ".join(f"drafts.{column}" for column in _DRAFT_COLUMNS)}, cards.name AS card_name
+            SELECT {", ".join(f"drafts.{column}" for column in _DRAFT_COLUMNS.split(", "))}, cards.name AS card_name
             FROM drafts JOIN cards ON cards.id = drafts.card_id
             WHERE drafts.user_id = :user_id AND drafts.status = 'pending'
             ORDER BY drafts.created_at, drafts.id
@@ -87,7 +83,7 @@ def queue(user: CurrentUser, db: Db):
     items = [
         QueueItem(
             kind="draft",
-            hot=is_hot_lead(db, row.card_id),
+            hot=is_hot_lead(db, user.id, row.card_id),
             card_id=row.card_id,
             card_name=row.card_name,
             draft=Draft.model_validate(row, from_attributes=True),
@@ -105,7 +101,7 @@ def queue(user: CurrentUser, db: Db):
     items = [
         QueueItem(
             kind="handover",
-            hot=is_hot_lead(db, row.id),
+            hot=is_hot_lead(db, user.id, row.id),
             card_id=row.id,
             card_name=row.name,
             draft=None,
@@ -128,7 +124,7 @@ def _decide(db: Connection, user_id: int, draft_id: int, status: str) -> Draft:
             f"""
             UPDATE drafts SET status = :status, updated_at = now()
             WHERE id = :id AND user_id = :user_id AND status = 'pending'
-            RETURNING {", ".join(_DRAFT_COLUMNS)}
+            RETURNING {_DRAFT_COLUMNS}
             """
         ),
         {"id": draft_id, "user_id": user_id, "status": status},
@@ -153,5 +149,13 @@ def approve_draft(draft_id: int, user: CurrentUser, db: Db):
 
 @router.post("/drafts/{draft_id}/dismiss", response_model=Draft)
 def dismiss_draft(draft_id: int, user: CurrentUser, db: Db):
-    """Drop a pending draft from the queue. Nothing is sent."""
-    return _decide(db, user.id, draft_id, "dismissed")
+    """Drop a pending draft from the queue. Nothing is sent, so the slots the draft offered are free again."""
+    draft = _decide(db, user.id, draft_id, "dismissed")
+    try:
+        calendar.release_holds(
+            db, user.id, draft.card_id, trigger=f"copilot: user dismissed draft {draft.id}", draft_id=draft.id
+        )
+    except httpx.HTTPError:
+        # Raising rolls the dismissal back, so the draft and the calendar stay in step.
+        raise HTTPException(status_code=502, detail="Google Calendar could not be reached; try again")
+    return draft

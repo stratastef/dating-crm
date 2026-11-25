@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, TypeAdapter, ValidationError, field_valid
 from sqlalchemy import text
 
 from app import llm
+from app.audit import record_action
 from app.auth import CurrentUser, Db
 
 router = APIRouter()
@@ -74,7 +75,8 @@ async def _upload(request: Request) -> bytes:
 @router.post("/photos", response_model=Photo, status_code=201)
 def upload(request: Request, data: Annotated[bytes, Depends(_upload)], user: CurrentUser, db: Db):
     """Store one photo. The body is the JPEG or PNG file itself, with its type in `Content-Type`."""
-    content_type = request.headers.get("content-type")
+    # As a client may send it: `Image/JPEG; charset=binary` is image/jpeg.
+    content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
     if content_type not in _FORMATS.values():
         raise HTTPException(status_code=415, detail="a photo must be image/jpeg or image/png")
     try:
@@ -237,4 +239,14 @@ def decide(photo_id: int, decision: Decision, user: CurrentUser, db: Db):
     ).one_or_none()
     if not photo:
         raise HTTPException(status_code=404, detail="no edit on offer for this photo")
+    if decision.accept:
+        # A photo belongs to no one dating app, so the entry's app is `all`.
+        record_action(
+            db,
+            user.id,
+            type="profile_change",
+            app="all",
+            target=f"photo:{photo_id}",
+            trigger="copilot: user accepted a photo edit",
+        )
     return photo

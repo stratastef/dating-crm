@@ -5,8 +5,8 @@ from sqlalchemy import Connection, Row, text
 
 from app.audit import record_action
 from app.auth import CurrentUser, Db
-from app import handover
-from app.autopilot import autopilot_block, pauses
+from app import calendar, handover
+from app.autopilot import autopilot_block
 from app.cards import upsert_message
 from app.connectors import CapabilityFailed, call, unavailable
 from app.drafts import _COLUMNS, Draft
@@ -15,6 +15,10 @@ from app.sync import CONNECTORS
 
 router = APIRouter()
 
+
+# Chat autopilot adds this sentence to the first message it sends alone to a match while the user's AI
+# disclosure is on (`app/chat_autopilot.py`). Sending a message that carries it sets `cards.ai_disclosed`.
+DISCLOSURE = "Heads up: an AI assistant helps me write my messages here."
 
 # The stages in which autopilot chats. From Number swapped on the user texts off the app.
 CHAT_STAGES = ("matched", "chatting")
@@ -38,7 +42,7 @@ def unattended_block(db: Connection, user_id: int, draft_id: int) -> str | None:
         return block
     if draft.guardrail != []:  # a hit, Jev unavailable (`["unavailable"]`) or never checked (null)
         return f"the draft guardrail was hit: {draft.guardrail}"
-    if handover.is_paused(db, draft.card_id):
+    if handover.is_paused(db, user_id, draft.card_id):
         return "the card is paused for handover"
     if draft.stage not in CHAT_STAGES:
         return f"the card is in {draft.stage}"
@@ -95,7 +99,8 @@ def _card(db: Connection, user_id: int, draft_id: int) -> Row | None:
 def refusal(
     db: Connection, user_id: int, app: str, match_id: str | None, guardrail: list[str] | None = None
 ) -> str | None:
-    """Why a message cannot be sent to this match now, or None if it can. The kill switch stops tapped sends too.
+    """Why a message cannot be sent to this match now, or None if it can. The kill switch is not asked: it
+    pauses autopilot, and `unattended_block()` holds it for a send no user asked for. A tap still sends.
 
     `guardrail` is the draft's guardrail result. The user's tap may send a draft with any other hit, because
     they have read it; a draft that denies being AI is never sent, by a tap or alone, until it is edited.
@@ -106,9 +111,6 @@ def refusal(
         return f"{app} has no connector"
     if not match_id:
         return f"the card is not linked to a {app} match"
-    paused = pauses(db, user_id)
-    if paused["all"] or app in paused["apps"]:
-        return f"{app} is paused"
     return unavailable(db, user_id, CONNECTORS[app](), "send")
 
 
@@ -145,21 +147,31 @@ def send_draft(db: Connection, user_id: int, payload: dict) -> None:
             ),
             {"id": draft_id, "user_id": user_id},
         ).scalar_one_or_none()
-    if claimed != "sending":
+    if claimed is None:
         return
     draft = db.execute(
         text(
             "SELECT coalesce(d.edited, d.original) AS body, d.guardrail, c.id AS card_id, c.app, c.external_id"
-            " FROM drafts d JOIN cards c ON c.id = d.card_id WHERE d.id = :id"
+            " FROM drafts d JOIN cards c ON c.id = d.card_id WHERE d.id = :id AND d.user_id = :user_id"
         ),
-        {"id": draft_id},
+        {"id": draft_id, "user_id": user_id},
     ).one()
 
     def finish(status: str) -> None:
         db.execute(
-            text("UPDATE drafts SET status = :status, updated_at = now() WHERE id = :id"),
-            {"id": draft_id, "status": status},
+            text("UPDATE drafts SET status = :status, updated_at = now() WHERE id = :id AND user_id = :user_id"),
+            {"id": draft_id, "user_id": user_id, "status": status},
         )
+        if status == "failed":
+            # The offer did not go out as far as the app knows, so the slots it named are free again.
+            # shortcut: if the message did reach the match before the error, they hold an offer for a slot
+            # that is no longer held. Keep the holds of a failed draft if that ever double-books.
+            calendar.release_holds(
+                db, user_id, draft.card_id, trigger=f"draft {draft_id} failed to send", draft_id=draft_id
+            )
+
+    if claimed == "failed":
+        return finish("failed")  # an earlier attempt died: only its holds are left to release
 
     if refusal(db, user_id, draft.app, draft.external_id, draft.guardrail):
         return finish("pending")  # nothing was sent: the user can tap again once the cause is fixed
@@ -170,6 +182,12 @@ def send_draft(db: Connection, user_id: int, payload: dict) -> None:
     except CapabilityFailed:
         return finish("failed")  # no retry: the message may have reached the app before the error
     upsert_message(db, user_id, draft.card_id, sent["id"], "me", draft.body, sent["sent_at"])
+    if DISCLOSURE in draft.body:
+        # Whoever sent it, the match has now been told: chat autopilot does not add the sentence again.
+        db.execute(
+            text("UPDATE cards SET ai_disclosed = true WHERE id = :id AND user_id = :user_id"),
+            {"id": draft.card_id, "user_id": user_id},
+        )
     record_action(
         db, user_id, type="message", app=draft.app, target=f"card:{draft.card_id}", trigger=payload["trigger"]
     )

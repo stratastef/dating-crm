@@ -12,7 +12,9 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/db.py` | `database_url()`, read from `DATABASE_URL` |
 | `app/auth.py` | `CurrentUser` and `Db` route dependencies, `create_user()` |
 | `app/cards.py` | Match cards and their messages: routes under `/cards` |
+| `app/card_lookup.py` | Shared reads of one card: `own_card()`, `find_card()`, `conversation()`, `chat_lines()`, `unanswered()` |
 | `app/llm.py` | `call()`, the only way to call Claude; records each call's cost |
+| `app/jev.py` | Jev checks: `ask()`, the only way to call Jev, and the guardrail, handover, match-read, hot-lead and dealbreaker checks built on it |
 | `app/budget.py` | The monthly AI budget: `GET` and `PUT /budget` |
 | `app/drafts.py` | Copilot drafts for a card and the user's edits: `POST /cards/{id}/drafts`, `PATCH /drafts/{id}` |
 | `app/screenshots.py` | Screenshot copilot: `POST /screenshots` reads a shared screenshot into a card and a draft |
@@ -23,6 +25,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/photos.py` | The user's own photos, their ranking and light edits: routes under `/photos` |
 | `app/preferences.py` | What the user wants, versioned: routes under `/preferences`, `current_preferences()` |
 | `app/dashboard.py` | Good dates per hour, weekly: `POST /time` and `GET /dashboard` |
+| `app/feedback.py` | Feedback loop: `swipe_lines()` for the swipe pre-screen prompt, and `GET /feedback/export` |
 | `app/settings.py` | User settings: `GET` and `PATCH /settings` |
 | `app/tenancy.py` | `user_id_column()` for tenant tables |
 | `app/vault.py` | `store_token()`, `read_token()`, `delete_token()` for encrypted dating-app session tokens |
@@ -36,6 +39,8 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/chat_autopilot.py` | Chat autopilot: the `chat_reply` job, `GET` and `PUT /settings/ai-disclosure` |
 | `app/tinder.py` | `TinderConnector`: reads matches and messages from Tinder's unofficial web API |
 | `app/sync.py` | `PUT /connectors/{app}/token` and the `sync_matches` job |
+| `app/purge.py` | Find and purge: `GET /people`, `GET /people/candidates`, `POST /people/purge` |
+| `app/tombstones.py` | `bury()` and `is_buried()`: a purged person is not stored again |
 | `app/paid_items.py` | Paid items (Super Like, Rose, Boost): `propose()`, approve and decline routes, and `spend()`, the only code that spends one |
 | `app/swipes.py` | Swipe copilot (like or pass suggestions and the user's swipes, routes under `/swipes`) and swipe autopilot (the `swipe_autopilot` job) |
 | `migrations/versions/` | Alembic migrations |
@@ -78,6 +83,7 @@ Fixtures in `tests/conftest.py`:
 | `llm` | The stub that replaces `app.llm.complete` in every test. See "Calling Claude". |
 | `apns` | The stub that replaces `app.push.post` in every test. See "Push notifications". |
 | `jev` | The stub that replaces `app.jev.ask` in every test. See "Jev checks". |
+| `gcal` | The stub that replaces `app.calendar.google` in every test. See "Google Calendar holds". |
 
 ## Authentication and tenancy
 
@@ -120,6 +126,8 @@ A card is one match. Routes are in `app/cards.py`; tables are `cards` and `messa
 - `PATCH /cards/{id}` also takes `date_rating` (1 to 5) and `date_note`, both null until the user rates the date. A good date is a rating of 4 or 5: `is_good_date()` in `app/cards.py` is the only definition, and the card's `good_date` field is its result. The card's `led_to_date` is the chat's outcome label (see "Voice").
 - `app` is free text, for example `tinder` or `hinge`.
 - `external_id` is the ID the dating app gives the match or message. It is unique per user and app for cards, and per card for messages; a duplicate is `409`. Rows without one are never duplicates.
+- **Storing a message from other code:** `insert_message(db, user_id, card_id, external_id, sender, body, sent_at)` in `app/cards.py` is the one way to store a message. It runs everything a new message sets off: for `me`, the style profile is queued and a pending handover ends; for `them`, Stalled is cleared, the handover trigger runs and chat autopilot is asked to reply. The route and `upsert_message()` (which skips a message the card already has, and moves a Matched card to Chatting) both call it. Never insert into `messages` yourself.
+- **Reading a card from other code:** use `app/card_lookup.py`, which every module can import. `own_card(db, user_id, card_id)` returns the user's card or raises `404` (for a route); `find_card()` returns `None` instead (for a job). `conversation()` is the card's messages as `(sender, body)`, oldest first, `chat_lines()` turns them into `sender: body` prompt lines, and `unanswered()` is the match's messages since the user's last one. Do not write these queries again.
 
 ## Background jobs
 
@@ -163,9 +171,10 @@ result = llm.call(db, user.id, "draft", system="...", prompt="...")  # result.te
 
 - The model is read from `ANTHROPIC_MODEL` (default `claude-fable-5-2`) and the key from `ANTHROPIC_API_KEY`. Compose passes both to the API and worker. A feature that needs another model passes `model=` to `call()`; cost and the cap apply the same way.
 - Every call inserts one row in `llm_calls`: `purpose` (the third argument, naming the feature), `model`, both token counts and `cost_usd`. The row is written in its own transaction, so it is kept when the calling job fails. `llm.spend(db, user_id)` is the user's total for the current calendar month (UTC) in USD.
+- **Other paid models:** Jev is paid from the same budget. `app/jev.py` asks `llm.budget_reached()` before it calls and adds its cost with `llm.record(db, user_id, purpose, model, cost)`. A new paid model must do both.
 - **AI budget:** each user has a hard monthly cap, `users.ai_budget_usd`, default 50 USD. `GET /budget` returns `{"spend_usd", "cap_usd", "paused"}` and `PUT /budget` with `{"cap_usd": 20}` sets the cap (routes in `app/budget.py`). While the month's spend is at the cap, `call()` raises `llm.BudgetReached` without calling Claude (a route answers `402`; a job retries and then fails), and the worker skips autopilot jobs with the reason `AI budget reached`. The call that reaches the cap sends the user a push. The budget pause is computed, not a row in `autopilot_pauses`: a new month or a higher cap lifts it, `POST /autopilot/resume` does not, and it is not shown by `GET /autopilot/pause`. Pauses set for other reasons are untouched. Spend can pass the cap by the cost of calls already in flight.
 - Cost is tokens times the per-model price in `llm.PRICES` (USD per million tokens). The prices are copied by hand: confirm them against Anthropic's price list. A model missing from the table is charged at the default model's price.
-- A refusal raises `RuntimeError`. Server-side fallback models are not configured.
+- A refusal raises `RuntimeError`. Server-side fallback models are not configured. Code that can go on without Claude catches `llm.Failed` (the budget cap, a refusal or an API error); only `app/llm.py` imports `anthropic`.
 - Tests never reach the API: the autouse `llm` fixture in `tests/conftest.py` replaces `complete()` with a stub. Set `llm.reply` to choose the text and read `llm.prompts`, `llm.systems` and `llm.images` to see what was sent. For a route that calls Claude more than once, set `llm.replies` to a list; it is used up first, one per call.
 
 ## Voice
@@ -178,7 +187,7 @@ Routes and the job are in `app/voice.py`; the table is `voice_profiles` (one row
 | `GET /voice` | Read `answers` and `profile`. `profile` is `null` until the worker has written it. |
 | `GET /cards/{id}/similar-chats?limit=` | Past chats that led to a date, most similar to this card's conversation first. `limit` defaults to 3. |
 
-- The `voice_profile` job writes the style profile from the answers and the user's own messages (the newest 200). Saving answers and `POST /cards/{id}/messages` with `sender: me` queue it. Code that stores messages another way must call `queue_profile(db, user_id)`.
+- The `voice_profile` job writes the style profile from the answers and the user's own messages (the newest 200). Saving answers and `POST /cards/{id}/messages` with `sender: me` queue it. Every message is stored by `insert_message()` (see "Cards and messages"), which queues it.
 - A chat led to a date if its card has `led_to_date: true`. A trigger on `cards` sets the label when the stage is `date_set`, `dated` or `seeing_them` or the date is rated, and nothing unsets it, so an archived card keeps it.
 - A chat that led to a good date (`is_good_date()`) ranks as if it were `GOOD_DATE_BOOST` (1.5) times as similar. Each result carries its `date_rating`.
 - The job also reads the newest 20 draft edits (`original` against `edited`), and `PATCH /drafts/{id}` queues it. See "Feedback loop".
@@ -196,7 +205,8 @@ Routes are in `app/bios.py`; the table is `bios` (one row per user and app). A b
 
 - To regenerate, call the rewrite route again. To regenerate from an edit, send the edited text as the body.
 - The rewrite route returns `409` until the style profile is written, and `502` if Claude's reply is not a bio; the client can retry.
-- Nothing is written to a dating app: in copilot the user copies the accepted text.
+- Nothing is written to a dating app: in copilot the user copies the accepted text. Profile autopilot (the app changing a bio or photos in a dating app itself) is not built: no connector has a capability for it.
+- `PUT /bios/{app}` writes an audit log entry: type `profile_change`, that app, target `bio`, trigger `copilot: user accepted a bio`. The text is not in the log.
 
 ## Photos
 
@@ -217,6 +227,7 @@ Routes are in `app/photos.py`; the table is `photos` (one row per photo). A phot
 - Claude is called with the photos through `llm.call(..., images=[(content_type, data)])`. Each photo is sent scaled down to 1024 pixels a side.
 - The rank route returns `409` when the user has no photos, and `502` when Claude's reply does not rank exactly the user's photos or holds an edit outside the limits; nothing is stored then.
 - Nothing is uploaded to a dating app and nothing rotates photos: the user saves the photo they want and changes their profile themselves.
+- Accepting an edit writes an audit log entry: type `profile_change`, app `all` (a photo belongs to no one dating app), target `photo:<photos.id>`, trigger `copilot: user accepted a photo edit`. Rejecting writes none.
 - Not built: deleting a photo.
 
 ## Drafts
@@ -231,13 +242,14 @@ Routes are in `app/drafts.py`; the table is `drafts` (one row per draft).
 
 - A draft is `{"id", "card_id", "kind", "status", "original", "edited"}`. `original` is Claude's text and never changes; `edited` is `null` until the user edits. The text to use is `edited` if set, else `original`.
 - `status` is `pending` until the user sends, approves or dismisses the draft (see "Review queue"). A sent or approved draft is `approved` (queued), then `sending` (the worker is sending it) and `sent` or `failed`. A dismissed draft is `dismissed`. The user can still copy any draft.
-- **Send:** the route answers `409` with the reason and queues nothing when the draft is not `pending`, the card's app is paused (the kill switch, for that app or all apps), the app has no connector, the card has no `external_id`, or `send` is unavailable (see "Connectors": not declared, switched off, copilot-only, no token).
-- **Queue a send from code:** `queue_send(db, user_id, draft_id, trigger)` in `app/send.py` is the one way to send a draft. It moves a `pending` draft to `approved` and queues a `send_draft` job in your transaction; it returns the draft, or `None` if the draft is not `pending`. `trigger` goes to the audit log. For a tap it does not check the pause or autonomy: the route checks the pause before it, and the job checks the pause again. A send no user asked for must pass `unattended=True`: see "Chat autopilot".
+- **Send:** the route answers `409` with the reason and queues nothing when the draft is not `pending`, the app has no connector, the card has no `external_id`, or `send` is unavailable (see "Connectors": not declared, switched off, copilot-only, no token).
+- **Queue a send from code:** `queue_send(db, user_id, draft_id, trigger)` in `app/send.py` is the one way to send a draft. It moves a `pending` draft to `approved` and queues a `send_draft` job in your transaction; it returns the draft, or `None` if the draft is not `pending`. `trigger` goes to the audit log. A tap is not held by the kill switch or the autonomy level: both stop autopilot only, so the user can always send a draft they have read. A send no user asked for must pass `unattended=True`: see "Chat autopilot".
 - **Guardrail and the tap:** the user's tap or approval sends a draft with a guardrail hit, because the guardrail's job is to put the draft in front of them. The one exception is `denies_ai`: such a draft is never sent, by a tap (`409`), an approval (it stays `approved`) or the job, until the user edits it and the guardrail runs again. The review queue approves the draft itself, so it calls `send_approved(db, user_id, draft_id, trigger)`, which queues the job for an already `approved` draft if the app can send.
-- **The `send_draft` job** sends the text (`edited` if set, else `original`) with the connector's `send`, stores the message on the card under the app's message ID (so sync does not add it twice), writes an audit log entry (`type: message`, `target: card:<id>`) and sets `sent`. If the app became paused or `send` unavailable after the tap, nothing is sent and the draft goes back to `pending`.
+- **The `send_draft` job** sends the text (`edited` if set, else `original`) with the connector's `send`, stores the message on the card under the app's message ID (so sync does not add it twice), writes an audit log entry (`type: message`, `target: card:<id>`) and sets `sent`. If `send` became unavailable after the tap, nothing is sent and the draft goes back to `pending`.
 - **At most once:** the job commits `sending` before it calls the app. If the app answers with an error, or the worker dies before the job commits, the draft ends as `failed` and is never sent again, because the message may have gone out. A `failed` draft whose message did go out appears on the card at the next sync. To try again, write another draft.
 - The prompt holds the style profile, the card's app, name and notes, the match read (its `tone` sets the draft's tone), the conversation, and `similar_chats()` as examples.
-- The write route returns `409` until the style profile is written, and `502` if Claude's reply is empty.
+- **Offering a time:** every draft that offers a slot holds it, in every autonomy mode. When the match's unanswered messages hit `logistics`, no slot is held for the card yet and the calendar is connected, `draft_for()` tells Claude to name no day or time and adds the sentence from `calendar.offer_slots()`, which holds each slot it names for that draft. Without a connected calendar the draft offers nothing by itself; a time Claude or the user writes into the text is not held. `POST /drafts/{id}/dismiss` and a failed send release the draft's holds.
+- The write route returns `409` until the style profile is written, and `502` if Claude's reply is empty. Other code calls `draft_for(db, user_id, card_id)`, which raises `CannotDraft` in those cases (its `status` is the route's answer); a job catches it and never sees an `HTTPException`.
 - A draft also has `guardrail` and `hot_lead`, the results of its Jev checks (see below).
 
 ## Jev checks
@@ -247,13 +259,14 @@ Jev is a cheap yes/no classifier reached through treg. It judges one sentence at
 | Function | Use it for | Returns |
 | --- | --- | --- |
 | `jev.ask(sentence, check)` | One yes/no check on one sentence. `check` is a key of `jev.CHECKS`; add a key to add a check, for example a bio dealbreaker. | `bool`. Raises `JevUnavailable` when Jev is not configured or the call fails. |
-| `jev.guardrail_hits(text)` | Draft guardrail on an outgoing message. | The checks hit, from `denies_ai`, `protected_trait`, `overpromise`. Empty means safe to send. |
-| `jev.handover_hits(text)` | Handover trigger on an incoming message. | The checks hit, from `asks_if_ai`, `logistics`, `personal_info`, `sensitive`. Empty means no handover. |
-| `jev.is_hot_lead(text)` | Hot-lead triage on a draft. | `bool`: the draft deserves a live push. |
-| `jev.dealbreaker_hit(bio, dealbreakers)` | Swipe pre-filter on a candidate's bio. | The first dealbreaker the bio shows, else `None`. `None` too when Jev could not be asked: the cheap model then screens the profile. With `strict=True` it raises `JevUnavailable` instead; swipe autopilot uses that. |
+| `jev.guardrail_hits(db, user_id, text)` | Draft guardrail on an outgoing message. | The checks hit, from `denies_ai`, `protected_trait`, `overpromise`, `plays_on_insecurity`. Empty means safe to send. |
+| `jev.read_hits(db, user_id, text)` | Limits of the match read, on one inference's value and evidence. | The checks hit, from `about_other_person`, `guesses_protected_trait`, `targets_insecurity`. |
+| `jev.handover_hits(db, user_id, text)` | Handover trigger on an incoming message. | The checks hit, from `asks_if_ai`, `logistics`, `place_or_exclusivity`, `personal_info`, `sensitive`. Empty means no handover. |
+| `jev.is_hot_lead(db, user_id, text)` | Hot-lead triage on a draft. | `bool`: the draft deserves a live push. |
+| `jev.dealbreaker_hit(db, user_id, bio, dealbreakers)` | Swipe pre-filter on a candidate's bio. | The first dealbreaker the bio shows, else `None`. `None` too when Jev could not be asked: the cheap model then screens the profile. With `strict=True` it raises `JevUnavailable` instead; swipe autopilot uses that. |
 
 - The three functions split the text into sentences and ask about each. A check is hit if any sentence hits it.
-- Results are stored with the row. `messages.handover` is set for every new message from `them`, by `POST /cards/{id}/messages` and by `upsert_message`; it is `null` for the user's own messages. `drafts.guardrail` and `drafts.hot_lead` are set when a draft is written, and `PATCH /drafts/{id}` runs the guardrail again on the edit. The routes return these fields.
+- Results are stored with the row. `messages.handover` is set for a new message from `them`, by `POST /cards/{id}/messages` and by `upsert_message`, if the user has not answered it yet and it is at most a day old. It is `null` (not checked) for an older or answered message and for the user's own messages. `drafts.guardrail` and `drafts.hot_lead` are set when a draft is written, and `PATCH /drafts/{id}` runs the guardrail again on the edit. The routes return these fields.
 - Never send a draft unattended whose `guardrail` is not an empty list: `queue_send(..., unattended=True)` enforces it. Code that sends any other text must call `jev.guardrail_hits()` on it first.
 - Fail closed: when Jev is not configured or a call fails, `guardrail_hits` and `handover_hits` return `["unavailable"]`, which counts as a hit, and `is_hot_lead` returns `False`. Nothing is sent unattended without Jev.
 - The owner must set three variables for the API and the worker; Compose passes them through from your shell or `.env`. Until all three are set, every check fails closed as above.
@@ -266,7 +279,7 @@ Jev is a cheap yes/no classifier reached through treg. It judges one sentence at
 | `JEV_MODEL` | Optional. The Jev model, default `typesafe/jev-1.13`. |
 
 - The request is `POST {JEV_BASE_URL}/call/{JEV_TOOL}` with one question of type `noul`; the answer is read from `answers.q1.noul` (a probability; 0.5 or more is yes). This shape is copied from treg's `jev-memory` example and has not been run against the real service: confirm it with one real call before relying on the checks.
-- Jev calls are not recorded in `llm_calls`.
+- **Cost and cap:** every function but `ask()` takes `db` and `user_id` first, because Jev is paid from the user's AI budget (see "Calling Claude"). Each function records its calls as one row in `llm_calls` (purpose `jev`, cost = calls times `jev.PRICE_USD`). `PRICE_USD` is a guess written by hand: confirm it against what treg charges. While the month's spend is at the cap Jev is not called and every check fails closed as above. So at the cap each new message from a match hands its card over, and those cards stay paused until the user answers or hands back. Never call `ask()` directly from a feature: the call would be neither capped nor recorded.
 - Tests never reach Jev: the autouse `jev` fixture in `tests/conftest.py` replaces `ask()`. It answers no unless the sentence contains a phrase you list, `jev.yes["logistics"] = ["saturday"]`; `jev.asked` records each call.
 
 ## Review queue
@@ -277,12 +290,12 @@ All in `app/review.py`. A pending draft waits in the queue until the user approv
 | --- | --- |
 | `GET /queue` | List what waits for the user, hot leads first, then oldest first. |
 | `POST /drafts/{id}/approve` | Set the draft's `status` to `approved` and return it. `409` if it is no longer pending. |
-| `POST /drafts/{id}/dismiss` | Set the draft's `status` to `dismissed` and return it. `409` if it is no longer pending. |
+| `POST /drafts/{id}/dismiss` | Set the draft's `status` to `dismissed` and return it. Releases the calendar holds of the slots the draft offered. `409` if it is no longer pending, `502` if Google could not be reached (the draft stays pending). |
 
 - A queue item is `{"kind", "hot", "card_id", "card_name", "draft", "suggestions"}`. For kind `draft`, `draft` holds the draft. For kind `handover` (a card whose handover is pending, see "Handover"), `suggestions` holds the suggested replies and `draft` is null. For kind `paid_item` (see "Paid items"), `paid_item` holds the proposal, `card_id` is null and `card_name` is the proposal's `name`; it is never hot. A new kind of item adds its own `kind`.
-- `is_hot_lead(db, card_id)` is the only definition of a hot lead. So far: the match sent a message within the last hour, Jev's hot-lead triage flagged a pending draft of the card (`drafts.hot_lead`), or the card's handover is pending. Add the date-coordination signal there.
+- `is_hot_lead(db, user_id, card_id)` is the only definition of a hot lead: the match sent a message within the last hour, Jev's hot-lead triage flagged a pending draft of the card (`drafts.hot_lead`), the card's handover is pending, or a date is being coordinated (a slot is held for the match, or a message of theirs that hit `logistics` is unanswered).
 - `POST /cards/{id}/drafts` calls `notify_if_hot()`, which sends one push at once for a hot lead and nothing otherwise. Call it wherever else an item joins the queue.
-- Approving sends the draft when its card's app can send: `hand_on_approved_draft(db, user_id, draft)` is called once per approved draft and queues the `send_draft` job (see "Drafts"). When the app cannot send (no connector, paused, `send` unavailable, card without `external_id`), the approval still succeeds, the draft stays `approved` and the user copies it.
+- Approving sends the draft when its card's app can send: `hand_on_approved_draft(db, user_id, draft)` is called once per approved draft and queues the `send_draft` job (see "Drafts"). When the app cannot send (no connector, `send` unavailable, card without `external_id`), the approval still succeeds, the draft stays `approved` and the user copies it.
 
 ## Match read
 
@@ -298,7 +311,7 @@ Routes are in `app/reads.py`; the tables are `inferences` (one row per card and 
 
 - An inference is `{"id", "card_id", "kind", "value", "evidence", "confidence", "corrected"}`. `kind` is `texting_style`, `interests`, `values`, `photos` or `tone`; `confidence` is 0 to 1. `value` is Claude's; the value to use is `corrected` if set, else `value`.
 - A new read replaces the uncorrected inferences. A corrected one keeps its correction and gets Claude's new `value` next to it.
-- `_allowed()` checks every inference Claude replies before it is stored, and drops it when: a field is missing, the evidence is empty or the confidence is outside 0 to 1; it is about anyone but the match (`about` is not `match`); it targets an insecurity; its kind is not listed above; or it guesses a protected trait (ethnicity, religion, health, sexuality, politics) and the user has not opted in. The `about`, `protected_trait` and `targets_insecurity` labels are Claude's own, so a mislabelled inference under an allowed kind gets through.
+- `_allowed()` checks every inference Claude replies before it is stored, and drops it when: a field is missing, the evidence is empty or the confidence is outside 0 to 1; it is about anyone but the match (`about` is not `match`); it targets an insecurity; its kind is not listed above; or it guesses a protected trait (ethnicity, religion, health, sexuality, politics) and the user has not opted in. The `about`, `protected_trait` and `targets_insecurity` labels are Claude's own, so `_allowed()` also asks Jev about the inference's text (`jev.read_hits()`), whatever the labels say. `about_other_person` or `targets_insecurity` drops it. `guesses_protected_trait` drops it unless the user opted in; then it is stored as protected (`unlabelled` if Claude gave no trait), so opting out hides it. When Jev cannot be asked the inference is dropped, so a read stores nothing until Jev is configured.
 - With the opt-in on, a protected trait may also be its own kind (`religion` and so on). Opting out hides stored protected-trait inferences from the read and from drafts; it does not delete them.
 - With no photos on the card the read is from text only.
 - Other server code reads the card's read with `read_lines(db, user_id, card_id)`.
@@ -325,11 +338,11 @@ All in `app/handover.py`. When a new message from the match hits the handover tr
 | `POST /cards/{id}/hand-back` | End the pause, pending or taken over. Returns the same two fields. |
 
 - A card has `handover` and `handover_suggestions`. `handover` is null (autopilot may chat), `pending` (a trigger hit and the user has not answered) or `taken_over`. A new message from `me` ends `pending`; only `hand-back` ends `taken_over`.
-- Before autopilot sends to a card, it must call `handover.is_paused(db, card_id)` and send nothing when it is true. This is next to `autopilot_allowed()`, which knows apps and jobs but not cards.
-- `POST /cards/{id}/messages` and `upsert_message` call `handover.incoming()` for a message from `them` and `handover.answered()` for one from `me`. Code that adds messages another way must call them too.
-- Suggested replies: one Claude call (purpose `handover`) writes up to three. Each goes through `jev.guardrail_hits()` and is dropped on any hit, so no suggestion denies being AI. There are none when Jev is unavailable, the AI budget is reached or Claude fails; the card is paused and the push is sent all the same.
+- Before autopilot sends to a card, it must call `handover.is_paused(db, user_id, card_id)` and send nothing when it is true. This is next to `autopilot_allowed()`, which knows apps and jobs but not cards.
+- `insert_message()` calls `handover.incoming()` for a message from `them` and `handover.answered()` for one from `me` (see "Cards and messages").
+- Suggested replies: one Claude call (purpose `handover`) writes up to three. Each goes through `jev.guardrail_hits()` and is dropped on any hit. Each is also judged together with the match's unanswered messages (`jev.answer_denies_ai(db, user_id, question, answer)`), so a bare "Nope" to "are you a bot?" is dropped too and no suggestion denies being AI. There are none when Jev is unavailable, the AI budget is reached or Claude fails; the card is paused and the push is sent all the same.
 - The push goes through `notify_if_hot()`; a pending handover is a hot lead. Its body is the suggestions, one per line.
-- A hit on a message that is not the card's newest does nothing. A hit on a message older than a day pauses the card without a Claude call or a push, so a first sync of old chats costs nothing and sends nothing. A hit on a card that is already paused changes nothing.
+- A hit on any message the user has not answered pauses the card, newest or not: an app may deliver a batch newest first. A hit on a message with a later message from `me` does nothing. Chat autopilot reads the hits of every unanswered message the same way (`unanswered()` in `app/card_lookup.py`). A message that is already answered, or older than a day, is not sent to Jev at all, so a first sync of old chats costs nothing, pauses nothing and sends nothing. Chat autopilot does not send alone while such an unchecked message is unanswered (see "Chat autopilot"). A hit on a card that is already paused changes nothing.
 
 ## Chat autopilot
 
@@ -341,18 +354,18 @@ All in `app/chat_autopilot.py`, plus the gate in `app/send.py`. With chat autono
   - the card is paused for handover or taken over (`handover.is_paused()`);
   - the card's stage is not `matched` or `chatting`: from Number swapped on, nothing is sent alone.
 - **Any other code that sends alone** must go through `queue_send(..., unattended=True)` too.
-- **Which messages get a reply:** only the card's newest message, from the match, sent within the last day, on a card with no draft that is `pending`, `approved` or `sending`. So a first sync of old chats sends nothing, two messages in a row get one reply, and a draft left in the review queue stops further replies on that card until the user sends or dismisses it.
-- **Date logistics:** Claude is told to name no day, time or place, and `jev.names_logistics()` checks its text; a hit adds `logistics` to the draft's `guardrail`, so it goes to the user. In `guardrails` mode a message from the match about logistics hands the card over as before. In `full` mode a message whose only handover hit is `logistics` does not pause the card. Instead the job:
-  - offers up to 2 slots from `calendar.free_slots()`, calls `hold_slot()` for each and adds the sentence that names them itself, so the only times in a message sent alone are held slots;
+- **Which messages get a reply:** only the card's newest message, from the match, sent within the last day, on a card with no draft that is `pending`, `approved` or `sending`. If an older message from the match is still unanswered and was never checked for handover (`messages.handover` is null), the reply gets `unchecked` in its `guardrail` and waits for the user. So a first sync of old chats sends nothing, two messages in a row get one reply, and a draft left in the review queue stops further replies on that card until the user sends or dismisses it.
+- **Date logistics:** Claude is told to name no day, time or place, and `jev.names_logistics()` checks its text; a hit adds `logistics` to the draft's `guardrail`, so it goes to the user. In `guardrails` mode a message from the match about logistics hands the card over as before. In `full` mode the app coordinates a time alone and nothing else: a message whose only handover hit is `logistics` does not pause the card. A place to meet or exclusivity also hits `place_or_exclusivity`, so it hands the card over like every other trigger. For a time the job:
+  - calls `calendar.offer_slots()`, which holds up to 2 free slots for the draft and returns the sentence that names them, so the only times in a message sent alone are held slots;
   - if the card has holds, asks Claude (purpose `date_coordination`) whether the match accepts one, declines all, or says something else. Accepted: `confirm_date()` for that slot and the card moves to `date_set`, where autopilot stops; the reply waits in the review queue. Declined: `release_holds()` and a new offer. Anything else, no free slot or no connected calendar: the draft goes to the user with `logistics`.
 - **Audit:** the sent message's entry has the trigger `chat autopilot (<level>): reply to message <messages.id>`. Holds, releases and confirmations have `chat autopilot (full): offered a time`, `match declined` and `match agreed`.
-- **AI disclosure:** `GET` and `PUT /settings/ai-disclosure` with `{"enabled": true}`, on by default. While on, the first message sent alone to a match ends with `DISCLOSURE` ("Heads up: an AI assistant helps me write my messages here."). First means the card has no `chat autopilot` message in the audit log. The sentence is part of the draft's `original`, so the guardrail checks it and the user sees it if the draft is held back. It is per user, not per match's country: keep it on where the law requires disclosure, such as the EU.
+- **AI disclosure:** `GET` and `PUT /settings/ai-disclosure` with `{"enabled": true}`, on by default. While on, the first message sent alone to a match ends with `DISCLOSURE` ("Heads up: an AI assistant helps me write my messages here."). First means the card's `ai_disclosed` is false. The `send_draft` job sets it when a message that carries the sentence goes out, by autopilot or by the user's tap. So a match who got replies while the setting was off is told on the next reply after it is turned on, and a user who edits the sentence out of a held draft has not disclosed. The sentence is part of the draft's `original`, so the guardrail checks it and the user sees it if the draft is held back. It is per user, not per match's country: keep it on where the law requires disclosure, such as the EU.
 - **Limits:**
   - Only replies: openers to new matches are not sent alone.
   - Nothing queues a reply when autopilot is resumed, the autonomy is raised or a card is handed back; the match's next message does.
   - Offered slots are 19:00 to 21:00 on the next 7 days in `USER_TIMEZONE` (an IANA name such as `Europe/Berlin`, default `UTC`; Compose passes it to the API and worker). The slot sentence is English.
-  - Holds of a draft the user dismisses stay until the card is archived.
-  - Jev's `logistics` check also covers exclusivity, so full mode answers such a message alone; only the `overpromise` guardrail and the rule given to Claude stand in the way of a promise.
+  - A hold is tied to the draft that offers it (`calendar_holds.draft_id`). Dismissing that draft, or a failed send of it, releases its holds. If the user edits the offer out of a draft and sends it, the holds stay until the match declines or the card is archived. If a failed send did reach the match, they hold an offer for a slot that is free again.
+  - Whether a message is about a place or exclusivity is Jev's judgement (`place_or_exclusivity`); when Jev cannot be asked the card is handed over.
   - Not run against the real Tinder, Claude, Jev or Google.
 
 ## Preferences
@@ -397,7 +410,18 @@ Compose passes `TOKEN_VAULT_MASTER_KEY` from your shell or `.env` to the API and
 Every autopilot action must call `record_action(connection, user_id, type=..., app=..., target=..., trigger=...)` from `app.audit`, in the same transaction as the action. `type` is one of `message`, `like`, `pass`, `profile_change`, `calendar_hold`, `purge`, `super_like`, `rose`, `boost`.
 The `audit_log` table is append-only (a trigger rejects `UPDATE` and `DELETE`). `GET /audit-log?app=&type=` lists the current user's entries, newest first.
 
-An entry about one match must name them only at the start of `target`, as `card:<cards.id>` or `match:<external_id>`, alone or followed by a space and details (`card:7 hold 2026-12-01T19:00:00+00:00`). It must never hold their name or message text: a purge finds the entries to delete by that start of `target` alone.
+`target` is one of these, alone or followed by a space and details (`card:7 hold 2026-12-01T19:00:00+00:00`):
+
+| `target` starts with | About | Written by |
+| --- | --- | --- |
+| `card:<cards.id>` | A match | `message` (a sent draft), `calendar_hold`, `purge` of a card |
+| `match:<external_id>` | A match, by the app's ID, for code that has no card. Nothing writes it today; the purge deletes it. | |
+| `candidate:<swipe_candidates.id>` | A profile the user has not matched with | `like` and `pass` by swipe autopilot, `super_like`, `rose`, `purge` of a candidate |
+| `account` | The user's own account on that app | `boost` |
+| `bio` | The user's own bio on that app | `profile_change` |
+| `photo:<photos.id>` | One of the user's own photos; `app` is `all` | `profile_change` |
+
+An entry about another person must name them only at the start of `target`, in one of the first three forms. It must never hold their name or message text: a purge finds the entries to delete by that start of `target` alone (the `cards_purge_audit_log` and `swipe_candidates_purge_audit_log` triggers). A new form of target for a person needs its own purge.
 
 ## Find and purge
 
@@ -412,6 +436,9 @@ A match can ask for their data to be deleted. Routes are in `app/purge.py`.
 - The purge cannot be undone. Without `"confirm": "purge"` the request is `422`. It runs in one transaction: if any card is not the caller's it is `404` and nothing is deleted.
 - Every table that holds data about a match must reference `cards` (directly or through another table) with `ON DELETE CASCADE`; deleting the card is the purge. `tests/test_purge.py` reads the foreign keys from the database, so a new card table fails `test_no_row_for_a_purged_person_remains_in_any_table` until that test seeds a row in it. Anything kept outside Postgres needs its own delete in `purge_people()`: today that is the Google Calendar events of the card's holds, held or confirmed, whose titles carry the match's name. No file about a match is kept on disk: `card_photos` holds URLs, an imported screenshot is not stored, and the files under `PHOTOS_DIR` are the user's own photos.
 - Audit log: the entries about the purged match are deleted, not kept or blanked, because `target` identifies the person. The `cards_purge_audit_log` trigger does it when the card is deleted, which is the only delete the append-only trigger lets through besides deleting the user. The purge then adds one entry per card: type `purge`, the card's app, target `card:<id>` (an id that now points at nothing), trigger `deletion request`.
+- **A purged person stays purged.** The purge stores one tombstone per card with an `external_id` and per candidate, in `purge_tombstones`: a keyed hash (HMAC-SHA256 under `TOKEN_VAULT_MASTER_KEY`) of the user, the app and the app's ID for the person. It holds no name, app or ID. `app/tombstones.py` has `bury()` and `is_buried()`. Every path that stores a match or a candidate asks `is_buried()` first: `upsert_card()` returns `None` for a purged match (sync then skips their messages), `POST /cards` with their `external_id` is `409`, and `screen()` skips a purged profile. New code that stores a person from an app must ask too.
+- Limits of the tombstone: a new master key forgets all of them. A card without an `external_id` has none, so a screenshot of the same chat makes a new card. A purged candidate who later becomes a match has another ID and gets a card.
+- `connector_alerts` holds no match or profile ID (see "Connectors"), so a purge has nothing to delete there.
 - Not covered: backups made before the purge still hold the data until they expire.
 
 ## Autonomy and kill switch
@@ -432,6 +459,8 @@ pause(db, user_id, "tinder", reason="ban signal")  # the reason is recorded on s
 resume(db, user_id, "tinder")
 autopilot_allowed(db, user_id, "tinder", "chat")   # False if paused, or if chat autonomy is off or copilot
 ```
+
+A pause stops only what the app would do alone. What the user does by hand still goes out while paused: a tapped or approved draft, a swipe, an approved paid item.
 
 Resuming all apps lifts only the pause on all apps. An app paused on its own stays paused until it is resumed by name.
 
@@ -468,8 +497,9 @@ messages = call(db, user_id, TinderConnector(), "read_messages", match_id)
 
 - **Switch a capability off:** set `CONNECTOR_DISABLED_CAPABILITIES=tinder:send,hinge:like` (comma-separated `app:capability`).
 - **Unavailable:** `unavailable(db, user_id, connector, capability)` returns the reason, or `None`. `call()` raises `CapabilityUnavailable` and does not touch the app when the capability is not declared, is disabled, the app is copilot-only, or the user has no stored token for the app.
-- **Fallback to copilot:** if the connector method raises, `call()` inserts a row in `connector_alerts` (`user_id`, `app`, `capability`, `error` = `repr()` of the exception) and raises `CapabilityFailed`, with the connector's exception as `__cause__`. The row is written in its own transaction, so it survives the failed job's rollback. That row is both the alert and the fallback: `is_copilot_only(db, user_id, app)` is true while the user has any alert for the app, and every capability of that app is then unavailable for that user. `alerts(db, user_id)` lists them. Delete the user's rows for an app to re-enable its connector.
-- **Ban detection:** `classify(error)` sorts the connector's exception into `auth failure` (HTTP 401), `ban signal` (HTTP 403) or `transient` (anything else), stored in the alert's `reason`. An auth failure or ban signal also calls `pause(user_id, app, reason)` in the same transaction as the alert, so that app's autopilot stops for that user; a transient error does not pause. `GET /connectors/alerts` returns the user's alerts (`id`, `app`, `capability`, `reason`, `error`, `created_at`), newest first. A fresh token lifts the copilot-only fallback but not the pause: resume with `POST /autopilot/resume?app=...`.
+- **Transient errors change nothing:** if the connector method raises anything but an HTTP 401 or 403 (a timeout, a 5xx, a 429), `call()` logs it and raises `CapabilityFailed`. No alert is stored, nothing is paused and no push is sent: the app stays on, and a job that fails this way is retried by the job queue.
+- **Fallback to copilot:** if the connector method raises an auth failure or ban signal (see below), `call()` inserts a row in `connector_alerts` (`user_id`, `app`, `capability`, `error` = the exception's class name, plus the status code for an HTTP error, such as `HTTPStatusError 401`; never its text or URL, which can hold match and profile IDs and would outlive a purge; the full error is logged) and raises `CapabilityFailed`, with the connector's exception as `__cause__`. The row is written in its own transaction, so it survives the failed job's rollback. That row is both the alert and the fallback: `is_copilot_only(db, user_id, app)` is true while the user has any alert for the app, and every capability of that app is then unavailable for that user. `alerts(db, user_id)` lists them. Delete the user's rows for an app to re-enable its connector.
+- **Ban detection:** `classify(error)` sorts the connector's exception into `auth failure` (HTTP 401), `ban signal` (HTTP 403) or `transient` (anything else). An auth failure or ban signal is stored in the alert's `reason`, calls `pause(user_id, app, reason)` in the same transaction as the alert, so that app's autopilot stops for that user, and sends a push. `GET /connectors/alerts` returns the user's alerts (`id`, `app`, `capability`, `reason`, `error`, `created_at`), newest first. A fresh token lifts the copilot-only fallback but not the pause: resume with `POST /autopilot/resume?app=...`.
 
 Test a connector's callers with a fake like `FakeConnector` in `tests/test_connectors.py`.
 
@@ -538,12 +568,14 @@ All take the caller's transaction as `db`. Datetimes must be timezone-aware.
 from app import calendar
 
 slots = calendar.free_slots(db, user_id, start, end, duration=timedelta(hours=2))  # [(start, end), ...]
-hold_id = calendar.hold_slot(db, user_id, card_id, start, end, trigger="chat autopilot: proposed a time")
-calendar.release_holds(db, user_id, card_id, trigger="match declined")
+sentence = calendar.offer_slots(db, user_id, card_id, draft_id, trigger="copilot: offered a time")  # "I'm free ... or ...", or None
+hold_id = calendar.hold_slot(db, user_id, card_id, start, end, trigger="chat autopilot: proposed a time", draft_id=draft_id)
+calendar.release_holds(db, user_id, card_id, trigger="match declined")  # draft_id=... for one draft's holds only
 calendar.confirm_date(db, user_id, card_id, trigger="match agreed", start=start)  # True if a hold was confirmed
 ```
 
 - `free_slots()` cuts the window into slots of `duration` from `start` and returns those that touch no busy time in Google and no row in `calendar_holds`. Choosing the window (which days and hours) is the caller's job.
+- `offer_slots()` is how a draft offers a time: it picks up to 2 free evenings (19:00 to 21:00 on the next 7 days in `USER_TIMEZONE`, a fixed v1 window), holds each with `hold_slot(..., draft_id=)` and returns the English sentence to add to the draft. `None` when no evening is free.
 - `hold_slot()` must be called for every slot a message offers. It creates a tentative event named "Hold: date with <name>". It raises `SlotTaken` if the slot is busy in Google or overlaps any slot held or confirmed for a match.
 - Two matches never get the same slot because the database refuses it: `calendar_holds` has an exclusion constraint, so no two rows of one user overlap. A second hold on an overlapping slot fails even if two jobs race.
 - `release_holds()` deletes the card's tentative events and their rows. Call it when the match declines. `PATCH /cards/{id}` with `stage: archived` calls it too.
@@ -561,7 +593,7 @@ calendar.confirm_date(db, user_id, card_id, trigger="match agreed", start=start)
 
 - **Start:** `PUT /connectors/{app}/token` with `{"token": "..."}` stores the token in the vault, deletes the user's alerts for the app (so the connector is on again) and queues a `sync_matches` job with payload `{"app": app}`. It returns `204`, or `404` if the app has no connector.
 - **Schedule:** `sync_matches` is a recurring job (`every=SYNC_INTERVAL`, 15 minutes). The recurring run has an empty payload and syncs every app in `CONNECTORS`. It skips an app, without failing, when the user has no token for it, the app is copilot-only or a read capability is switched off.
-- **Cards:** a new match becomes a card in `matched`. `upsert_card()` in `app/cards.py` finds the card by `external_id`; on a later sync it changes only the name.
+- **Cards:** a new match becomes a card in `matched`. `upsert_card()` in `app/cards.py` finds the card by `external_id`; on a later sync it changes only the name. A match the user purged is skipped (see "Find and purge").
 - **Messages:** `upsert_message()` adds a message unless the card already has its `external_id`. A new message moves a card from `matched` to `chatting`. Sync never changes any other stage.
 - **Fewer requests:** sync reads a match's messages only when the match has messages and its newest one is not stored yet.
 - **Not built:** a match that disappears from the app (unmatched) keeps its card and stage.
@@ -580,12 +612,12 @@ All in `app/swipes.py`; the table is `swipe_candidates` (one row per profile an 
 
 - A candidate is `{"id", "app", "name", "bio", "photos", "suggestion", "reason", "source", "decision"}`. `photos` are URLs for the user to look at. `source` is the pre-filter that suggested: `jev` or `model`.
 - **Pre-filters, cheapest first:** `jev.dealbreaker_hit()` asks Jev about each bio sentence and each of the user's dealbreakers; a hit is a `pass` with no Claude call. The rest go to a cheap Claude model through `llm.call()` with purpose `swipe_prescreen`. The model is read from `SWIPE_PRESCREEN_MODEL` (default `claude-haiku-5-5`). It sees the preferences in force, the name and the bio. Photos are never analysed.
-- One request screens at most `BATCH` (10) new profiles, inside the request. A profile already stored is not screened again. At the AI budget the request stops screening and returns what it has. A model answer that is neither `like` nor `pass` stores nothing; the profile is screened again when the app offers it next.
+- One request screens at most `BATCH` (10) new profiles, inside the request. A profile already stored is not screened again. At the AI budget the request stops screening and returns what it has; Jev is under the same budget, so nothing new is screened then. A model answer that is neither `like` nor `pass` stores nothing; the profile is screened again when the app offers it next.
 - **Manual swipes:** a decided row is kept with both `suggestion` and `decision`. These rows are the manual-swipe preference signal: the pre-screen prompt holds `feedback.swipe_lines()` (see "Feedback loop").
 - The decision route answers with the candidate plus `applied`. `applied: false` means the app was not reached (connector unavailable or failed, see "Connectors"): the swipe is stored and the user swipes in the dating app by hand.
 - `apply_decision(db, user_id, app, profile_id, decision)` is the one function that swipes through a connector. Swipe autopilot must call it and `record_action()`. It sends a plain like or pass and never spends a paid item.
 - The copilot routes do not read the swipe autonomy level: a request from the user is the consent.
-- Find and purge: a candidate is not a card. Find it with `GET /people/candidates` and purge it with `candidate_ids` (see "Find and purge"). The dating app may offer a purged profile again; it is then stored again.
+- Find and purge: a candidate is not a card. Find it with `GET /people/candidates` and purge it with `candidate_ids` (see "Find and purge"). The dating app may offer a purged profile again; it is not stored again.
 
 ## Feedback loop
 
@@ -606,7 +638,7 @@ Nothing is trained in v1. What the user did changes later prompts and retrieval 
 The `swipe_autopilot` job in `app/swipes.py` likes and passes without the user. It is registered as `@handler("swipe_autopilot", autopilot="swipe", every=AUTOPILOT_INTERVAL)` (1 hour) and runs for every app in `CONNECTORS`.
 
 - **Off by default.** The worker skips the job unless the user's swipe autonomy is `guardrails` or `full` (`PUT /autonomy/swipe`). The two levels act the same here.
-- **What stops it:** `autopilot_allowed(db, user_id, app, "swipe")` is asked for each app and again before each swipe. So the kill switch (all apps or one), a ban or auth pause of the app and the AI budget cap all stop it, also in the middle of a run. A failed swipe ends the run for that app (it is then copilot-only).
+- **What stops it:** `autopilot_allowed(db, user_id, app, "swipe")` is asked for each app and again before each swipe. So the kill switch (all apps or one), a ban or auth pause of the app and the AI budget cap all stop it, also in the middle of a run. A failed swipe ends the run for that app; after a transient error the next run tries again.
 - **What it swipes:** the candidates that wait in `swipe_candidates`, oldest first, by their stored suggestion. It calls the copilot's `screen()` for new candidates only when fewer wait than it may swipe. It swipes with `apply_decision()`, so a paid item is never spent. A candidate with a pending paid-item proposal is skipped (see "Paid items").
 - **Dealbreakers are checked again before each swipe**, with `jev.dealbreaker_hit(..., strict=True)`: a hit turns a stored like into a pass. If Jev cannot be asked the profile is not swiped and waits for the user. A profile with an empty bio has nothing to check and is swiped by its suggestion.
 - **Limits:** `GET /swipes/limits` and `PUT /swipes/limits` with `{"swipes_per_run": 5, "swipes_per_day": 20}` (the defaults; columns on `users`). They count unattended swipes per app: per run of the job, and in any 24 hours. Allowed values are 1 to 10 per run and 1 to 100 per day. Keep them low: fast swiping is a ban signal.

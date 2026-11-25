@@ -62,7 +62,8 @@ struct APIClient {
     }
 
     /// Approves a draft: the server queues it and its worker sends it through the dating app. `409` means the
-    /// server refused: the app is paused, sending is off for it, or the draft was already sent.
+    /// server refused: sending is off for the app, or the draft was already sent. The kill switch does not
+    /// stop it.
     func sendDraft(draftID: Int) async throws {
         try await data("POST", "drafts/\(draftID)/send")
     }
@@ -179,16 +180,97 @@ struct APIClient {
         try await send("PUT", "photos/\(photoID)/edit", body: Self.encoder.encode(["accept": accept]))
     }
 
-    private func send<Response: Decodable>(_ method: String, _ path: String, body: Data? = nil) async throws -> Response {
-        try Self.decoder.decode(Response.self, from: await data(method, path, body: body))
+    // Settings. Each call returns the state the server now holds.
+
+    /// What the kill switch pauses.
+    func pauses() async throws -> Pauses {
+        try await send("GET", "autopilot/pause")
+    }
+
+    /// Pauses or resumes autopilot for one app, or for all apps when `app` is nil. A pause stops only what
+    /// the server would do alone: a draft the user taps still sends.
+    func setPaused(_ paused: Bool, app: String? = nil) async throws -> Pauses {
+        try await send("POST", "autopilot/\(paused ? "pause" : "resume")", query: app.map { ["app": $0] } ?? [:])
+    }
+
+    /// The autonomy level of each job: `chat`, `profile`, `swipe`.
+    func autonomy() async throws -> [String: AutonomyLevel] {
+        try await send("GET", "autonomy")
+    }
+
+    func setAutonomy(job: String, level: AutonomyLevel) async throws -> [String: AutonomyLevel] {
+        try await send("PUT", "autonomy/\(job)", body: Self.encoder.encode(["level": level]))
+    }
+
+    /// This month's AI spend and the cap.
+    func budget() async throws -> Budget {
+        try await send("GET", "budget")
+    }
+
+    func setBudgetCap(_ usd: Double) async throws -> Budget {
+        try await send("PUT", "budget", body: Self.encoder.encode(["cap_usd": usd]))
+    }
+
+    /// Whether the match read may guess ethnicity, religion, health, sexuality and politics. Off by default.
+    func protectedTraitGuesses() async throws -> Bool {
+        try await enabled("GET", "settings/protected-trait-guesses")
+    }
+
+    func setProtectedTraitGuesses(_ on: Bool) async throws {
+        _ = try await enabled("PUT", "settings/protected-trait-guesses", on)
+    }
+
+    /// Whether the first message sent alone to a match says that an AI helps write. On by default.
+    func aiDisclosure() async throws -> Bool {
+        try await enabled("GET", "settings/ai-disclosure")
+    }
+
+    func setAIDisclosure(_ on: Bool) async throws {
+        _ = try await enabled("PUT", "settings/ai-disclosure", on)
+    }
+
+    /// The user's cards, on every app, whose name or handle contains `query`.
+    func findPeople(_ query: String) async throws -> [Card] {
+        try await send("GET", "people", query: ["q": query])
+    }
+
+    /// The profiles the user only swiped on whose name or profile ID contains `query`.
+    func findCandidates(_ query: String) async throws -> [SwipeCandidate] {
+        try await send("GET", "people/candidates", query: ["q": query])
+    }
+
+    /// Deletes the cards and swipe candidates and everything stored about them. It cannot be undone.
+    /// Returns how many were deleted.
+    func purge(cardIDs: [Int], candidateIDs: [Int]) async throws -> Int {
+        let purged: Purged = try await send(
+            "POST", "people/purge",
+            body: Self.encoder.encode(Purge(cardIds: cardIDs, candidateIds: candidateIDs, confirm: PurgeConfirmation.word)))
+        return purged.purged
+    }
+
+    private func enabled(_ method: String, _ path: String, _ on: Bool? = nil) async throws -> Bool {
+        let body = try on.map { try Self.encoder.encode(["enabled": $0]) }
+        let setting: [String: Bool] = try await send(method, path, body: body)
+        return setting["enabled"] ?? false
+    }
+
+    private func send<Response: Decodable>(
+        _ method: String, _ path: String, body: Data? = nil, query: [String: String] = [:]
+    ) async throws -> Response {
+        try Self.decoder.decode(Response.self, from: await data(method, path, body: body, query: query))
     }
 
     /// For routes that answer with no body, call this instead of `send`.
     @discardableResult
     private func data(
-        _ method: String, _ path: String, body: Data? = nil, contentType: String = "application/json"
+        _ method: String, _ path: String, body: Data? = nil, contentType: String = "application/json",
+        query: [String: String] = [:]
     ) async throws -> Data {
-        var request = URLRequest(url: baseURL.appending(path: path))
+        var url = baseURL.appending(path: path)
+        if !query.isEmpty {
+            url.append(queryItems: query.map { URLQueryItem(name: $0.key, value: $0.value) })
+        }
+        var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         if let body {
@@ -226,6 +308,16 @@ struct APIClient {
 
 private struct SwipeDecided: Decodable {
     let applied: Bool
+}
+
+private struct Purge: Encodable {
+    let cardIds: [Int]
+    let candidateIds: [Int]
+    let confirm: String
+}
+
+private struct Purged: Decodable {
+    let purged: Int
 }
 
 private struct CardChanges: Encodable {

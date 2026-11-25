@@ -114,6 +114,16 @@ def suggestions(client) -> dict[str, dict]:
     return {candidate["name"]: candidate for candidate in response.json()}
 
 
+def test_a_purged_candidate_is_not_stored_again_when_the_app_offers_the_profile_again(signed_in, llm):
+    llm.reply = "like\nShe climbs."
+    dana = suggestions(signed_in)["Dana"]
+
+    assert signed_in.post("/people/purge", json={"candidate_ids": [dana["id"]], "confirm": "purge"}).status_code == 200
+
+    assert "Dana" not in suggestions(signed_in)
+    assert signed_in.get("/people/candidates", params={"q": "Dana"}).json() == []
+
+
 def test_a_dealbreaker_in_the_bio_is_a_pass_with_no_claude_call_and_no_photo_analysis(signed_in, tinder, jev, llm):
     signed_in.put("/preferences", json={"dealbreakers": ["smokes"]})
     jev.yes["dealbreaker"] = ["smoke"]
@@ -162,13 +172,13 @@ def test_a_profile_is_screened_once_and_waits_until_the_user_decides(signed_in, 
     assert signed_in.get("/swipes", params={"app": "tinder"}).json() == list(first.values())
 
 
-def test_at_the_ai_budget_only_the_jev_passes_are_suggested(signed_in, jev, llm):
+def test_at_the_ai_budget_nothing_is_screened_by_jev_or_by_the_model(signed_in, jev, llm):
     signed_in.put("/preferences", json={"dealbreakers": ["smokes"]})
     jev.yes["dealbreaker"] = ["smoke"]
     signed_in.put("/budget", json={"cap_usd": 0})
 
-    assert list(suggestions(signed_in)) == ["Dana"]
-    assert llm.prompts == []
+    assert list(suggestions(signed_in)) == []
+    assert llm.prompts == [] and jev.asked == []
 
 
 def test_an_answer_that_is_neither_like_nor_pass_suggests_nothing(signed_in, llm):
@@ -221,7 +231,7 @@ def test_nothing_is_swiped_in_tinder_until_the_user_decides(signed_in, tinder, l
 def test_when_tinder_refuses_the_swipe_it_is_still_stored_and_the_user_is_told(signed_in, tinder, llm):
     llm.reply = "like\nShe climbs."
     eve = suggestions(signed_in)["Eve"]
-    tinder.status = 500
+    tinder.status = 403
 
     swipe = decide(signed_in, eve, "like").json()
 

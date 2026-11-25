@@ -15,7 +15,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import Connection, text
 
-from app import feedback, jev, llm, paid_items
+from app import feedback, jev, llm, paid_items, tombstones
 from app.audit import record_action
 from app.auth import CurrentUser, Db
 from app.autopilot import autopilot_allowed
@@ -76,7 +76,7 @@ def suggest(db: Connection, user_id: int, wants: PreferencesVersion, candidate: 
     A dealbreaker Jev finds in the bio is a pass at once, before anything is paid for. Raises
     `llm.BudgetReached` when the cheap model is needed and the user's AI budget is spent.
     """
-    dealbreaker = jev.dealbreaker_hit(candidate["bio"], wants.dealbreakers)
+    dealbreaker = jev.dealbreaker_hit(db, user_id, candidate["bio"], wants.dealbreakers)
     if dealbreaker:
         return "pass", f"Dealbreaker: {dealbreaker}", "jev"
     reply = llm.call(
@@ -115,7 +115,7 @@ def pending(db: Connection, user_id: int, app: str | None = None) -> list:
 def apply_decision(db: Connection, user_id: int, app: str, profile_id: str, decision: Swipe) -> bool:
     """Swipe on a profile through the app's connector. False when the app could not be reached.
 
-    A plain like or pass only: no paid item is ever spent. A failure makes the app copilot-only (see `call()`).
+    A plain like or pass only: no paid item is ever spent. An auth failure or ban signal makes the app copilot-only (see `call()`).
     """
     try:
         call(db, user_id, CONNECTORS[app](), decision, profile_id)
@@ -142,7 +142,13 @@ def screen(db: Connection, user_id: int, app: str) -> None:
         ).scalars()
     )
     wants = current_preferences(db, user_id)
-    for candidate in [candidate for candidate in candidates if candidate["id"] not in seen][:BATCH]:
+    new = [
+        candidate
+        for candidate in candidates
+        # A profile the user purged is not stored again, however often the app offers it.
+        if candidate["id"] not in seen and not tombstones.is_buried(db, user_id, "profile", app, candidate["id"])
+    ]
+    for candidate in new[:BATCH]:
         try:
             suggested = suggest(db, user_id, wants, candidate)
         except llm.BudgetReached:
@@ -185,7 +191,7 @@ def suggestions(app: str, user: CurrentUser, db: Db):
     except CapabilityUnavailable as error:
         raise HTTPException(status_code=409, detail=str(error))
     except CapabilityFailed:
-        raise HTTPException(status_code=502, detail=f"{app} did not answer; it is now copilot-only")
+        raise HTTPException(status_code=502, detail=f"{app} did not answer; try again")
     return pending(db, user.id, app)
 
 
@@ -272,7 +278,7 @@ def swipe_autopilot(db: Connection, user_id: int, payload: dict) -> None:
         for candidate in pending(db, user_id, app):
             if left <= 0 or not autopilot_allowed(db, user_id, app, "swipe"):
                 break
-            if paid_items.waits_for_approval(db, candidate.id):
+            if paid_items.waits_for_approval(db, user_id, candidate.id):
                 continue  # a paid item is proposed for this profile: autopilot waits for the user's answer
             decision, source = candidate.suggestion, candidate.source
             if (decision, source) != ("pass", "jev"):
@@ -280,18 +286,18 @@ def swipe_autopilot(db: Connection, user_id: int, payload: dict) -> None:
                 # shortcut: this asks Jev a second time about a profile screened in this run; store the result
                 # of the first check on the row if the calls get costly.
                 try:
-                    if jev.dealbreaker_hit(candidate.bio, wants.dealbreakers, strict=True):
+                    if jev.dealbreaker_hit(db, user_id, candidate.bio, wants.dealbreakers, strict=True):
                         decision, source = "pass", "jev"
                 except jev.JevUnavailable:
                     continue  # no dealbreaker check, no unattended swipe: the profile waits for the user
             if not apply_decision(db, user_id, app, candidate.profile_id, decision):
-                break  # the app was not reached and is now copilot-only; the candidate waits for the user
+                break  # the app was not reached: the candidate waits for the next run, or for the user
             db.execute(
                 text(
                     "UPDATE swipe_candidates SET decision = :decision, decided_at = now(), unattended = true"
-                    " WHERE id = :id"
+                    " WHERE id = :id AND user_id = :user_id"
                 ),
-                {"decision": decision, "id": candidate.id},
+                {"decision": decision, "id": candidate.id, "user_id": user_id},
             )
             record_action(
                 db, user_id, type=decision, app=app, target=f"candidate:{candidate.id}", trigger=_TRIGGERS[source]

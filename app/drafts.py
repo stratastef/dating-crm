@@ -1,11 +1,13 @@
 """Copilot drafts: an opener or reply Claude writes for a card in the user's voice, and the user's edit of it."""
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import Connection, Row, text
 
-from app import jev, llm, review
+from app import calendar, jev, llm, vault
 from app.auth import CurrentUser, Db
+from app.card_lookup import chat_lines, conversation, find_card, unanswered
 from app.reads import read_lines
 from app.voice import queue_profile, similar_chats
 
@@ -41,40 +43,68 @@ _SYSTEM = (
 )
 
 
-def _chat(messages) -> list[str]:
-    """Prompt lines for (sender, body) pairs; sender is `me` or `them`."""
-    return [f"{sender}: {body}" for sender, body in messages]
-
-
 @router.post("/cards/{card_id}/drafts", response_model=Draft, status_code=201)
 def write_draft(card_id: int, user: CurrentUser, db: Db):
     """Write a draft for the card and store it: an opener when the card has no messages, a reply otherwise."""
-    draft, name = draft_for(db, user.id, card_id)
-    review.notify_if_hot(db, user.id, card_id, name)
+    from app.review import notify_if_hot  # imported here: app.review imports this module for `Draft`
+
+    try:
+        draft, name = draft_for(db, user.id, card_id)
+    except CannotDraft as error:
+        raise HTTPException(status_code=error.status, detail=str(error))
+    notify_if_hot(db, user.id, card_id, name)
     return draft
 
 
-def draft_for(db: Connection, user_id: int, card_id: int, rule: str = "") -> tuple[Row, str]:
+class CannotDraft(Exception):
+    """`draft_for()` wrote no draft. `status` is the HTTP status a route answers with; a job just catches it."""
+
+    def __init__(self, status: int, why: str):
+        super().__init__(why)
+        self.status = status
+
+
+_TIME_RULE = "Name no day and no time to meet: free times from the calendar are added after your text."
+
+
+def _asked_for_a_time(db: Connection, user_id: int, card_id: int) -> bool:
+    """True if the draft should offer times: the match's unanswered messages are about logistics, no slot is
+    held for them yet, and the user's calendar is connected."""
+    if not any("logistics" in (message.handover or []) for message in unanswered(db, user_id, card_id)):
+        return False
+    held = db.execute(
+        text(
+            "SELECT EXISTS (SELECT 1 FROM calendar_holds"
+            " WHERE user_id = :user_id AND card_id = :card_id AND status = 'held')"
+        ),
+        {"user_id": user_id, "card_id": card_id},
+    ).scalar_one()
+    return not held and vault.read_token(db, user_id, calendar.VAULT_APP) is not None
+
+
+def draft_for(db: Connection, user_id: int, card_id: int, rule: str = "", offer: bool = True) -> tuple[Row, str]:
     """Have Claude write a draft for the card and store it as `pending`. Returns the draft and the match's name.
 
-    `rule` is one more sentence for the task, for a caller that limits what the draft may say. Raises the
-    same `HTTPException`s the route answers with.
+    `rule` is one more sentence for the task, for a caller that limits what the draft may say. Raises
+    `CannotDraft` when there is no such card, no style profile yet, or Claude's reply is empty.
+
+    When the match asked for a time (see `_asked_for_a_time()`), the draft ends with a sentence that offers
+    free slots, each held for this draft (`calendar.offer_slots()`). A caller that offers times itself
+    passes `offer=False`.
     """
-    card = db.execute(
-        text("SELECT app, name, notes FROM cards WHERE id = :id AND user_id = :user_id"),
-        {"id": card_id, "user_id": user_id},
-    ).one_or_none()
+    offer = offer and _asked_for_a_time(db, user_id, card_id)
+    if offer:
+        rule = f"{rule} {_TIME_RULE}".strip()
+    card = find_card(db, user_id, card_id)
     if not card:
-        raise HTTPException(status_code=404, detail="card not found")
+        raise CannotDraft(404, "card not found")
     profile = db.execute(
         text("SELECT profile FROM voice_profiles WHERE user_id = :user_id"), {"user_id": user_id}
     ).scalar_one_or_none()
     if not profile:
-        raise HTTPException(status_code=409, detail="style profile not written yet")
+        raise CannotDraft(409, "style profile not written yet")
     # shortcut: the whole conversation is sent, trim to the newest messages if chats get long.
-    messages = db.execute(
-        text("SELECT sender, body FROM messages WHERE card_id = :card_id ORDER BY sent_at, id"), {"card_id": card_id}
-    ).all()
+    messages = conversation(db, user_id, card_id)
     kind = "reply" if messages else "opener"
     prompt = "\n".join(
         [
@@ -82,7 +112,7 @@ def draft_for(db: Connection, user_id: int, card_id: int, rule: str = "") -> tup
             f"<style_profile>\n{profile}\n</style_profile>",
             "<example_chats>",
             *(
-                "\n".join(["<chat>", *_chat((line["sender"], line["body"]) for line in chat.messages), "</chat>"])
+                "\n".join(["<chat>", *chat_lines((line["sender"], line["body"]) for line in chat.messages), "</chat>"])
                 for chat in similar_chats(db, user_id, card_id)
             ),
             "</example_chats>",
@@ -91,7 +121,7 @@ def draft_for(db: Connection, user_id: int, card_id: int, rule: str = "") -> tup
             *read_lines(db, user_id, card_id),
             "</match_read>",
             "<conversation>",
-            *_chat(messages),
+            *chat_lines(messages),
             "</conversation>",
         ]
     )
@@ -99,22 +129,36 @@ def draft_for(db: Connection, user_id: int, card_id: int, rule: str = "") -> tup
     # to a job if drafts get slow or many users draft at once.
     original = llm.call(db, user_id, "draft", _SYSTEM, prompt).text.strip()
     if not original:
-        raise HTTPException(status_code=502, detail="the draft was empty, try again")
+        raise CannotDraft(502, "the draft was empty, try again")
+    # The draft is stored first: a hold names the draft that offers it.
+    draft_id = db.execute(
+        text(
+            "INSERT INTO drafts (user_id, card_id, kind, original)"
+            " VALUES (:user_id, :card_id, :kind, :original) RETURNING id"
+        ),
+        {"user_id": user_id, "card_id": card_id, "kind": kind, "original": original},
+    ).scalar_one()
+    if offer:
+        try:
+            times = calendar.offer_slots(db, user_id, card_id, draft_id, trigger="copilot: offered a time")
+        except httpx.HTTPError:
+            times = None  # Google could not be reached: the draft offers no time, and the user names one
+        if times:
+            original = f"{original} {times}"
+    # The checks judge the whole text that would go out, the offer included.
     draft = db.execute(
         text(
             f"""
-            INSERT INTO drafts (user_id, card_id, kind, original, guardrail, hot_lead)
-            VALUES (:user_id, :card_id, :kind, :original, :guardrail, :hot_lead)
-            RETURNING {_COLUMNS}
+            UPDATE drafts SET original = :original, guardrail = :guardrail, hot_lead = :hot_lead
+            WHERE id = :id AND user_id = :user_id RETURNING {_COLUMNS}
             """
         ),
         {
+            "id": draft_id,
             "user_id": user_id,
-            "card_id": card_id,
-            "kind": kind,
             "original": original,
-            "guardrail": jev.guardrail_hits(original),
-            "hot_lead": jev.is_hot_lead(original),
+            "guardrail": jev.guardrail_hits(db, user_id, original),
+            "hot_lead": jev.is_hot_lead(db, user_id, original),
         },
     ).one()
     return draft, card.name
@@ -126,8 +170,11 @@ def edit_draft(draft_id: int, edit: Edit, user: CurrentUser, db: Db):
 
     The guardrail is run again, because the edit is now the text to send.
     """
-    # shortcut: Jev is asked before the draft is known to be the caller's. Check ownership first if that
-    # cost matters.
+    owned = db.execute(
+        text("SELECT 1 FROM drafts WHERE id = :id AND user_id = :user_id"), {"id": draft_id, "user_id": user.id}
+    ).one_or_none()
+    if not owned:
+        raise HTTPException(status_code=404, detail="draft not found")  # before Jev is paid for
     draft = db.execute(
         text(
             f"""
@@ -136,9 +183,12 @@ def edit_draft(draft_id: int, edit: Edit, user: CurrentUser, db: Db):
             RETURNING {_COLUMNS}
             """
         ),
-        {"id": draft_id, "user_id": user.id, "edited": edit.edited, "guardrail": jev.guardrail_hits(edit.edited)},
-    ).one_or_none()
-    if not draft:
-        raise HTTPException(status_code=404, detail="draft not found")
+        {
+            "id": draft_id,
+            "user_id": user.id,
+            "edited": edit.edited,
+            "guardrail": jev.guardrail_hits(db, user.id, edit.edited),
+        },
+    ).one()
     queue_profile(db, user.id)  # feedback loop: the edit shows what the style profile got wrong
     return draft
