@@ -1,5 +1,5 @@
-"""Tinder connector: reads the account owner's own matches and messages, and sends messages, with their web
-session token.
+"""Tinder connector: reads the account owner's own matches, messages and candidates, sends messages, and likes
+and passes, with their web session token.
 
 The API is unofficial. The request and response shapes here follow public write-ups of the web client and are
 not confirmed against a real account: see "Tinder connector" in the README for the list of assumptions.
@@ -16,7 +16,7 @@ PAGE_SIZE = 60
 
 class TinderConnector(Connector):
     app = "tinder"
-    capabilities = frozenset({"read_matches", "read_messages", "send"})
+    capabilities = frozenset({"read_matches", "read_messages", "send", "read_candidates", "like", "pass"})
 
     transport: httpx.BaseTransport | None = None  # tests put a stub here; None is the real network
 
@@ -67,6 +67,33 @@ class TinderConnector(Connector):
             response.raise_for_status()
             message = response.json()
         return {"id": message["_id"], "sent_at": message["sent_date"]}
+
+    def read_candidates(self, token: str) -> list[dict]:
+        """The next profiles Tinder offers to swipe on: `id`, `name`, `bio` (may be empty), `photos` (URLs)."""
+        with self._client(token) as client:
+            response = client.get("/v2/recs/core")
+            response.raise_for_status()
+            return [
+                {
+                    "id": result["user"]["_id"],
+                    "name": result["user"]["name"],
+                    "bio": result["user"].get("bio", ""),
+                    "photos": [photo["url"] for photo in result["user"].get("photos", [])],
+                }
+                # Tinder answers without `results` when it has nobody left to show.
+                for result in response.json()["data"].get("results") or []
+            ]
+
+    def like(self, token: str, profile_id: str) -> None:
+        """A free like. Paid items (Super Like, Boost) have their own endpoints and are never used here."""
+        self._swipe(token, "like", profile_id)
+
+    def pass_(self, token: str, profile_id: str) -> None:
+        self._swipe(token, "pass", profile_id)
+
+    def _swipe(self, token: str, direction: str, profile_id: str) -> None:
+        with self._client(token) as client:
+            client.get(f"/{direction}/{profile_id}").raise_for_status()
 
     def _client(self, token: str) -> httpx.Client:
         return httpx.Client(

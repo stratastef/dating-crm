@@ -13,7 +13,7 @@ from app.vault import read_token
 
 log = logging.getLogger("connectors")
 
-Capability = Literal["read_matches", "read_messages", "send", "like", "pass"]
+Capability = Literal["read_matches", "read_messages", "read_candidates", "send", "like", "pass"]
 Reason = Literal["auth failure", "ban signal", "transient"]
 
 
@@ -31,6 +31,9 @@ class Connector:
         raise NotImplementedError
 
     def read_messages(self, token: str, match_id: str) -> list[dict]:
+        raise NotImplementedError
+
+    def read_candidates(self, token: str) -> list[dict]:
         raise NotImplementedError
 
     def send(self, token: str, match_id: str, text: str) -> dict:

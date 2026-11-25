@@ -84,11 +84,13 @@ class StubLlm:
         self.prompts: list[str] = []
         self.systems: list[str] = []
         self.images: list[list] = []
+        self.models: list[str | None] = []  # the model each call asked for; None is the default model
 
-    def __call__(self, system: str, prompt: str, max_tokens: int = 16000, images=()) -> Completion:
+    def __call__(self, system: str, prompt: str, max_tokens: int = 16000, images=(), model: str | None = None) -> Completion:
         self.prompts.append(prompt)
         self.systems.append(system)
         self.images.append(list(images))
+        self.models.append(model)
         text = self.replies.pop(0) if self.replies else self.reply
         return Completion(text=text, model="stub", input_tokens=1, output_tokens=1)
 
@@ -193,7 +195,7 @@ class StubJev:
         self.yes: dict[str, list[str]] = {}
         self.asked: list[tuple[str, str]] = []
 
-    def __call__(self, sentence: str, check: str) -> bool:
+    def __call__(self, sentence: str, check: str, subject: str = "") -> bool:
         self.asked.append((sentence, check))
         return any(phrase in sentence.lower() for phrase in self.yes.get(check, []))
 

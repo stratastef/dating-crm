@@ -121,6 +121,24 @@ struct APIClient {
         try await data("POST", "time", body: Self.encoder.encode(["seconds": seconds]))
     }
 
+    /// The profiles that wait for the user's swipe, each with the server's suggestion.
+    func swipes() async throws -> [SwipeCandidate] {
+        try await send("GET", "swipes")
+    }
+
+    /// Has the server read the app's next profiles and suggest like or pass for each. Returns all that wait.
+    func suggestSwipes(app: String) async throws -> [SwipeCandidate] {
+        try await send("POST", "swipes/\(app)/suggestions")
+    }
+
+    /// Stores the user's swipe and swipes in the dating app. False when the app was not reached:
+    /// the swipe is stored and the user swipes there by hand.
+    func swipe(candidateID: Int, _ swipe: Swipe) async throws -> Bool {
+        let decided: SwipeDecided = try await send(
+            "POST", "swipes/\(candidateID)/decision", body: Self.encoder.encode(["decision": swipe]))
+        return decided.applied
+    }
+
     /// The user's own photos, best first once ranked.
     func photos() async throws -> [ProfilePhoto] {
         try await send("GET", "photos")
@@ -194,6 +212,10 @@ struct APIClient {
         encoder.dateEncodingStrategy = .formatted(dayFormat)
         return encoder
     }()
+}
+
+private struct SwipeDecided: Decodable {
+    let applied: Bool
 }
 
 private struct CardChanges: Encodable {

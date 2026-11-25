@@ -34,6 +34,8 @@ CHECKS: dict[str, str] = {
     ),
     "sensitive": "The sentence is about a sensitive or explicit topic: sex, health, trauma or politics, or is hostile.",
     # Hot-lead triage, on drafts.
+    # Swipe pre-filter, on a candidate's bio. `{subject}` is one of the user's dealbreakers.
+    "dealbreaker": 'The sentence shows that its writer fits this dealbreaker: "{subject}".',
     "hot_lead": "The sentence shows the chat is about to turn into a date, so a reply should go out right away.",
 }
 
@@ -50,12 +52,13 @@ class JevUnavailable(Exception):
     """Jev is not configured, or the call to it failed."""
 
 
-def ask(sentence: str, check: str) -> bool:
-    """Ask Jev one yes/no question about one sentence. `check` is a key of `CHECKS`.
+def ask(sentence: str, check: str, subject: str = "") -> bool:
+    """Ask Jev one yes/no question about one sentence. `check` is a key of `CHECKS`; `subject` fills the
+    `{subject}` of a check that has one.
 
     Raises `JevUnavailable` when `JEV_BASE_URL`, `JEV_API_KEY` or `JEV_TOOL` is unset or the call fails.
     """
-    statement = CHECKS[check]
+    statement = CHECKS[check].replace("{subject}", subject)
     # Compose passes an unset variable as an empty string, so empty counts as unset.
     base_url, api_key, tool = (os.environ.get(name) for name in ("JEV_BASE_URL", "JEV_API_KEY", "JEV_TOOL"))
     if not (base_url and api_key and tool):
@@ -123,6 +126,20 @@ def is_hot_lead(message: str) -> bool:
         return any(ask(sentence, "hot_lead") for sentence in sentences(message))
     except JevUnavailable:
         return False
+
+
+def dealbreaker_hit(bio: str, dealbreakers: list[str]) -> str | None:
+    """Swipe pre-filter for a candidate's bio: the first of the user's dealbreakers it shows, else None.
+
+    None when Jev could not be asked: the profile then goes on to the next pre-filter, and the user decides.
+    """
+    try:
+        for dealbreaker in dealbreakers:
+            if any(ask(sentence, "dealbreaker", dealbreaker) for sentence in sentences(bio)):
+                return dealbreaker
+    except JevUnavailable:
+        pass
+    return None
 
 
 def record_handover(db: Connection, message_id: int, body: str) -> list[str]:
