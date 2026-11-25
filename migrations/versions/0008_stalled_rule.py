@@ -1,14 +1,14 @@
 """add the stalled flag to cards and the silent-days setting to users
 
-Revision ID: 0006_stalled
-Revises: 0005_cards
+Revision ID: 0008_stalled
+Revises: 0007_connector_alerts
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0006_stalled"
-down_revision = "0005_cards"
+revision = "0008_stalled"
+down_revision = "0007_connector_alerts"
 branch_labels = None
 depends_on = None
 
