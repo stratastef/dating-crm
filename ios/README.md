@@ -46,6 +46,10 @@ After sign-in the app asks for permission to notify, gets a device token from Ap
 - The simulator gets no device token without an Apple account, so the tests cover only `Push`: the registration request and which card a tap opens. Not verified on a device: the permission prompt, the token arriving in `AppDelegate`, delivery of a push, and the tap opening the card on screen.
 - Signing out does not unregister the device. The phone keeps getting that user's pushes until someone else signs in on it.
 
+## Review queue
+
+"Review" on the board opens `QueueView`: the pending drafts from `GET /queue`, hot leads first. Each can be edited in place, then approved or dismissed; approve saves the edit first. Items of a kind the app does not know are skipped.
+
 ## Call the API
 
 All requests go through `APIClient`. To use a new route, add one method to it:
