@@ -1,7 +1,7 @@
 """create devices table
 
-Revision ID: 0011_devices
-Revises: 0010_bios
+Revision ID: 0014_devices
+Revises: 0013_alert_reason
 """
 
 import sqlalchemy as sa
@@ -9,8 +9,8 @@ from alembic import op
 
 from app.tenancy import user_id_column
 
-revision = "0011_devices"
-down_revision = "0010_bios"
+revision = "0014_devices"
+down_revision = "0013_alert_reason"
 branch_labels = None
 depends_on = None
 

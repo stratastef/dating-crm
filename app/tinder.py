@@ -1,0 +1,82 @@
+"""Tinder connector: reads the account owner's own matches and messages with their web session token.
+
+The API is unofficial. The request and response shapes here follow public write-ups of the web client and are
+not confirmed against a real account: see "Tinder connector" in the README for the list of assumptions.
+"""
+
+from collections.abc import Iterator
+
+import httpx
+
+from app.connectors import Connector
+
+PAGE_SIZE = 60
+
+
+class TinderConnector(Connector):
+    app = "tinder"
+    capabilities = frozenset({"read_matches", "read_messages"})
+
+    transport: httpx.BaseTransport | None = None  # tests put a stub here; None is the real network
+
+    def __init__(self) -> None:
+        self._person_of: dict[str, str] = {}  # match id -> the other person's user id
+
+    def read_matches(self, token: str) -> list[dict]:
+        """Every match: `id`, `name`, `has_messages`, and `last_message_id` (None if unknown or no messages)."""
+        matches = []
+        with self._client(token) as client:
+            # The web client lists matches without and with messages separately.
+            for has_messages in (False, True):
+                for match in self._pages(client, "/v2/matches", "matches", {"message": int(has_messages)}):
+                    self._person_of[match["_id"]] = match["person"]["_id"]
+                    preview = match.get("messages") or []
+                    # Newest by date, so the order of the preview list does not matter.
+                    newest = max(preview, key=lambda message: message["sent_date"], default=None)
+                    matches.append(
+                        {
+                            "id": match["_id"],
+                            "name": match["person"]["name"],
+                            "has_messages": has_messages,
+                            "last_message_id": newest["_id"] if has_messages and newest else None,
+                        }
+                    )
+        return matches
+
+    def read_messages(self, token: str, match_id: str) -> list[dict]:
+        """Every message of a match: `id`, `sender` (`me` or `them`), `body`, `sent_at` (ISO 8601)."""
+        if match_id not in self._person_of:
+            self.read_matches(token)
+        them = self._person_of[match_id]
+        with self._client(token) as client:
+            return [
+                {
+                    "id": message["_id"],
+                    "sender": "them" if message["from"] == them else "me",
+                    "body": message["message"],
+                    "sent_at": message["sent_date"],
+                }
+                for message in self._pages(client, f"/v2/matches/{match_id}/messages", "messages", {})
+            ]
+
+    def _client(self, token: str) -> httpx.Client:
+        return httpx.Client(
+            base_url="https://api.gotinder.com",
+            headers={"X-Auth-Token": token},
+            transport=self.transport,
+            timeout=30,
+        )
+
+    @staticmethod
+    def _pages(client: httpx.Client, path: str, key: str, params: dict) -> Iterator[dict]:
+        page_token = None
+        while True:
+            page = {"page_token": page_token} if page_token else {}
+            response = client.get(path, params={"count": PAGE_SIZE, **params, **page})
+            # The error names the status and URL only. The token is in a header and is never part of it.
+            response.raise_for_status()
+            data = response.json()["data"]
+            yield from data[key]
+            page_token = data.get("next_page_token")
+            if not page_token:
+                return

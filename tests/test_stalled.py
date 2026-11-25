@@ -1,5 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import text
+
 from app.jobs import enqueue_recurring, run_once
 
 
@@ -88,21 +90,24 @@ def test_the_job_uses_each_users_own_silent_days(client_for, app):
 
 
 def test_the_recurring_job_is_queued_once_per_user_per_hour(client, app):
-    # sender "them": a "me" message would also queue a voice_profile job and hide the count below
     card_id = new_card(client, last_message_days_ago=4, sender="them")
     engine = app.state.engine
     now = datetime.now(UTC)
 
-    enqueue_recurring(engine, now=now)
-    enqueue_recurring(engine, now=now)  # a second poll must not queue it twice
-    assert run_once(engine, now=now) is True
-    assert run_once(engine, now=now) is False
+    def runs_after_polling_at(moment: datetime) -> int:
+        # Counted by kind: other recurring jobs (sync_matches) share the queue.
+        enqueue_recurring(engine, now=moment)
+        enqueue_recurring(engine, now=moment)  # a second poll must not queue it twice
+        while run_once(engine, now=moment):
+            pass
+        with engine.begin() as db:
+            return db.execute(text("SELECT count(*) FROM jobs WHERE kind = 'mark_stalled' AND status = 'done'")).scalar_one()
+
+    assert runs_after_polling_at(now) == 1
     client.post(f"/cards/{card_id}/messages", json={"sender": "them", "body": "old one", "sent_at": days_ago(5)})
     assert client.get(f"/cards/{card_id}").json()["stalled"] is False
 
-    enqueue_recurring(engine, now=now + timedelta(minutes=30))
-    assert run_once(engine, now=now + timedelta(minutes=30)) is False  # not yet due again
+    assert runs_after_polling_at(now + timedelta(minutes=30)) == 1  # not yet due again
 
-    enqueue_recurring(engine, now=now + timedelta(hours=1, minutes=1))
-    assert run_once(engine, now=now + timedelta(hours=1, minutes=1)) is True
+    assert runs_after_polling_at(now + timedelta(hours=1, minutes=1)) == 2
     assert client.get(f"/cards/{card_id}").json()["stalled"] is True

@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, computed_field, field_validator
+from pydantic import BaseModel, Field, computed_field, field_validator
 from sqlalchemy import Connection, text
 from sqlalchemy.exc import IntegrityError
 
@@ -19,7 +19,7 @@ Stage = Literal["matched", "chatting", "number_swapped", "date_set", "dated", "s
 
 _COLUMNS = (
     "id, app, external_id, name, stage, stage_changed_at, notes, next_action, due_date, created_at,"
-    " stalled_at IS NOT NULL AS stalled"
+    " stalled_at IS NOT NULL AS stalled, date_rating, date_note"
 )
 
 # Only cards in these stages can be Stalled. Stalled is a flag (`cards.stalled_at`), not a stage.
@@ -46,6 +46,11 @@ def mark_stalled(db: Connection, user_id: int, payload: dict) -> None:
     )
 
 
+def is_good_date(rating: int | None) -> bool:
+    """The only definition of a good date: a rating of 4 or 5. An unrated date is not one."""
+    return rating is not None and rating >= 4
+
+
 class Card(BaseModel):
     id: int
     app: str
@@ -58,12 +63,19 @@ class Card(BaseModel):
     due_date: date | None
     created_at: datetime
     stalled: bool
+    date_rating: int | None
+    date_note: str | None
 
     @computed_field
     @property
     def suggested_actions(self) -> list[str]:
         """What the app offers on a Stalled card. `archive` is `PATCH /cards/{id}` with `stage: archived`."""
         return ["revive", "archive"] if self.stalled else []
+
+    @computed_field
+    @property
+    def good_date(self) -> bool:
+        return is_good_date(self.date_rating)
 
 
 class NewCard(BaseModel):
@@ -93,12 +105,84 @@ def create_card(card: NewCard, user: CurrentUser, db: Db):
         raise HTTPException(status_code=409, detail="a card with this app and external_id already exists")
 
 
+def upsert_card(db: Connection, user_id: int, app: str, external_id: str, name: str) -> int:
+    """Create the card for a synced match in Matched, or refresh its name. Returns the card id.
+
+    An existing card keeps its stage, notes, next action and due date.
+    """
+    return db.execute(
+        text(
+            """
+            INSERT INTO cards (user_id, app, external_id, name, stage)
+            VALUES (:user_id, :app, :external_id, :name, 'matched')
+            ON CONFLICT (user_id, app, external_id) DO UPDATE SET name = EXCLUDED.name
+            RETURNING id
+            """
+        ),
+        {"user_id": user_id, "app": app, "external_id": external_id, "name": name},
+    ).scalar_one()
+
+
+def has_message(db: Connection, card_id: int, external_id: str) -> bool:
+    return db.execute(
+        text("SELECT EXISTS (SELECT 1 FROM messages WHERE card_id = :card_id AND external_id = :external_id)"),
+        {"card_id": card_id, "external_id": external_id},
+    ).scalar_one()
+
+
+def upsert_message(
+    db: Connection, user_id: int, card_id: int, external_id: str, sender: str, body: str, sent_at: datetime | str
+) -> None:
+    """Add a synced message unless the card already has it.
+
+    A new message has the same effects as one added through `POST /cards/{id}/messages`, and it also moves a
+    Matched card to Chatting.
+    """
+    added = db.execute(
+        text(
+            """
+            INSERT INTO messages (user_id, card_id, external_id, sender, body, sent_at)
+            VALUES (:user_id, :card_id, :external_id, :sender, :body, CAST(:sent_at AS timestamptz))
+            ON CONFLICT (card_id, external_id) DO NOTHING
+            RETURNING id
+            """
+        ),
+        {
+            "user_id": user_id,
+            "card_id": card_id,
+            "external_id": external_id,
+            "sender": sender,
+            "body": body,
+            "sent_at": sent_at,
+        },
+    ).one_or_none()
+    if not added:
+        return
+    db.execute(
+        text(
+            "UPDATE cards SET stage = 'chatting', stage_changed_at = now()"
+            " WHERE id = :card_id AND user_id = :user_id AND stage = 'matched'"
+        ),
+        {"card_id": card_id, "user_id": user_id},
+    )
+    if sender == "me":
+        queue_profile(db, user_id)
+    else:
+        # A reply clears Stalled, as in `add_message`.
+        db.execute(
+            text("UPDATE cards SET stalled_at = NULL WHERE id = :card_id AND user_id = :user_id"),
+            {"card_id": card_id, "user_id": user_id},
+        )
+
+
 class CardChanges(BaseModel):
     name: str | None = None
     stage: Stage | None = None
     notes: str | None = None
     next_action: str | None = None
     due_date: date | None = None
+    date_rating: int | None = Field(default=None, ge=1, le=5)
+    date_note: str | None = None
 
     @field_validator("name", "stage", "notes")
     @classmethod

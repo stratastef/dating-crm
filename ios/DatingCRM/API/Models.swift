@@ -33,6 +33,12 @@ struct Card: Codable, Identifiable, Hashable {
     var nextAction: String?
     /// Local midnight of the due day; the server stores a plain date.
     var dueDate: Date?
+    /// 1 to 5, nil until the user rates the date.
+    var dateRating: Int?
+    var dateNote: String?
+
+    /// True when the card is in Dated and has no rating yet: the app then asks for one.
+    var needsDateRating: Bool { stage == .dated && dateRating == nil }
 }
 
 struct Message: Codable, Identifiable, Hashable {
@@ -41,4 +47,11 @@ struct Message: Codable, Identifiable, Hashable {
     let id: Int
     var sender: Sender
     var body: String
+}
+
+/// What the user wants: wishes in plain words, plus must-haves and dealbreakers.
+struct Preferences: Codable, Equatable {
+    var wishes = ""
+    var mustHaves: [String] = []
+    var dealbreakers: [String] = []
 }

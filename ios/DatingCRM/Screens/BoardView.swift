@@ -36,6 +36,7 @@ struct BoardView: View {
                 }
             }
             .toolbar {
+                NavigationLink("Preferences") { PreferencesView(client: client) }
                 Button("Sign out", action: signOut)
             }
             .refreshable { await load() }

@@ -26,7 +26,7 @@ struct APIClient {
         try await send("GET", "cards/\(cardID)/messages")
     }
 
-    /// Saves the card's stage, notes, next action and due date, and returns the stored card.
+    /// Saves the card's stage, notes, next action, due date, date rating and date note, and returns the stored card.
     func update(_ card: Card) async throws -> Card {
         try await send("PATCH", "cards/\(card.id)", body: Self.encoder.encode(CardChanges(card: card)))
     }
@@ -39,6 +39,15 @@ struct APIClient {
     func registerDevice(token: String) async throws {
         try await data("POST", "devices", body: Self.encoder.encode(["token": token]))
     }
+
+    /// The preferences in force; empty until the user saves some.
+    func preferences() async throws -> Preferences {
+        try await send("GET", "preferences")
+    }
+
+    /// Stores the preferences as a new version on the server and returns what it stored.
+    func save(_ preferences: Preferences) async throws -> Preferences {
+        try await send("PUT", "preferences", body: Self.encoder.encode(preferences))    }
 
     private func send<Response: Decodable>(_ method: String, _ path: String, body: Data? = nil) async throws -> Response {
         try Self.decoder.decode(Response.self, from: await data(method, path, body: body))
@@ -86,7 +95,7 @@ struct APIClient {
 private struct CardChanges: Encodable {
     let card: Card
 
-    enum CodingKeys: CodingKey { case stage, notes, nextAction, dueDate }
+    enum CodingKeys: CodingKey { case stage, notes, nextAction, dueDate, dateRating, dateNote }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -95,5 +104,8 @@ private struct CardChanges: Encodable {
         // `encode`, not `encodeIfPresent`: the server clears these two only on an explicit null.
         try container.encode(card.nextAction, forKey: .nextAction)
         try container.encode(card.dueDate, forKey: .dueDate)
+        // The app never clears a rating or its note, so these are sent only when set.
+        try container.encodeIfPresent(card.dateRating, forKey: .dateRating)
+        try container.encodeIfPresent(card.dateNote, forKey: .dateNote)
     }
 }
