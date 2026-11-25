@@ -1,7 +1,7 @@
 """create llm_calls and drafts tables
 
-Revision ID: 0013_drafts
-Revises: 0012_date_rating
+Revision ID: 0014_drafts
+Revises: 0013_alert_reason
 """
 
 import sqlalchemy as sa
@@ -9,8 +9,8 @@ from alembic import op
 
 from app.tenancy import user_id_column
 
-revision = "0013_drafts"
-down_revision = "0012_date_rating"
+revision = "0014_drafts"
+down_revision = "0013_alert_reason"
 branch_labels = None
 depends_on = None
 
