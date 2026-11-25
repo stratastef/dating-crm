@@ -7,7 +7,7 @@ from sqlalchemy import text
 from app import jev, llm, review
 from app.auth import CurrentUser, Db
 from app.reads import read_lines
-from app.voice import similar_chats
+from app.voice import queue_profile, similar_chats
 
 router = APIRouter()
 
@@ -130,4 +130,5 @@ def edit_draft(draft_id: int, edit: Edit, user: CurrentUser, db: Db):
     ).one_or_none()
     if not draft:
         raise HTTPException(status_code=404, detail="draft not found")
+    queue_profile(db, user.id)  # feedback loop: the edit shows what the style profile got wrong
     return draft

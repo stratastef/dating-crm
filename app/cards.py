@@ -22,7 +22,8 @@ Stage = Literal["matched", "chatting", "number_swapped", "date_set", "dated", "s
 
 _COLUMNS = (
     "id, app, external_id, name, stage, stage_changed_at, notes, next_action, due_date, created_at,"
-    " stalled_at IS NOT NULL AS stalled, date_rating, date_note, handover, handover_suggestions"
+    " stalled_at IS NOT NULL AS stalled, date_rating, date_note, handover, handover_suggestions,"
+    " led_to_date"
 )
 
 # Only cards in these stages can be Stalled. Stalled is a flag (`cards.stalled_at`), not a stage.
@@ -71,6 +72,8 @@ class Card(BaseModel):
     # Paused for handover (see `app/handover.py`): `pending`, `taken_over` or null.
     handover: str | None
     handover_suggestions: list[str]
+    # Outcome label of the chat: the card was once in `date_set`, `dated` or `seeing_them`, or has a rating.
+    led_to_date: bool
 
     @computed_field
     @property

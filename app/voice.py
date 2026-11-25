@@ -54,37 +54,49 @@ class ChatMessage(BaseModel):
 class PastChat(BaseModel):
     card_id: int
     similarity: float  # 0 to 1
+    date_rating: int | None  # the outcome label: null until the user rates the date
     messages: list[ChatMessage]
 
 
+# How much more a chat that led to a good date counts in retrieval than an equally similar one.
+GOOD_DATE_BOOST = 1.5
+
+
 def similar_chats(db: Connection, user_id: int, card_id: int, limit: int = 3) -> list:
-    """The user's past chats that led to a date, most similar to the card's conversation first."""
+    """The user's past chats that led to a date, most similar to the card's conversation first.
+
+    A chat that led to a good date ranks as if it were `GOOD_DATE_BOOST` times as similar.
+    """
+    from app.cards import is_good_date  # here, not at the top: `app.cards` imports this module
+
     # shortcut: trigram similarity of the whole chat text, computed per query with no index. Move to
     # embeddings (pgvector) if drafts need likeness of meaning rather than of wording.
-    # shortcut: a chat counts as "led to a date" by its current stage, so a dated card that was later
-    # archived is missed until stage history exists.
-    return db.execute(
+    # shortcut: every dated chat is read and ranked here, in Python. Rank in SQL if a user has thousands.
+    chats = db.execute(
         text(
             """
             WITH chats AS (
-                SELECT c.id AS card_id,
+                SELECT c.id AS card_id, c.date_rating,
                        string_agg(m.body, E'\n' ORDER BY m.sent_at, m.id) AS body,
                        json_agg(json_build_object('sender', m.sender, 'body', m.body) ORDER BY m.sent_at, m.id)
                            AS messages
                 FROM cards c JOIN messages m ON m.card_id = c.id
-                WHERE c.user_id = :user_id
-                  AND (c.id = :card_id OR c.stage IN ('date_set', 'dated', 'seeing_them'))
+                WHERE c.user_id = :user_id AND (c.id = :card_id OR c.led_to_date)
                 GROUP BY c.id
             )
-            SELECT past.card_id, similarity(past.body, coalesce(given.body, '')) AS similarity, past.messages
+            SELECT past.card_id, similarity(past.body, coalesce(given.body, '')) AS similarity, past.messages,
+                   past.date_rating
             FROM chats past LEFT JOIN chats given ON given.card_id = :card_id
             WHERE past.card_id <> :card_id
-            ORDER BY similarity DESC, past.card_id DESC
-            LIMIT :limit
             """
         ),
-        {"user_id": user_id, "card_id": card_id, "limit": limit},
+        {"user_id": user_id, "card_id": card_id},
     ).all()
+    return sorted(
+        chats,
+        key=lambda chat: (chat.similarity * (GOOD_DATE_BOOST if is_good_date(chat.date_rating) else 1), chat.card_id),
+        reverse=True,
+    )[:limit]
 
 
 @router.get("/cards/{card_id}/similar-chats", response_model=list[PastChat])
@@ -112,12 +124,14 @@ def queue_profile(db: Connection, user_id: int) -> None:
 _SYSTEM = (
     "You write a style profile of how one person texts on dating apps. A later step drafts messages in their"
     " voice from this profile alone. Describe tone, humour, message length, punctuation, capitalisation, emoji"
-    " use, typical openers and how they ask someone out. Use only what the answers and messages show. Reply"
-    " with the profile only, under 300 words."
+    " use, typical openers and how they ask someone out. Use only what the answers and messages show. Each edit"
+    " under `my_edits` is a draft written from the last profile and what the person sent instead: describe the"
+    " style so that the next draft needs no such edit. Reply with the profile only, under 300 words."
 )
 
 # shortcut: only the newest messages are read, summarise in batches if older chats turn out to matter.
 _MESSAGE_LIMIT = 200
+_EDIT_LIMIT = 20  # the newest edits of drafts
 
 
 @handler("voice_profile")
@@ -133,6 +147,13 @@ def write_profile(db: Connection, user_id: int, payload: dict) -> None:
         ),
         {"user_id": user_id, "limit": _MESSAGE_LIMIT},
     ).scalars()
+    edits = db.execute(
+        text(
+            "SELECT original, edited FROM drafts WHERE user_id = :user_id AND edited <> original"
+            " ORDER BY updated_at DESC, id DESC LIMIT :limit"
+        ),
+        {"user_id": user_id, "limit": _EDIT_LIMIT},
+    ).all()
     prompt = "\n".join(
         [
             "<questionnaire>",
@@ -141,6 +162,9 @@ def write_profile(db: Connection, user_id: int, payload: dict) -> None:
             "<my_messages>",
             *reversed(list(messages)),
             "</my_messages>",
+            "<my_edits>",
+            *(f"draft: {original}\nsent instead: {edited}" for original, edited in reversed(edits)),
+            "</my_edits>",
         ]
     )
     profile = llm.call(db, user_id, "voice_profile", _SYSTEM, prompt).text
