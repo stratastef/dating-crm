@@ -1,14 +1,14 @@
 """add the monthly AI budget cap to users
 
-Revision ID: 0016_ai_budget
-Revises: 0015_devices
+Revision ID: 0017_ai_budget
+Revises: 0016_dashboard
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0016_ai_budget"
-down_revision = "0015_devices"
+revision = "0017_ai_budget"
+down_revision = "0016_dashboard"
 branch_labels = None
 depends_on = None
 
