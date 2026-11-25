@@ -10,6 +10,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/worker.py` | Worker process entry point |
 | `app/db.py` | `database_url()`, read from `DATABASE_URL` |
 | `app/auth.py` | `CurrentUser` and `Db` route dependencies, `create_user()` |
+| `app/cards.py` | Match cards and their messages: routes under `/cards` |
 | `app/tenancy.py` | `user_id_column()` for tenant tables |
 | `migrations/versions/` | Alembic migrations |
 | `tests/` | pytest suite |
@@ -69,6 +70,23 @@ Every table except `users` is a tenant table. Declare its owner with `user_id_co
 ```python
 op.create_table("matches", sa.Column("id", sa.BigInteger, sa.Identity(), primary_key=True), user_id_column(), ...)
 ```
+
+## Cards and messages
+
+A card is one match. Routes are in `app/cards.py`; tables are `cards` and `messages`. All routes need a token and see only the caller's rows; a card that is not yours is `404`.
+
+| Route | Does |
+| --- | --- |
+| `POST /cards` | Create a card. Body: `app`, `name`, optional `external_id`, `stage` (default `matched`), `notes`, `next_action`, `due_date`. |
+| `GET /cards?stage=&app=` | List cards, oldest first. Both filters are optional. |
+| `GET /cards/{id}` | Read one card. |
+| `PATCH /cards/{id}` | Change only the fields sent: `name`, `stage`, `notes`, `next_action`, `due_date`. `null` clears `next_action` or `due_date`. |
+| `POST /cards/{id}/messages` | Add a message. Body: `sender` (`me` or `them`), `body`, optional `sent_at` (default now), `external_id`. |
+| `GET /cards/{id}/messages` | List the card's messages by `sent_at`. |
+
+- `stage` is one of `matched`, `chatting`, `number_swapped`, `date_set`, `dated`, `seeing_them`, `archived`. Anything else is `422`. `stage_changed_at` on the card is the time of the last stage change; there is no stage history table.
+- `app` is free text, for example `tinder` or `hinge`.
+- `external_id` is the ID the dating app gives the match or message. It is unique per user and app for cards, and per card for messages; a duplicate is `409`. Rows without one are never duplicates.
 
 ## Add a migration
 
