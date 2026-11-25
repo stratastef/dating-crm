@@ -1,4 +1,5 @@
-"""Tinder connector: reads the account owner's own matches and messages with their web session token.
+"""Tinder connector: reads the account owner's own matches and messages, and sends messages, with their web
+session token.
 
 The API is unofficial. The request and response shapes here follow public write-ups of the web client and are
 not confirmed against a real account: see "Tinder connector" in the README for the list of assumptions.
@@ -15,7 +16,7 @@ PAGE_SIZE = 60
 
 class TinderConnector(Connector):
     app = "tinder"
-    capabilities = frozenset({"read_matches", "read_messages"})
+    capabilities = frozenset({"read_matches", "read_messages", "send"})
 
     transport: httpx.BaseTransport | None = None  # tests put a stub here; None is the real network
 
@@ -58,6 +59,14 @@ class TinderConnector(Connector):
                 }
                 for message in self._pages(client, f"/v2/matches/{match_id}/messages", "messages", {})
             ]
+
+    def send(self, token: str, match_id: str, text: str) -> dict:
+        """Send one message to a match. Returns the sent message's `id` and `sent_at` (ISO 8601)."""
+        with self._client(token) as client:
+            response = client.post(f"/user/matches/{match_id}", json={"message": text})
+            response.raise_for_status()
+            message = response.json()
+        return {"id": message["_id"], "sent_at": message["sent_date"]}
 
     def _client(self, token: str) -> httpx.Client:
         return httpx.Client(

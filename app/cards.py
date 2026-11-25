@@ -3,11 +3,13 @@
 from datetime import date, datetime, timedelta
 from typing import Literal
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, computed_field, field_validator
 from sqlalchemy import Connection, text
 from sqlalchemy.exc import IntegrityError
 
+from app import calendar
 from app import jev
 from app.auth import CurrentUser, Db
 from app.voice import queue_profile
@@ -239,6 +241,13 @@ def update_card(card_id: int, changes: CardChanges, user: CurrentUser, db: Db):
     ).one_or_none()
     if not row:
         raise HTTPException(status_code=404, detail="card not found")
+    if "stage" in fields:
+        try:
+            # Date set confirms the card's calendar hold; Archived releases its holds.
+            calendar.stage_changed(db, user.id, card_id, fields["stage"])
+        except httpx.HTTPError:
+            # Raising rolls the stage change back, so the card and the calendar stay in step.
+            raise HTTPException(status_code=502, detail="Google Calendar could not be reached; try again")
     return row
 
 
