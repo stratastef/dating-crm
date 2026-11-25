@@ -1,7 +1,7 @@
 """create the photos table
 
-Revision ID: 0018_photos
-Revises: 0017_ai_budget
+Revision ID: 0021_photos
+Revises: 0020_calendar_holds
 """
 
 import sqlalchemy as sa
@@ -10,8 +10,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 from app.tenancy import user_id_column
 
-revision = "0018_photos"
-down_revision = "0017_ai_budget"
+revision = "0021_photos"
+down_revision = "0020_calendar_holds"
 branch_labels = None
 depends_on = None
 

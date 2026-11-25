@@ -3,11 +3,14 @@
 from datetime import date, datetime, timedelta
 from typing import Literal
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, computed_field, field_validator
 from sqlalchemy import Connection, text
 from sqlalchemy.exc import IntegrityError
 
+from app import calendar
+from app import jev
 from app.auth import CurrentUser, Db
 from app.voice import queue_profile
 from app.jobs import handler
@@ -173,6 +176,9 @@ def upsert_message(
             text("UPDATE cards SET stalled_at = NULL WHERE id = :card_id AND user_id = :user_id"),
             {"card_id": card_id, "user_id": user_id},
         )
+        # shortcut: Jev is called inside the sync job, once per sentence and check, also for old messages
+        # on a first sync. Move to its own job if a sync gets slow.
+        jev.record_handover(db, added.id, body)
 
 
 class CardChanges(BaseModel):
@@ -235,6 +241,13 @@ def update_card(card_id: int, changes: CardChanges, user: CurrentUser, db: Db):
     ).one_or_none()
     if not row:
         raise HTTPException(status_code=404, detail="card not found")
+    if "stage" in fields:
+        try:
+            # Date set confirms the card's calendar hold; Archived releases its holds.
+            calendar.stage_changed(db, user.id, card_id, fields["stage"])
+        except httpx.HTTPError:
+            # Raising rolls the stage change back, so the card and the calendar stay in step.
+            raise HTTPException(status_code=502, detail="Google Calendar could not be reached; try again")
     return row
 
 
@@ -249,7 +262,7 @@ def read_card(card_id: int, user: CurrentUser, db: Db):
     return row
 
 
-_MESSAGE_COLUMNS = "id, card_id, external_id, sender, body, sent_at"
+_MESSAGE_COLUMNS = "id, card_id, external_id, sender, body, sent_at, handover"
 
 
 class Message(BaseModel):
@@ -259,6 +272,8 @@ class Message(BaseModel):
     sender: str
     body: str
     sent_at: datetime
+    # The handover checks an incoming message hit (see `app/jev.py`); null when it was not checked.
+    handover: list[str] | None
 
 
 class NewMessage(BaseModel):
@@ -295,6 +310,7 @@ def add_message(card_id: int, message: NewMessage, user: CurrentUser, db: Db):
             text("UPDATE cards SET stalled_at = NULL WHERE id = :id AND user_id = :user_id"),
             {"id": card_id, "user_id": user.id},
         )
+        return {**row._mapping, "handover": jev.record_handover(db, row.id, message.body)}
     return row
 
 

@@ -73,6 +73,47 @@ struct Draft: Codable, Identifiable, Hashable {
     var text: String { edited ?? original }
 }
 
+/// One thing Claude inferred about a match. `value` is Claude's; `corrected` is the user's correction of it.
+struct Inference: Codable, Identifiable, Hashable {
+    let id: Int
+    /// The server's name for what is inferred, for example `texting_style` or `tone`.
+    var kind: String
+    var value: String
+    var evidence: String
+    /// 0 to 1.
+    var confidence: Double
+    var corrected: String?
+
+    /// What to show and use: the user's correction when there is one.
+    var text: String { corrected ?? value }
+
+    /// The kind as a label: `texting_style` reads "Texting style".
+    var title: String {
+        let words = kind.replacing("_", with: " ")
+        return words.prefix(1).uppercased() + words.dropFirst()
+    }
+}
+
+/// One thing that waits for the user's review. `kind` is `draft` so far; the server adds more kinds later.
+struct QueueItem: Codable, Identifiable, Hashable {
+    var kind: String
+    /// A hot lead: the server pushed it at once.
+    var hot: Bool
+    var cardID: Int
+    var cardName: String
+    /// Set when `kind` is `draft`.
+    var draft: Draft?
+
+    var id: String { "\(kind)-\(draft?.id ?? cardID)" }
+
+    // The key strategy turns `card_id` into `cardId`.
+    enum CodingKeys: String, CodingKey {
+        case kind, hot, draft
+        case cardID = "cardId"
+        case cardName
+    }
+}
+
 /// What the user wants: wishes in plain words, plus must-haves and dealbreakers.
 struct Preferences: Codable, Equatable {
     var wishes = ""

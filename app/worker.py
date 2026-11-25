@@ -12,6 +12,7 @@ from app.db import database_url
 from app.jobs import enqueue_recurring, run_once
 
 # Import every module that registers job handlers here, so the worker knows them.
+import app.send  # noqa: F401
 import app.sync  # noqa: F401
 import app.voice  # noqa: F401
 import app.cards  # noqa: F401  (mark_stalled)

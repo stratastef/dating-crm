@@ -36,28 +36,38 @@ class Completion:
     output_tokens: int
 
 
-# One image for Claude to look at: its content type (`image/jpeg` or `image/png`) and the file's bytes.
-ImageInput = tuple[str, bytes]
+# One image for Claude to look at: a URL Claude fetches, or a file held here as (content type, bytes) with
+# content type `image/jpeg` or `image/png`.
+ImageInput = str | tuple[str, bytes]
+
+
+def _image_source(image: ImageInput) -> dict:
+    if isinstance(image, str):
+        return {"type": "url", "url": image}
+    media_type, data = image
+    return {"type": "base64", "media_type": media_type, "data": base64.b64encode(data).decode()}
 
 
 def complete(system: str, prompt: str, max_tokens: int = 16000, images: Sequence[ImageInput] = ()) -> Completion:
     """Send one prompt to Claude and return its text and token usage.
 
     The model is `ANTHROPIC_MODEL` (default `claude-fable-5-2`); the key is read from `ANTHROPIC_API_KEY`.
-    `images` are placed before the prompt, in the order given.
+    `images` are URLs Claude fetches or `(content type, bytes)` pairs; Claude sees them before the prompt, in
+    the order given.
     """
-    content = [
-        {
-            "type": "image",
-            "source": {"type": "base64", "media_type": media_type, "data": base64.b64encode(data).decode()},
-        }
-        for media_type, data in images
-    ]
     message = anthropic.Anthropic().messages.create(
         model=os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL),
         max_tokens=max_tokens,
         system=system,
-        messages=[{"role": "user", "content": [*content, {"type": "text", "text": prompt}]}],
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    *({"type": "image", "source": _image_source(image)} for image in images),
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ],
     )
     if message.stop_reason == "refusal":
         # A refusal carries no usable text. Raising lets a job retry and then fail visibly.
@@ -81,9 +91,9 @@ def call(
 ) -> Completion:
     """Send one prompt to Claude for a user and record what the call cost. Every feature calls Claude through this.
 
-    `purpose` names the feature, for example `draft`. Raises `BudgetReached`, without calling Claude, while the
+    `purpose` names the feature, for example `draft`. `images` are images to show Claude: each a URL, or a
+    `(content type, bytes)` pair for a file held here. Raises `BudgetReached`, without calling Claude, while the
     user's spend this month is at their cap. The call that reaches the cap sends the user a push.
-    `images` are `(content type, bytes)` pairs for Claude to look at; it sees them before the prompt.
     """
     # shortcut: two calls at the same moment can both pass this check, so spend can pass the cap by the cost
     # of the calls in flight. Lock the user row here if that ever matters.
