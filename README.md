@@ -329,7 +329,7 @@ All in `app/handover.py`. When a new message from the match hits the handover tr
 - `POST /cards/{id}/messages` and `upsert_message` call `handover.incoming()` for a message from `them` and `handover.answered()` for one from `me`. Code that adds messages another way must call them too.
 - Suggested replies: one Claude call (purpose `handover`) writes up to three. Each goes through `jev.guardrail_hits()` and is dropped on any hit, so no suggestion denies being AI. There are none when Jev is unavailable, the AI budget is reached or Claude fails; the card is paused and the push is sent all the same.
 - The push goes through `notify_if_hot()`; a pending handover is a hot lead. Its body is the suggestions, one per line.
-- A hit on a message that is not the card's newest does nothing. A hit on a message older than a day pauses the card without a Claude call or a push, so a first sync of old chats costs nothing and sends nothing. A hit on a card that is already paused changes nothing.
+- A hit on any message the user has not answered pauses the card, newest or not: an app may deliver a batch newest first. A hit on a message with a later message from `me` does nothing. Chat autopilot reads the hits of every unanswered message the same way (`handover.unanswered()`). A hit on a message older than a day pauses the card without a Claude call or a push, so a first sync of old chats costs nothing and sends nothing. A hit on a card that is already paused changes nothing.
 
 ## Chat autopilot
 

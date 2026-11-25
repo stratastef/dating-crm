@@ -117,7 +117,9 @@ def chat_reply(db: Connection, user_id: int, payload: dict) -> None:
         return  # a draft waits for the user or is being sent: a second reply would cross it
 
     level = autonomy_levels(db, user_id)["chat"]
-    logistics = "logistics" in (newest.handover or [])
+    # Every message the user has not answered counts, not only the newest: "when are you free?" then "??".
+    waiting = handover.unanswered(db, user_id, card_id)
+    logistics = any("logistics" in (message.handover or []) for message in waiting)
     if logistics and level != "full":
         return  # guardrails mode: date logistics are the user's (the card is paused for handover anyway)
 
@@ -132,7 +134,7 @@ def chat_reply(db: Connection, user_id: int, payload: dict) -> None:
             {"user_id": user_id, "card_id": card_id},
         ).all()
         if holds:
-            answer = _answer_to_offer(db, user_id, holds, newest.body)
+            answer = _answer_to_offer(db, user_id, holds, "\n".join(message.body for message in waiting))
 
     try:
         draft, _ = draft_for(db, user_id, card_id, rule=_RULE)

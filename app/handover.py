@@ -74,19 +74,22 @@ def incoming(db: Connection, user_id: int, card_id: int, message_id: int, body: 
     full = autonomy_levels(db, user_id)["chat"] == "full" and autopilot_allowed(db, user_id, app, "chat")
     if full and hits == ["logistics"]:
         return hits
+    # Unanswered, not newest: an app may hand over a batch newest first, so the message that hits is often
+    # stored after the ones that followed it.
     message = db.execute(
         text(
             """
             SELECT NOT EXISTS (SELECT 1 FROM messages later WHERE later.card_id = :card_id
-                               AND later.sent_at > messages.sent_at) AS newest,
+                               AND later.user_id = :user_id AND later.sender = 'me'
+                               AND later.sent_at > messages.sent_at) AS unanswered,
                    sent_at > now() - interval '1 day' AS recent
-            FROM messages WHERE id = :id
+            FROM messages WHERE id = :id AND user_id = :user_id
             """
         ),
-        {"id": message_id, "card_id": card_id},
+        {"id": message_id, "card_id": card_id, "user_id": user_id},
     ).one()
-    if not message.newest:
-        return hits  # an old message added late: the chat has moved on
+    if not message.unanswered:
+        return hits  # the user has replied since: the chat has moved on
     name = db.execute(
         text("UPDATE cards SET handover = 'pending' WHERE id = :id AND handover IS NULL RETURNING name"),
         {"id": card_id},
@@ -109,6 +112,22 @@ def incoming(db: Connection, user_id: int, card_id: int, message_id: int, body: 
         body="\n".join(suggestions) or "Autopilot paused this chat. Open it to reply or take over.",
     )
     return hits
+
+
+def unanswered(db: Connection, user_id: int, card_id: int) -> list:
+    """The match's messages since the user's last one, oldest first: `id`, `body`, `handover`."""
+    return db.execute(
+        text(
+            """
+            SELECT id, body, handover FROM messages
+            WHERE card_id = :card_id AND user_id = :user_id AND sender = 'them'
+              AND sent_at > coalesce((SELECT max(sent_at) FROM messages WHERE card_id = :card_id
+                                      AND user_id = :user_id AND sender = 'me'), '-infinity')
+            ORDER BY sent_at, id
+            """
+        ),
+        {"card_id": card_id, "user_id": user_id},
+    ).all()
 
 
 def answered(db: Connection, card_id: int) -> None:

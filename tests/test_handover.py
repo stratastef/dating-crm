@@ -158,3 +158,31 @@ def test_a_pending_handover_is_a_hot_lead_in_the_queue_until_it_is_taken_over(cl
     client.post(f"/cards/{card_id}/take-over")
 
     assert client.get("/queue").json() == []
+
+
+def at(client, card_id: int, sender: str, body: str, sent_at: datetime) -> None:
+    message = {"sender": sender, "body": body, "sent_at": sent_at.isoformat()}
+    assert client.post(f"/cards/{card_id}/messages", json=message).status_code == 201
+
+
+def test_a_hit_on_an_earlier_message_of_one_batch_pauses_the_card(app, client, jev):
+    """Tinder returns the newest message first, so the one that asks is stored after the one that followed it."""
+    jev.yes["asks_if_ai"] = ["are you a bot"]
+    card_id = card(client)
+    now = datetime.now(timezone.utc)
+
+    at(client, card_id, "them", "??", now)
+    at(client, card_id, "them", "are you a bot?", now - timedelta(minutes=1))
+
+    assert paused(app, card_id)
+
+
+def test_a_hit_on_a_message_the_user_already_answered_does_not_pause_the_card(app, client, jev):
+    jev.yes["asks_if_ai"] = ["are you a bot"]
+    card_id = card(client)
+    now = datetime.now(timezone.utc)
+
+    at(client, card_id, "me", "ask me anything", now)
+    at(client, card_id, "them", "are you a bot?", now - timedelta(minutes=1))
+
+    assert not paused(app, card_id)

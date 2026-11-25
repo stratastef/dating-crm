@@ -424,6 +424,20 @@ def test_full_mode_hands_over_an_answer_that_neither_accepts_nor_declines(
     assert [draft["guardrail"] for draft in queued_for_review(client)] == [["logistics"]]
 
 
+def test_full_mode_offers_times_when_the_question_is_not_the_newest_message(
+    app, client, card_id, tinder, jev, gcal, evenings  # noqa: F811
+):
+    client.put("/settings/ai-disclosure", json={"enabled": False})
+    autonomy(client, "full")
+    jev.yes["logistics"] = ["when are you free"]
+
+    incoming(client, card_id, "when are you free?")
+    incoming(client, card_id, "??")
+    work(app)
+
+    assert sent(tinder) == [f"{REPLY} I'm free {said(evenings[0])} or {said(evenings[1])}."]
+
+
 # (g) AI disclosure.
 
 
