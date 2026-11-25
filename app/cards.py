@@ -224,6 +224,9 @@ def update_card(card_id: int, changes: CardChanges, user: CurrentUser, db: Db):
         assignments.append("stage_changed_at = CASE WHEN stage <> :stage THEN now() ELSE stage_changed_at END")
         # Archiving, or any move out of the stallable stages, ends Stalled.
         assignments.append(f"stalled_at = CASE WHEN :stage IN {_STALLABLE} THEN stalled_at END")
+    if fields.get("date_rating") is not None:
+        # The first rating fixes the week the date counts in on the dashboard.
+        assignments.append("date_rated_at = COALESCE(date_rated_at, now())")
     row = db.execute(
         text(
             f"""
