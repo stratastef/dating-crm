@@ -146,8 +146,21 @@ _Avoid_: Home, inbox, dashboard, needs you
 The screen that shows the review queue.
 
 **Pipeline**:
-The screen that shows every card by stage.
+The screen that shows every card, grouped by who acts next: waiting for you, handled by autopilot, waiting for them, texting off-app, and archived. Each row still shows the card's stage.
 _Avoid_: Board
+
+**Waiting for you**:
+A card blocked on the user: a pending handover, a draft in Review, a copied draft not yet sent, a Stalled card, an overdue next action, or a Dated card with no rating. A next action due today does not count until it is overdue.
+_Avoid_: Needs you, due
+
+**Handled by autopilot**:
+A Matched or Chatting card that autopilot can act on now: chat autonomy is Autopilot or Full autopilot, the app's connector works, nothing is paused and the AI budget is not reached.
+
+**Waiting for them**:
+A Matched or Chatting card where the match owes a reply and autopilot cannot act on it.
+
+**Off-app**:
+A card from Number swapped on, where the user texts the match outside the dating app.
 
 **Dashboard**:
 The screen that shows good dates per hour of the user's time over the weeks.
