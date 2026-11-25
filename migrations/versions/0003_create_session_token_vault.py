@@ -1,7 +1,7 @@
 """create session token vault tables
 
-Revision ID: 0002_token_vault
-Revises: 0001
+Revision ID: 0003_token_vault
+Revises: 0002_audit_log
 """
 
 import sqlalchemy as sa
@@ -9,8 +9,8 @@ from alembic import op
 
 from app.tenancy import user_id_column
 
-revision = "0002_token_vault"
-down_revision = "0001"
+revision = "0003_token_vault"
+down_revision = "0002_audit_log"
 branch_labels = None
 depends_on = None
 
