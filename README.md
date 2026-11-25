@@ -13,11 +13,13 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/auth.py` | `CurrentUser` and `Db` route dependencies, `create_user()` |
 | `app/cards.py` | Match cards and their messages: routes under `/cards` |
 | `app/llm.py` | `call()`, the only way to call Claude; records each call's cost |
+| `app/budget.py` | The monthly AI budget: `GET` and `PUT /budget` |
 | `app/drafts.py` | Copilot drafts for a card and the user's edits: `POST /cards/{id}/drafts`, `PATCH /drafts/{id}` |
 | `app/send.py` | Sending a draft: `POST /drafts/{id}/send`, `queue_send()` and the `send_draft` job |
 | `app/voice.py` | Questionnaire, style profile and similar past chats: routes under `/voice` |
 | `app/bios.py` | Bio and prompt rewrites per dating app: routes under `/bios` |
 | `app/preferences.py` | What the user wants, versioned: routes under `/preferences`, `current_preferences()` |
+| `app/dashboard.py` | Good dates per hour, weekly: `POST /time` and `GET /dashboard` |
 | `app/settings.py` | User settings: `GET` and `PATCH /settings` |
 | `app/tenancy.py` | `user_id_column()` for tenant tables |
 | `app/vault.py` | `store_token()`, `read_token()`, `delete_token()` for encrypted dating-app session tokens |
@@ -25,6 +27,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/autopilot.py` | Autonomy per job and the kill switch: `autopilot_allowed()`, `pause()`, `resume()` |
 | `app/connectors.py` | `Connector` contract, `call()`, `is_copilot_only()`, `alerts()` |
 | `app/push.py` | `send_push()` and `POST /devices` |
+| `app/review.py` | Review queue: `GET /queue`, approve and dismiss a draft, `is_hot_lead()` |
 | `app/tinder.py` | `TinderConnector`: reads matches and messages from Tinder's unofficial web API |
 | `app/sync.py` | `PUT /connectors/{app}/token` and the `sync_matches` job |
 | `migrations/versions/` | Alembic migrations |
@@ -148,7 +151,8 @@ result = llm.call(db, user.id, "draft", system="...", prompt="...")  # result.te
 ```
 
 - The model is read from `ANTHROPIC_MODEL` (default `claude-fable-5-2`) and the key from `ANTHROPIC_API_KEY`. Compose passes both to the API and worker.
-- Every call inserts one row in `llm_calls`: `purpose` (the third argument, naming the feature), `model`, both token counts and `cost_usd`. The row is written in the caller's transaction. `llm.spend(db, user_id)` is the user's total in USD.
+- Every call inserts one row in `llm_calls`: `purpose` (the third argument, naming the feature), `model`, both token counts and `cost_usd`. The row is written in its own transaction, so it is kept when the calling job fails. `llm.spend(db, user_id)` is the user's total for the current calendar month (UTC) in USD.
+- **AI budget:** each user has a hard monthly cap, `users.ai_budget_usd`, default 50 USD. `GET /budget` returns `{"spend_usd", "cap_usd", "paused"}` and `PUT /budget` with `{"cap_usd": 20}` sets the cap (routes in `app/budget.py`). While the month's spend is at the cap, `call()` raises `llm.BudgetReached` without calling Claude (a route answers `402`; a job retries and then fails), and the worker skips autopilot jobs with the reason `AI budget reached`. The call that reaches the cap sends the user a push. The budget pause is computed, not a row in `autopilot_pauses`: a new month or a higher cap lifts it, `POST /autopilot/resume` does not, and it is not shown by `GET /autopilot/pause`. Pauses set for other reasons are untouched. Spend can pass the cap by the cost of calls already in flight.
 - Cost is tokens times the per-model price in `llm.PRICES` (USD per million tokens). The prices are copied by hand: confirm them against Anthropic's price list. A model missing from the table is charged at the default model's price.
 - A refusal raises `RuntimeError`. Server-side fallback models are not configured.
 - Tests never reach the API: the autouse `llm` fixture in `tests/conftest.py` replaces `complete()` with a stub. Set `llm.reply` to choose the text and read `llm.prompts` to see what was sent.
@@ -192,13 +196,28 @@ Routes are in `app/drafts.py`; the table is `drafts` (one row per draft).
 | `POST /drafts/{id}/send` | The user approves the draft: queue it for the worker to send. Returns `202` and the draft. In `app/send.py`. |
 
 - A draft is `{"id", "card_id", "kind", "status", "original", "edited"}`. `original` is Claude's text and never changes; `edited` is `null` until the user edits. The text to use is `edited` if set, else `original`.
-- `status` is `pending` until the user taps send, then `approved` (queued), `sending` (the worker is sending it) and `sent` or `failed`. A draft that was never tapped stays `pending`; the user can still copy it.
+- `status` is `pending` until the user sends, approves or dismisses the draft (see "Review queue"). A sent or approved draft is `approved` (queued), then `sending` (the worker is sending it) and `sent` or `failed`. A dismissed draft is `dismissed`. The user can still copy any draft.
 - **Send:** the route answers `409` with the reason and queues nothing when the draft is not `pending`, the card's app is paused (the kill switch, for that app or all apps), the app has no connector, the card has no `external_id`, or `send` is unavailable (see "Connectors": not declared, switched off, copilot-only, no token).
-- **Queue a send from code:** `queue_send(db, user_id, draft_id, trigger)` in `app/send.py` is the one way to send a draft. It moves a `pending` draft to `approved` and queues a `send_draft` job in your transaction; it returns the draft, or `None` if the draft is not `pending`. `trigger` goes to the audit log. It does not check the pause or autonomy: the route checks the pause before it, and the job checks the pause again.
+- **Queue a send from code:** `queue_send(db, user_id, draft_id, trigger)` in `app/send.py` is the one way to send a draft. It moves a `pending` draft to `approved` and queues a `send_draft` job in your transaction; it returns the draft, or `None` if the draft is not `pending`. `trigger` goes to the audit log. It does not check the pause or autonomy: the route checks the pause before it, and the job checks the pause again. The review queue approves the draft itself, so it calls `send_approved(db, user_id, draft_id, trigger)`, which queues the job for an already `approved` draft if the app can send.
 - **The `send_draft` job** sends the text (`edited` if set, else `original`) with the connector's `send`, stores the message on the card under the app's message ID (so sync does not add it twice), writes an audit log entry (`type: message`, `target: card:<id>`) and sets `sent`. If the app became paused or `send` unavailable after the tap, nothing is sent and the draft goes back to `pending`.
 - **At most once:** the job commits `sending` before it calls the app. If the app answers with an error, or the worker dies before the job commits, the draft ends as `failed` and is never sent again, because the message may have gone out. A `failed` draft whose message did go out appears on the card at the next sync. To try again, write another draft.
 - The prompt holds the style profile, the card's app, name and notes, the conversation, and `similar_chats()` as examples.
 - The write route returns `409` until the style profile is written, and `502` if Claude's reply is empty.
+
+## Review queue
+
+All in `app/review.py`. A pending draft waits in the queue until the user approves or dismisses it; editing is `PATCH /drafts/{id}`.
+
+| Route | Does |
+| --- | --- |
+| `GET /queue` | List what waits for the user, hot leads first, then oldest first. |
+| `POST /drafts/{id}/approve` | Set the draft's `status` to `approved` and return it. `409` if it is no longer pending. |
+| `POST /drafts/{id}/dismiss` | Set the draft's `status` to `dismissed` and return it. `409` if it is no longer pending. |
+
+- A queue item is `{"kind", "hot", "card_id", "card_name", "draft"}`. `kind` is `draft` so far and `draft` holds the draft; a new kind of item adds its own `kind` and may leave `draft` null.
+- `is_hot_lead(db, card_id)` is the only definition of a hot lead. So far: the match sent a message within the last hour. Add date-coordination and handover signals there.
+- `POST /cards/{id}/drafts` calls `notify_if_hot()`, which sends one push at once for a hot lead and nothing otherwise. Call it wherever else an item joins the queue.
+- Approving sends the draft when its card's app can send: `hand_on_approved_draft(db, user_id, draft)` is called once per approved draft and queues the `send_draft` job (see "Drafts"). When the app cannot send (no connector, paused, `send` unavailable, card without `external_id`), the approval still succeeds, the draft stays `approved` and the user copies it.
 
 ## Preferences
 
@@ -211,6 +230,19 @@ Routes are in `app/preferences.py`; the table is `preferences` (append-only, one
 | `GET /preferences/versions` | Every version, oldest first, each with `created_at`: the moment it came into force. |
 
 Server code reads the version in force with `current_preferences(db, user_id)` from `app.preferences`; it returns `version`, `wishes`, `must_haves` and `dealbreakers`.
+
+## Dashboard
+
+Routes are in `app/dashboard.py`; the table is `app_time` (one row per report).
+
+| Route | Does |
+| --- | --- |
+| `POST /time` with `{"seconds": 90}` | Record time the user spent in the app. 1 second to 1 day per report; returns `204`. |
+| `GET /dashboard` | One entry per week with recorded time or a good date, oldest first: `week` (its Monday), `good_dates`, `hours`, `good_dates_per_hour`. |
+
+- A week starts on Monday in UTC. `good_dates_per_hour` is `null` for a week with no recorded time.
+- A good date (`is_good_date()`) counts in the week of the card's `date_rated_at`: the moment of its first rating, not the day of the date.
+- Limit: hours are only the time the iOS app was in the foreground, as the app reports it; time in the dating apps is not counted, and a stretch is lost if the app is killed or suspended before it reports.
 
 ## Session token vault
 

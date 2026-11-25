@@ -47,6 +47,21 @@ struct APIClient {
         try await data("POST", "drafts/\(draftID)/send")
     }
 
+    /// Everything that waits for the user's review, hot leads first.
+    func queue() async throws -> [QueueItem] {
+        try await send("GET", "queue")
+    }
+
+    /// Approves a pending draft as the server holds it. Save an edit first.
+    func approve(draftID: Int) async throws {
+        try await data("POST", "drafts/\(draftID)/approve")
+    }
+
+    /// Drops a pending draft from the queue. Nothing is sent.
+    func dismiss(draftID: Int) async throws {
+        try await data("POST", "drafts/\(draftID)/dismiss")
+    }
+
     func card(id: Int) async throws -> Card {
         try await send("GET", "cards/\(id)")
     }
@@ -63,7 +78,18 @@ struct APIClient {
 
     /// Stores the preferences as a new version on the server and returns what it stored.
     func save(_ preferences: Preferences) async throws -> Preferences {
-        try await send("PUT", "preferences", body: Self.encoder.encode(preferences))    }
+        try await send("PUT", "preferences", body: Self.encoder.encode(preferences))
+    }
+
+    /// Good dates per hour for every week with recorded time or a good date, oldest first.
+    func dashboard() async throws -> [DashboardWeek] {
+        try await send("GET", "dashboard")
+    }
+
+    /// Reports a stretch of time the user spent in the app.
+    func recordTime(seconds: Int) async throws {
+        try await data("POST", "time", body: Self.encoder.encode(["seconds": seconds]))
+    }
 
     private func send<Response: Decodable>(_ method: String, _ path: String, body: Data? = nil) async throws -> Response {
         try Self.decoder.decode(Response.self, from: await data(method, path, body: body))

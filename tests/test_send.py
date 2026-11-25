@@ -113,6 +113,27 @@ def test_the_users_edit_is_what_gets_sent(app, client, draft, tinder):
     assert tinder.sent == [(f"/user/matches/{CLEO}", {"message": "both, badly"})]
 
 
+def test_approving_a_draft_in_the_review_queue_sends_it_once(app, client, draft, tinder):
+    assert client.post(f"/drafts/{draft['id']}/approve").status_code == 200
+    assert client.post(f"/drafts/{draft['id']}/send").status_code == 409
+
+    work(app)
+
+    assert tinder.sent == [(f"/user/matches/{CLEO}", {"message": "both. badly."})]
+    assert status(app, draft) == "sent"
+    assert client.get("/audit-log").json()[0]["trigger"] == f"copilot: user approved draft {draft['id']}"
+
+
+def test_approving_a_draft_while_the_app_is_paused_sends_nothing(app, client, draft, tinder):
+    client.post("/autopilot/pause", params={"app": "tinder"})
+
+    assert client.post(f"/drafts/{draft['id']}/approve").status_code == 200
+    work(app)
+
+    assert tinder.sent == []
+    assert status(app, draft) == "approved"
+
+
 def test_a_second_tap_is_refused_and_the_draft_is_sent_once(app, client, draft, tinder):
     assert client.post(f"/drafts/{draft['id']}/send").status_code == 202
     assert client.post(f"/drafts/{draft['id']}/send").status_code == 409

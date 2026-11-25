@@ -35,6 +35,28 @@ def queue_send(db: Connection, user_id: int, draft_id: int, trigger: str) -> Row
     return draft
 
 
+def send_approved(db: Connection, user_id: int, draft_id: int, trigger: str) -> None:
+    """Queue the send of a draft the caller has just moved to `approved`, if its card's app can send now.
+
+    For the review queue, which approves drafts itself. Call it once per draft: a second job for the same
+    draft would mark it `failed`. When the app cannot send, the draft stays `approved` and the user copies it.
+    """
+    card = _card(db, user_id, draft_id)
+    if card and card.status == "approved" and not refusal(db, user_id, card.app, card.external_id):
+        enqueue(db, user_id, "send_draft", {"draft_id": draft_id, "trigger": trigger})
+
+
+def _card(db: Connection, user_id: int, draft_id: int) -> Row | None:
+    """The app and match a draft would be sent to, and the draft's status."""
+    return db.execute(
+        text(
+            "SELECT c.app, c.external_id, d.status FROM drafts d JOIN cards c ON c.id = d.card_id"
+            " WHERE d.id = :id AND d.user_id = :user_id"
+        ),
+        {"id": draft_id, "user_id": user_id},
+    ).one_or_none()
+
+
 def refusal(db: Connection, user_id: int, app: str, match_id: str | None) -> str | None:
     """Why a message cannot be sent to this match now, or None if it can. The kill switch stops tapped sends too."""
     if app not in CONNECTORS:
@@ -50,13 +72,7 @@ def refusal(db: Connection, user_id: int, app: str, match_id: str | None) -> str
 @router.post("/drafts/{draft_id}/send", response_model=Draft, status_code=202)
 def tap_send(draft_id: int, user: CurrentUser, db: Db):
     """The user approves a draft: queue it for the worker to send. `409` says why when it cannot be sent."""
-    card = db.execute(
-        text(
-            "SELECT c.app, c.external_id, d.status FROM drafts d JOIN cards c ON c.id = d.card_id"
-            " WHERE d.id = :id AND d.user_id = :user_id"
-        ),
-        {"id": draft_id, "user_id": user.id},
-    ).one_or_none()
+    card = _card(db, user.id, draft_id)
     if not card:
         raise HTTPException(status_code=404, detail="draft not found")
     why = refusal(db, user.id, card.app, card.external_id)
