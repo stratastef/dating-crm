@@ -31,6 +31,16 @@ struct APIClient {
         try await send("PATCH", "cards/\(card.id)", body: Self.encoder.encode(CardChanges(card: card)))
     }
 
+    /// The preferences in force; empty until the user saves some.
+    func preferences() async throws -> Preferences {
+        try await send("GET", "preferences")
+    }
+
+    /// Stores the preferences as a new version on the server and returns what it stored.
+    func save(_ preferences: Preferences) async throws -> Preferences {
+        try await send("PUT", "preferences", body: Self.encoder.encode(preferences))
+    }
+
     private func send<Response: Decodable>(_ method: String, _ path: String, body: Data? = nil) async throws -> Response {
         var request = URLRequest(url: baseURL.appending(path: path))
         request.httpMethod = method
