@@ -14,6 +14,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/tenancy.py` | `user_id_column()` for tenant tables |
 | `app/vault.py` | `store_token()`, `read_token()`, `delete_token()` for encrypted dating-app session tokens |
 | `app/audit.py` | `record_action()` and `GET /audit-log` |
+| `app/connectors.py` | `Connector` contract, `call()`, `is_copilot_only()`, `alerts()` |
 | `migrations/versions/` | Alembic migrations |
 | `tests/` | pytest suite |
 | `compose.yaml` | `db`, `api` and `worker` services |
@@ -110,6 +111,33 @@ Compose passes `TOKEN_VAULT_MASTER_KEY` from your shell or `.env` to the API and
 
 Every autopilot action must call `record_action(connection, user_id, type=..., app=..., target=..., trigger=...)` from `app.audit`, in the same transaction as the action. `type` is one of `message`, `like`, `pass`, `profile_change`, `calendar_hold`.
 The `audit_log` table is append-only (a trigger rejects `UPDATE` and `DELETE`). `GET /audit-log?app=&type=` lists the current user's entries, newest first.
+
+## Connectors
+
+The contract is in `app/connectors.py`. The capabilities are `read_matches`, `read_messages`, `send`, `like` and `pass`.
+
+Add a connector: subclass `Connector`, set `app`, declare the `capabilities` it supports and implement the method for each one (`pass` is the method `pass_`). Leave a capability out of `capabilities` to leave it out of the build. Each method receives the session token; read it from the vault. A method raises any exception when the app refuses or breaks.
+
+```python
+class TinderConnector(Connector):
+    app = "tinder"
+    capabilities = frozenset({"read_matches", "read_messages"})
+
+    def read_matches(self, token: str) -> list[dict]: ...
+    def read_messages(self, token: str, match_id: str) -> list[dict]: ...
+```
+
+Never call a connector method directly. Go through `call()`, which enforces the rules below:
+
+```python
+matches = call(db, user_id, TinderConnector(), "read_matches", read_token(db, user_id, "tinder"))
+```
+
+- **Switch a capability off:** set `CONNECTOR_DISABLED_CAPABILITIES=tinder:send,hinge:like` (comma-separated `app:capability`).
+- **Unavailable:** `call()` raises `CapabilityUnavailable` and does not touch the app when the capability is not declared, is disabled, or the app is copilot-only.
+- **Fallback to copilot:** if the connector method raises, `call()` inserts a row in `connector_alerts` (`user_id`, `app`, `capability`, `error` = `repr()` of the exception) and raises `CapabilityFailed`, with the connector's exception as `__cause__`. The row is written in its own transaction, so it survives the failed job's rollback. That row is both the alert and the fallback: `is_copilot_only(db, user_id, app)` is true while the user has any alert for the app, and every capability of that app is then unavailable for that user. `alerts(db, user_id)` lists them. Delete the user's rows for an app to re-enable its connector.
+
+Test a connector's callers with a fake like `FakeConnector` in `tests/test_connectors.py`.
 
 ## Add a migration
 

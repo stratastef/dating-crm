@@ -3,6 +3,7 @@ x-app: &app
   environment:
     DATABASE_URL: postgresql+psycopg://app:app@db:5432/app
     TOKEN_VAULT_MASTER_KEY: ${TOKEN_VAULT_MASTER_KEY:-}
+    CONNECTOR_DISABLED_CAPABILITIES: ${CONNECTOR_DISABLED_CAPABILITIES:-}
   depends_on:
     db:
       condition: service_healthy
