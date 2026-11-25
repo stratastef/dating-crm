@@ -14,6 +14,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/cards.py` | Match cards and their messages: routes under `/cards` |
 | `app/card_lookup.py` | Shared reads of one card: `own_card()`, `find_card()`, `conversation()`, `chat_lines()`, `unanswered()` |
 | `app/llm.py` | `call()`, the only way to call Claude; records each call's cost |
+| `app/jev.py` | Jev checks: `ask()`, the only way to call Jev, and the guardrail, handover, match-read, hot-lead and dealbreaker checks built on it |
 | `app/budget.py` | The monthly AI budget: `GET` and `PUT /budget` |
 | `app/drafts.py` | Copilot drafts for a card and the user's edits: `POST /cards/{id}/drafts`, `PATCH /drafts/{id}` |
 | `app/screenshots.py` | Screenshot copilot: `POST /screenshots` reads a shared screenshot into a card and a draft |
@@ -24,6 +25,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/photos.py` | The user's own photos, their ranking and light edits: routes under `/photos` |
 | `app/preferences.py` | What the user wants, versioned: routes under `/preferences`, `current_preferences()` |
 | `app/dashboard.py` | Good dates per hour, weekly: `POST /time` and `GET /dashboard` |
+| `app/feedback.py` | Feedback loop: `swipe_lines()` for the swipe pre-screen prompt, and `GET /feedback/export` |
 | `app/settings.py` | User settings: `GET` and `PATCH /settings` |
 | `app/tenancy.py` | `user_id_column()` for tenant tables |
 | `app/vault.py` | `store_token()`, `read_token()`, `delete_token()` for encrypted dating-app session tokens |
@@ -81,6 +83,7 @@ Fixtures in `tests/conftest.py`:
 | `llm` | The stub that replaces `app.llm.complete` in every test. See "Calling Claude". |
 | `apns` | The stub that replaces `app.push.post` in every test. See "Push notifications". |
 | `jev` | The stub that replaces `app.jev.ask` in every test. See "Jev checks". |
+| `gcal` | The stub that replaces `app.calendar.google` in every test. See "Google Calendar holds". |
 
 ## Authentication and tenancy
 
