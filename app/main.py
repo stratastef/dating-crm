@@ -7,12 +7,15 @@ from app.auth import CurrentUser, Db
 from app.autopilot import router as autopilot_router
 from app.bios import router as bios_router
 from app.calendar import router as calendar_router
+from app.budget import budget_reached_response, router as budget_router
 from app.cards import router as cards_router
 from app.dashboard import router as dashboard_router
 from app.db import database_url
 from app.drafts import router as drafts_router
 from app.jobs import enqueue
+from app.llm import BudgetReached
 from app.push import router as push_router
+from app.review import router as review_router
 from app.preferences import router as preferences_router
 from app.sync import router as sync_router
 from app.voice import router as voice_router
@@ -55,10 +58,13 @@ def create_app(url: str | None = None) -> FastAPI:
     app.include_router(autopilot_router)
     app.include_router(bios_router)
     app.include_router(calendar_router)
+    app.include_router(budget_router)
+    app.add_exception_handler(BudgetReached, budget_reached_response)
     app.include_router(cards_router)
     app.include_router(dashboard_router)
     app.include_router(drafts_router)
     app.include_router(push_router)
+    app.include_router(review_router)
     app.include_router(preferences_router)
     app.include_router(sync_router)
     app.include_router(voice_router)

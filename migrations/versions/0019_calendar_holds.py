@@ -1,7 +1,7 @@
 """create calendar holds table
 
-Revision ID: 0017_calendar_holds
-Revises: 0016_dashboard
+Revision ID: 0019_calendar_holds
+Revises: 0018_jev_checks
 """
 
 import sqlalchemy as sa
@@ -10,8 +10,8 @@ from sqlalchemy.dialects import postgresql
 
 from app.tenancy import user_id_column
 
-revision = "0017_calendar_holds"
-down_revision = "0016_dashboard"
+revision = "0019_calendar_holds"
+down_revision = "0018_jev_checks"
 branch_labels = None
 depends_on = None
 

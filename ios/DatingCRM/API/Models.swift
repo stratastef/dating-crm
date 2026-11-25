@@ -73,6 +73,26 @@ struct Draft: Codable, Identifiable, Hashable {
     var text: String { edited ?? original }
 }
 
+/// One thing that waits for the user's review. `kind` is `draft` so far; the server adds more kinds later.
+struct QueueItem: Codable, Identifiable, Hashable {
+    var kind: String
+    /// A hot lead: the server pushed it at once.
+    var hot: Bool
+    var cardID: Int
+    var cardName: String
+    /// Set when `kind` is `draft`.
+    var draft: Draft?
+
+    var id: String { "\(kind)-\(draft?.id ?? cardID)" }
+
+    // The key strategy turns `card_id` into `cardId`.
+    enum CodingKeys: String, CodingKey {
+        case kind, hot, draft
+        case cardID = "cardId"
+        case cardName
+    }
+}
+
 /// What the user wants: wishes in plain words, plus must-haves and dealbreakers.
 struct Preferences: Codable, Equatable {
     var wishes = ""

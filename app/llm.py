@@ -7,6 +7,8 @@ from decimal import Decimal
 import anthropic
 from sqlalchemy import Connection, text
 
+from app.push import send_push
+
 DEFAULT_MODEL = "claude-fable-5-2"
 
 # USD per million tokens: (input, output). Confirm these against Anthropic's price list before relying
@@ -17,6 +19,10 @@ PRICES: dict[str, tuple[Decimal, Decimal]] = {
     "claude-sonnet-5-5": (Decimal("2"), Decimal("10")),
     "claude-haiku-5-5": (Decimal("0.10"), Decimal("0.50")),
 }
+
+
+class BudgetReached(RuntimeError):
+    """The user's Claude spend this month is at their cap: no call is made."""
 
 
 @dataclass
@@ -53,37 +59,58 @@ def complete(system: str, prompt: str, max_tokens: int = 16000) -> Completion:
 def call(db: Connection, user_id: int, purpose: str, system: str, prompt: str, max_tokens: int = 16000) -> Completion:
     """Send one prompt to Claude for a user and record what the call cost. Every feature calls Claude through this.
 
-    `purpose` names the feature, for example `draft`. The cost row is written in the caller's transaction.
+    `purpose` names the feature, for example `draft`. Raises `BudgetReached`, without calling Claude, while the
+    user's spend this month is at their cap. The call that reaches the cap sends the user a push.
     """
+    # shortcut: two calls at the same moment can both pass this check, so spend can pass the cap by the cost
+    # of the calls in flight. Lock the user row here if that ever matters.
+    if budget_reached(db, user_id):
+        raise BudgetReached("AI budget reached")
     # `complete` is looked up at call time so tests can replace it with a stub.
     completion = complete(system, prompt, max_tokens)
     # A model missing from the table is charged at the default model's price, so its cost is never zero.
     # shortcut: cache reads and writes are not priced apart, add them when a caller turns on prompt caching.
     input_price, output_price = PRICES.get(completion.model, PRICES[DEFAULT_MODEL])
     cost = (completion.input_tokens * input_price + completion.output_tokens * output_price) / 1_000_000
-    # shortcut: if the caller's transaction rolls back (a job that fails after the call), the cost row is
-    # lost with it. Write it in its own transaction if the budget cap needs failed attempts counted.
-    db.execute(
-        text(
-            """
-            INSERT INTO llm_calls (user_id, purpose, model, input_tokens, output_tokens, cost_usd)
-            VALUES (:user_id, :purpose, :model, :input_tokens, :output_tokens, :cost)
-            """
-        ),
-        {
-            "user_id": user_id,
-            "purpose": purpose,
-            "model": completion.model,
-            "input_tokens": completion.input_tokens,
-            "output_tokens": completion.output_tokens,
-            "cost": cost,
-        },
-    )
+    # Own transaction: the money is spent even if the caller (a job handler) fails later and rolls back.
+    with db.engine.begin() as own:
+        own.execute(
+            text(
+                """
+                INSERT INTO llm_calls (user_id, purpose, model, input_tokens, output_tokens, cost_usd)
+                VALUES (:user_id, :purpose, :model, :input_tokens, :output_tokens, :cost)
+                """
+            ),
+            {
+                "user_id": user_id,
+                "purpose": purpose,
+                "model": completion.model,
+                "input_tokens": completion.input_tokens,
+                "output_tokens": completion.output_tokens,
+                "cost": cost,
+            },
+        )
+        if budget_reached(own, user_id):  # spend was below the cap before this call, so the alert is sent once
+            send_push(own, user_id, "AI budget reached", "Autopilot is paused until next month or a higher cap.")
     return completion
 
 
 def spend(db: Connection, user_id: int) -> Decimal:
-    """What the user's recorded Claude calls cost in total, in USD."""
+    """What the user's recorded Claude calls cost so far this calendar month (UTC), in USD."""
     return db.execute(
-        text("SELECT coalesce(sum(cost_usd), 0) FROM llm_calls WHERE user_id = :user_id"), {"user_id": user_id}
+        text(
+            "SELECT coalesce(sum(cost_usd), 0) FROM llm_calls WHERE user_id = :user_id"
+            " AND created_at >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"
+        ),
+        {"user_id": user_id},
     ).scalar_one()
+
+
+def cap(db: Connection, user_id: int) -> Decimal:
+    """The user's hard cap on Claude spend per calendar month, in USD."""
+    return db.execute(text("SELECT ai_budget_usd FROM users WHERE id = :id"), {"id": user_id}).scalar_one()
+
+
+def budget_reached(db: Connection, user_id: int) -> bool:
+    """True while this month's spend is at the cap: no Claude call is made and autopilot is paused."""
+    return spend(db, user_id) >= cap(db, user_id)

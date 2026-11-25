@@ -14,6 +14,10 @@ x-app: &app
     GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
     GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
     GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
+    JEV_BASE_URL: ${JEV_BASE_URL:-}
+    JEV_API_KEY: ${JEV_API_KEY:-}
+    JEV_TOOL: ${JEV_TOOL:-}
+    JEV_MODEL: ${JEV_MODEL:-}
   depends_on:
     db:
       condition: service_healthy
