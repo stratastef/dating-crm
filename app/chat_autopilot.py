@@ -130,9 +130,15 @@ def chat_reply(db: Connection, user_id: int, payload: dict) -> None:
                     db, user_id, card_id, trigger=f"{TRIGGER} (full): match agreed", start=holds[answer].start
                 )
                 db.execute(
-                    text("UPDATE cards SET stage = 'date_set', stage_changed_at = now() WHERE id = :id"),
-                    {"id": card_id},
+                    text(
+                        "UPDATE cards SET stage = 'date_set', stage_changed_at = now()"
+                        " WHERE id = :id AND user_id = :user_id"
+                    ),
+                    {"id": card_id, "user_id": user_id},
                 )
+                # The rule for every stage change made outside the PATCH route. The agreed slot is confirmed
+                # above, so today this finds nothing left to do.
+                calendar.stage_changed(db, user_id, card_id, "date_set")
             elif answer == "other":
                 for_user = ["logistics"]  # a counter-offer, a place, exclusivity: the user answers
             else:

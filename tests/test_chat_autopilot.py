@@ -388,6 +388,25 @@ def test_full_mode_books_the_date_the_match_agrees_to_and_then_stops(
     assert len(sent(tinder)) == 1
 
 
+def test_booking_a_date_tells_the_calendar_that_the_cards_stage_changed(
+    app, client, card_id, tinder, jev, gcal, evenings, llm, monkeypatch  # noqa: F811
+):
+    """Code that sets a stage without the PATCH route must call `calendar.stage_changed()`."""
+    changes = []
+    monkeypatch.setattr("app.calendar.stage_changed", lambda db, user_id, card, stage: changes.append((card, stage)))
+    autonomy(client, "full")
+    jev.yes["logistics"] = ["when are you free", "works for me"]
+    incoming(client, card_id, "when are you free?")
+    work(app)
+    llm.replies = ["2", "can't wait"]
+
+    incoming(client, card_id, "the second one works for me")
+    work(app)
+
+    assert client.get(f"/cards/{card_id}").json()["stage"] == "date_set"
+    assert changes == [(card_id, "date_set")]
+
+
 def test_full_mode_releases_the_holds_a_match_declines_and_offers_other_times(
     app, client, card_id, tinder, jev, gcal, evenings, llm  # noqa: F811
 ):
