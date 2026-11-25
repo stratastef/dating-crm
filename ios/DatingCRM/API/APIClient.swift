@@ -26,7 +26,7 @@ struct APIClient {
         try await send("GET", "cards/\(cardID)/messages")
     }
 
-    /// Saves the card's stage, notes, next action and due date, and returns the stored card.
+    /// Saves the card's stage, notes, next action, due date, date rating and date note, and returns the stored card.
     func update(_ card: Card) async throws -> Card {
         try await send("PATCH", "cards/\(card.id)", body: Self.encoder.encode(CardChanges(card: card)))
     }
@@ -81,7 +81,7 @@ struct APIClient {
 private struct CardChanges: Encodable {
     let card: Card
 
-    enum CodingKeys: CodingKey { case stage, notes, nextAction, dueDate }
+    enum CodingKeys: CodingKey { case stage, notes, nextAction, dueDate, dateRating, dateNote }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -90,5 +90,8 @@ private struct CardChanges: Encodable {
         // `encode`, not `encodeIfPresent`: the server clears these two only on an explicit null.
         try container.encode(card.nextAction, forKey: .nextAction)
         try container.encode(card.dueDate, forKey: .dueDate)
+        // The app never clears a rating or its note, so these are sent only when set.
+        try container.encodeIfPresent(card.dateRating, forKey: .dateRating)
+        try container.encodeIfPresent(card.dateNote, forKey: .dateNote)
     }
 }

@@ -9,6 +9,7 @@ struct CardDetailView: View {
     @State private var card: Card
     @State private var messages: [Message] = []
     @State private var error: String?
+    @State private var askForRating = false
 
     init(client: APIClient, card: Card, onSaved: @escaping (Card) -> Void) {
         self.client = client
@@ -60,6 +61,16 @@ struct CardDetailView: View {
                 Task { await save() }
             }
             .disabled(card == saved)
+        }
+        .onChange(of: card.stage) {
+            askForRating = card.needsDateRating
+        }
+        .sheet(isPresented: $askForRating) {
+            DateRatingSheet(name: card.name) { rating, note in
+                card.dateRating = rating
+                card.dateNote = note
+                Task { await save() }
+            }
         }
         .task {
             do {
