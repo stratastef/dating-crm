@@ -58,6 +58,8 @@ struct CardDetailView: View {
                 }
             }
 
+            ReadSection(client: client, cardID: card.id)
+
             DraftSection(client: client, cardID: card.id)
         }
         .navigationTitle(card.name)

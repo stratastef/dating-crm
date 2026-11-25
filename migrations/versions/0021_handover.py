@@ -1,14 +1,14 @@
 """pause a card for handover
 
-Revision ID: 0019_handover
-Revises: 0018_jev_checks
+Revision ID: 0021_handover
+Revises: 0020_calendar_holds
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0019_handover"
-down_revision = "0018_jev_checks"
+revision = "0021_handover"
+down_revision = "0020_calendar_holds"
 branch_labels = None
 depends_on = None
 

@@ -72,15 +72,25 @@ def client(client_for):
 
 
 class StubLlm:
-    """Stands in for `app.llm.complete`. Set `reply` to choose the text; `prompts` records what was sent."""
+    """Stands in for `app.llm.complete`. Set `reply` to choose the text; `prompts` records what was sent.
+
+    `systems` and `images` record the system prompt and the images of each call.
+    `replies` are used up first, one per call, for a route that calls Claude more than once.
+    """
 
     def __init__(self):
         self.reply = "stub reply"
+        self.replies: list[str] = []
         self.prompts: list[str] = []
+        self.systems: list[str] = []
+        self.images: list[list] = []
 
-    def __call__(self, system: str, prompt: str, max_tokens: int = 16000) -> Completion:
+    def __call__(self, system: str, prompt: str, max_tokens: int = 16000, images=()) -> Completion:
         self.prompts.append(prompt)
-        return Completion(text=self.reply, model="stub", input_tokens=1, output_tokens=1)
+        self.systems.append(system)
+        self.images.append(list(images))
+        text = self.replies.pop(0) if self.replies else self.reply
+        return Completion(text=text, model="stub", input_tokens=1, output_tokens=1)
 
 
 @pytest.fixture(autouse=True)
@@ -123,6 +133,55 @@ def apns(monkeypatch):
     stub = StubApns()
     stub.key = APNS_KEY  # for checking the signature of a push
     monkeypatch.setattr("app.push.post", stub)
+    return stub
+
+
+class StubGoogle:
+    """Stands in for `app.calendar.google`, the only object that calls Google.
+
+    Set `busy` to the user's busy times as `(start, end)`. `events` maps each event ID to its
+    `status` (`tentative` or `confirmed`), `start`, `end` and `summary`; a deleted event is removed.
+    """
+
+    refresh_token = "stub-refresh-token"
+
+    def __init__(self):
+        self.busy: list[tuple] = []
+        self.events: dict[str, dict] = {}
+        self.codes: list[str] = []
+        self.tokens: list[str] = []  # the refresh token of every calendar call
+
+    def exchange_code(self, code: str) -> str:
+        self.codes.append(code)
+        return self.refresh_token
+
+    def free_busy(self, refresh_token, start, end):
+        self.tokens.append(refresh_token)
+        return [(b0, b1) for b0, b1 in self.busy if b0 < end and start < b1]
+
+    def create_tentative(self, refresh_token, start, end, summary):
+        self.tokens.append(refresh_token)
+        event_id = f"event-{len(self.tokens)}"
+        self.events[event_id] = {"status": "tentative", "start": start, "end": end, "summary": summary}
+        return event_id
+
+    def delete(self, refresh_token, event_id):
+        self.tokens.append(refresh_token)
+        del self.events[event_id]
+
+    def confirm(self, refresh_token, event_id, summary):
+        self.tokens.append(refresh_token)
+        self.events[event_id].update(status="confirmed", summary=summary)
+
+
+@pytest.fixture(autouse=True)
+def gcal(monkeypatch):
+    """Every test gets the stub, so no test can call Google."""
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "test-client-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "test-client-secret")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "http://testserver/calendar/callback")
+    stub = StubGoogle()
+    monkeypatch.setattr("app.calendar.google", stub)
     return stub
 
 
