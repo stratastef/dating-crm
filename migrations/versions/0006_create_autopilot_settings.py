@@ -1,7 +1,7 @@
 """create autonomy_settings and autopilot_pauses tables
 
-Revision ID: 0005_autopilot
-Revises: 0004_jobs
+Revision ID: 0006_autopilot
+Revises: 0005_cards
 """
 
 import sqlalchemy as sa
@@ -9,8 +9,8 @@ from alembic import op
 
 from app.tenancy import user_id_column
 
-revision = "0005_autopilot"
-down_revision = "0004_jobs"
+revision = "0006_autopilot"
+down_revision = "0005_cards"
 branch_labels = None
 depends_on = None
 

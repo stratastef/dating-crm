@@ -5,6 +5,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.audit import router as audit_router
 from app.auth import CurrentUser, Db
 from app.autopilot import router as autopilot_router
+from app.cards import router as cards_router
 from app.db import database_url
 from app.jobs import enqueue
 
@@ -43,5 +44,6 @@ def create_app(url: str | None = None) -> FastAPI:
 
     app.include_router(audit_router)
     app.include_router(autopilot_router)
+    app.include_router(cards_router)
 
     return app
