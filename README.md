@@ -12,6 +12,8 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/db.py` | `database_url()`, read from `DATABASE_URL` |
 | `app/auth.py` | `CurrentUser` and `Db` route dependencies, `create_user()` |
 | `app/cards.py` | Match cards and their messages: routes under `/cards` |
+| `app/llm.py` | `complete()`, the only function that calls Claude |
+| `app/voice.py` | Questionnaire, style profile and similar past chats: routes under `/voice` |
 | `app/tenancy.py` | `user_id_column()` for tenant tables |
 | `app/vault.py` | `store_token()`, `read_token()`, `delete_token()` for encrypted dating-app session tokens |
 | `app/audit.py` | `record_action()` and `GET /audit-log` |
@@ -51,6 +53,7 @@ Fixtures in `tests/conftest.py`:
 | `client` | `TestClient` authenticated as a fresh user. All tables are emptied after each test. |
 | `client_for(email)` | Same, for a named user. Use it when a test needs two users. |
 | `app` | The FastAPI app, for unauthenticated requests: `TestClient(app)`. |
+| `llm` | The stub that replaces `app.llm.complete` in every test. See "Calling Claude". |
 
 ## Authentication and tenancy
 
@@ -111,6 +114,35 @@ def sync_matches(db: Connection, user_id: int, payload: dict) -> None: ...
 `db` is the job's own transaction. If the handler raises, its writes are rolled back and the job is retried after 30s, 1m, 2m and 4m. After 5 attempts its status is `failed` and `last_error` holds the exception. Workers claim jobs with `FOR UPDATE SKIP LOCKED`, so several workers can run. A worker that crashes mid-job releases it, so make handlers safe to run twice.
 
 In a test, call `run_once(app.state.engine)` to run the next due job; pass `now=` to move the clock. `POST /jobs/ping` queues a no-op job and `GET /jobs/{id}` returns its `status` (`queued`, `done` or `failed`).
+
+## Calling Claude
+
+All Claude calls go through one function, `complete()` in `app/llm.py`, which uses the `anthropic` SDK. Call it through the module so tests can replace it:
+
+```python
+from app import llm
+
+result = llm.complete(system="...", prompt="...")  # result.text, result.model, result.input_tokens, result.output_tokens
+```
+
+- The model is read from `ANTHROPIC_MODEL` (default `claude-fable-5-2`) and the key from `ANTHROPIC_API_KEY`. Compose passes both to the API and worker.
+- Every call returns its token usage. Nothing stores it yet.
+- A refusal raises `RuntimeError`. Server-side fallback models are not configured.
+- Tests never reach the API: the autouse `llm` fixture in `tests/conftest.py` replaces `complete()` with a stub. Set `llm.reply` to choose the text and read `llm.prompts` to see what was sent.
+
+## Voice
+
+Routes and the job are in `app/voice.py`; the table is `voice_profiles` (one row per user).
+
+| Route | Does |
+| --- | --- |
+| `PUT /voice/questionnaire` | Replace the questionnaire answers. Body: `{"answers": {"<question>": "<answer>"}}`. |
+| `GET /voice` | Read `answers` and `profile`. `profile` is `null` until the worker has written it. |
+| `GET /cards/{id}/similar-chats?limit=` | Past chats that led to a date, most similar to this card's conversation first. `limit` defaults to 3. |
+
+- The `voice_profile` job writes the style profile from the answers and the user's own messages (the newest 200). Saving answers and `POST /cards/{id}/messages` with `sender: me` queue it. Code that stores messages another way must call `queue_profile(db, user_id)`.
+- A chat led to a date if its card's stage is `date_set`, `dated` or `seeing_them`.
+- Similarity is `similarity()` from the Postgres `pg_trgm` extension over the whole chat text, so it measures shared wording, not meaning. Other code calls `similar_chats(db, user_id, card_id, limit)`.
 
 ## Session token vault
 

@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from app.auth import CurrentUser, Db
+from app.voice import queue_profile
 
 router = APIRouter()
 
@@ -163,6 +164,8 @@ def add_message(card_id: int, message: NewMessage, user: CurrentUser, db: Db):
         raise HTTPException(status_code=409, detail="a message with this external_id already exists on the card")
     if not row:
         raise HTTPException(status_code=404, detail="card not found")
+    if message.sender == "me":
+        queue_profile(db, user.id)  # the style profile is written from the user's own messages
     return row
 
 

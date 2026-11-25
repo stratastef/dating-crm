@@ -9,6 +9,7 @@ from sqlalchemy import create_engine, make_url, text
 
 from app.auth import create_user
 from app.db import database_url
+from app.llm import Completion
 from app.main import create_app
 
 
@@ -60,3 +61,23 @@ def client_for(app):
 def client(client_for):
     """A client authenticated as a fresh user, on a clean database."""
     return client_for("user@example.com")
+
+
+class StubLlm:
+    """Stands in for `app.llm.complete`. Set `reply` to choose the text; `prompts` records what was sent."""
+
+    def __init__(self):
+        self.reply = "stub reply"
+        self.prompts: list[str] = []
+
+    def __call__(self, system: str, prompt: str, max_tokens: int = 16000) -> Completion:
+        self.prompts.append(prompt)
+        return Completion(text=self.reply, model="stub", input_tokens=1, output_tokens=1)
+
+
+@pytest.fixture(autouse=True)
+def llm(monkeypatch):
+    """Every test gets the stub, so no test can call the real Claude API."""
+    stub = StubLlm()
+    monkeypatch.setattr("app.llm.complete", stub)
+    return stub
