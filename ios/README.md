@@ -14,7 +14,8 @@ The SwiftUI client for the API in the repo root. It needs Xcode 27 and an iOS 18
 | `DatingCRM.entitlements` | The push notification entitlement. |
 | `DatingCRM/API/APIClient.swift` | Every call to the server. |
 | `DatingCRM/API/Models.swift` | `Stage`, `Card`, `Message`, `Inference`, `Preferences`, `DashboardWeek`: the JSON the server sends. |
-| `DatingCRM/Screens/` | One file per screen. |
+| `DatingCRM/API/ProfilePhoto.swift` | `ProfilePhoto` and `PhotoEdit`: the user's own photos, their ranking and the light edit on offer. |
+| `DatingCRM/Screens/` | One file per screen. `PhotosView` uploads photos from the photo library as JPEG, ranks them and shows each offered edit as a preview to accept or reject. The server makes every preview from the uploaded pixels. |
 | `DatingCRMTests/` | Unit tests (Swift Testing). `StubServer` stands in for the server. |
 | `Info.plist` | Only the keys that build settings cannot express. The rest of the Info.plist is generated. |
 
