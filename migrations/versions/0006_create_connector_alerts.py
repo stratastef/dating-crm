@@ -1,7 +1,7 @@
 """create connector_alerts table
 
-Revision ID: 0005_connector_alerts
-Revises: 0004_jobs
+Revision ID: 0006_connector_alerts
+Revises: 0005_cards
 """
 
 import sqlalchemy as sa
@@ -9,8 +9,8 @@ from alembic import op
 
 from app.tenancy import user_id_column
 
-revision = "0005_connector_alerts"
-down_revision = "0004_jobs"
+revision = "0006_connector_alerts"
+down_revision = "0005_cards"
 branch_labels = None
 depends_on = None
 
