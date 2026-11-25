@@ -206,6 +206,21 @@ def release_holds(db: Connection, user_id: int, card_id: int, *, trigger: str) -
         _release(db, user_id, _card(db, user_id, card_id).app, card_id, holds, trigger)
 
 
+def delete_events(db: Connection, user_id: int, card_ids: list[int]) -> None:
+    """Delete from Google every event of the cards, held or confirmed. For the purge: the rows go with the cards."""
+    event_ids = db.execute(
+        text(
+            "SELECT event_id FROM calendar_holds"
+            " WHERE user_id = :user_id AND card_id = ANY(:card_ids) AND event_id IS NOT NULL"
+        ),
+        {"user_id": user_id, "card_ids": card_ids},
+    ).scalars().all()
+    if event_ids:
+        token = _refresh_token(db, user_id)
+        for event_id in event_ids:
+            google.delete(token, event_id)
+
+
 def confirm_date(db: Connection, user_id: int, card_id: int, *, trigger: str, start: datetime | None = None) -> bool:
     """Turn the card's hold that starts at `start` into a confirmed event and release its other holds.
 

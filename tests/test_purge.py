@@ -1,6 +1,8 @@
 from sqlalchemy import text
 
+from app import calendar
 from app.audit import record_action
+from tests.test_calendar import NINE, SEVEN, connect
 from tests.test_drafts import write_profile
 from tests.test_reads import inference, read
 
@@ -71,7 +73,13 @@ def test_purge_drops_audit_entries_about_the_person_and_logs_itself_without_thei
     new_card(client, "hinge", "Sam", "zq-handle")  # the same handle on another app is another person
     with app.state.engine.begin() as connection:
         user_id = connection.execute(text("SELECT id FROM users")).scalar_one()
-        for app_name, target in [("tinder", f"card:{zelda}"), ("tinder", "match:zq-handle"), ("hinge", "match:zq-handle")]:
+        for app_name, target in [
+            ("tinder", f"card:{zelda}"),
+            ("tinder", f"card:{zelda} hold 2026-12-01T19:00:00+00:00"),
+            ("tinder", "match:zq-handle"),
+            ("hinge", "match:zq-handle"),
+            ("tinder", f"card:{zelda}0"),  # another card whose id starts with the same digits
+        ]:
             record_action(connection, user_id, type="message", app=app_name, target=target, trigger="chat autopilot")
 
     client.post("/people/purge", json={"card_ids": [zelda], "confirm": "purge"})
@@ -79,6 +87,7 @@ def test_purge_drops_audit_entries_about_the_person_and_logs_itself_without_thei
     log = [(entry["type"], entry["app"], entry["target"], entry["trigger"]) for entry in client.get("/audit-log").json()]
     assert log == [
         ("purge", "tinder", f"card:{zelda}", "deletion request"),
+        ("message", "tinder", f"card:{zelda}0", "chat autopilot"),
         ("message", "hinge", "match:zq-handle", "chat autopilot"),
     ]
 
@@ -94,7 +103,7 @@ _CARD_TABLES = """
 """
 
 
-def test_no_row_for_a_purged_person_remains_in_any_table(app, client, llm):
+def test_no_row_for_a_purged_person_remains_in_any_table(app, client, llm, gcal):
     """The tables are discovered, not listed. When this fails for a new table, seed a row for the person
     below (with `quixote` in its text), and make the purge remove it."""
     write_profile(app, client, llm, "Short, lowercase, teasing.")
@@ -106,6 +115,7 @@ def test_no_row_for_a_purged_person_remains_in_any_table(app, client, llm):
     read(client, llm, card_id, [inference("interests", "quixote: climbing")])
     llm.reply = "quixote, saturday?"
     assert client.post(f"/cards/{card_id}/drafts").status_code == 201
+    connect(client, app)
 
     def count(connection, table, where="true"):
         return connection.execute(text(f'SELECT count(*) FROM {table} AS r WHERE {where}')).scalar_one()
@@ -121,6 +131,10 @@ def test_no_row_for_a_purged_person_remains_in_any_table(app, client, llm):
         record_action(
             connection, user_id, type="message", app="tinder", target="match:quixote-771", trigger="chat autopilot"
         )
+        calendar.hold_slot(connection, user_id, card_id, SEVEN, NINE, trigger="chat autopilot: proposed a time")
+        calendar.hold_slot(connection, user_id, card_id, NINE, NINE + (NINE - SEVEN), trigger="chat autopilot")
+        calendar.confirm_date(connection, user_id, card_id, trigger="match agreed", start=SEVEN)
+        assert ["Date with Zelda Quixote"] == [event["summary"] for event in gcal.events.values()]
         card_tables = connection.execute(text(_CARD_TABLES)).scalars().all()
         unseeded = [table for table in card_tables if count(connection, table) == 0]
         assert not unseeded, f"these tables reference cards; seed a row for the person in this test: {unseeded}"
@@ -134,3 +148,4 @@ def test_no_row_for_a_purged_person_remains_in_any_table(app, client, llm):
             ["cards", *card_tables], 0
         )
         assert holding_her_content(connection) == set()
+    assert gcal.events == {}  # her name was in the calendar event too

@@ -1,13 +1,13 @@
 """purge: a deleted card takes its audit entries with it, and the purge is an audit type
 
-Revision ID: 0020_purge
-Revises: 0019_match_read
+Revision ID: 0021_purge
+Revises: 0020_calendar_holds
 """
 
 from alembic import op
 
-revision = "0020_purge"
-down_revision = "0019_match_read"
+revision = "0021_purge"
+down_revision = "0020_calendar_holds"
 branch_labels = None
 depends_on = None
 
@@ -22,15 +22,17 @@ def _type_check(types: str) -> None:
 def upgrade() -> None:
     _type_check(f"{_TYPES}, 'purge'")
     # Deleting a card deletes the audit entries about that match: target `card:<cards.id>`, or
-    # `match:<cards.external_id>` on the same app. The append-only trigger on audit_log lets a delete
-    # through only from inside another trigger, so this is the one way such entries are removed.
+    # `match:<cards.external_id>` on the same app, alone or followed by a space and more text. The
+    # append-only trigger on audit_log lets a delete through only from inside another trigger, so this is
+    # the one way such entries are removed.
     op.execute(
         """
         CREATE FUNCTION cards_purge_audit_log() RETURNS trigger AS $$
         BEGIN
             DELETE FROM audit_log
             WHERE user_id = OLD.user_id
-              AND (target = 'card:' || OLD.id OR (app = OLD.app AND target = 'match:' || OLD.external_id));
+              AND (starts_with(target || ' ', 'card:' || OLD.id || ' ')
+                   OR (app = OLD.app AND starts_with(target || ' ', 'match:' || OLD.external_id || ' ')));
             RETURN OLD;
         END
         $$ LANGUAGE plpgsql

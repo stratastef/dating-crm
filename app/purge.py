@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
+from app import calendar
 from app.audit import record_action
 from app.auth import CurrentUser, Db
 from app.cards import _COLUMNS, Card
@@ -43,15 +44,17 @@ def purge_people(purge: Purge, user: CurrentUser, db: Db) -> dict[str, int]:
     Every table that references `cards` does so with ON DELETE CASCADE, so deleting the card deletes its rows.
     The `cards_purge_audit_log` trigger deletes the audit entries about the match.
     """
-    card_ids = set(purge.card_ids)
-    deleted = db.execute(
-        text("DELETE FROM cards WHERE user_id = :user_id AND id = ANY(:ids) RETURNING id, app"),
-        {"user_id": user.id, "ids": list(card_ids)},
+    params = {"user_id": user.id, "ids": list(set(purge.card_ids))}
+    cards = db.execute(
+        text("SELECT id, app FROM cards WHERE user_id = :user_id AND id = ANY(:ids) FOR UPDATE"), params
     ).all()
-    if len(deleted) != len(card_ids):
-        # Raising rolls the transaction back: nothing is purged.
+    if len(cards) != len(params["ids"]):
         raise HTTPException(status_code=404, detail="card not found")
-    for card in deleted:
+    # The calendar events carry the match's name. They go first, while the holds still say which they are:
+    # if Google fails, the transaction rolls back and the purge can be sent again.
+    calendar.delete_events(db, user.id, params["ids"])
+    db.execute(text("DELETE FROM cards WHERE user_id = :user_id AND id = ANY(:ids)"), params)
+    for card in cards:
         # The entry names the card only by its id, which now points at nothing.
         record_action(db, user.id, type="purge", app=card.app, target=f"card:{card.id}", trigger="deletion request")
-    return {"purged": len(deleted)}
+    return {"purged": len(cards)}
