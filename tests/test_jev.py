@@ -41,6 +41,16 @@ def test_a_check_sends_one_sentence_to_jev_and_returns_yes_or_no(real_jev):
     assert jev_module.ask("I like climbing.", "denies_ai") is False
 
 
+def test_the_protected_trait_guardrail_asks_jev_about_every_trait_the_spec_names(real_jev):
+    seen = real_jev(0.1)
+
+    jev_module.ask("Who did you vote for?", "protected_trait")
+
+    statement = json.loads(seen[0].content)["questions"]["q1"]["criteria"]["true"]
+    for trait in ("ethnicity", "religion", "health", "sexual", "politic"):
+        assert trait in statement
+
+
 def test_an_unknown_check_name_is_refused(real_jev):
     real_jev(0.9)
     with pytest.raises(KeyError):

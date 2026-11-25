@@ -22,7 +22,7 @@ CHECKS: dict[str, str] = {
     "denies_ai": "The sentence denies that the writer is an AI or a bot, or claims the writer is human.",
     "protected_trait": (
         "The sentence names or asks about a protected trait of the reader: race, ethnicity, religion, disability,"
-        " health condition, sexual orientation, gender identity, age or national origin."
+        " health condition, sexual orientation, gender identity, age, national origin or politics."
     ),
     "overpromise": "The sentence promises something the writer cannot be sure to keep, or guarantees an outcome.",
     "plays_on_insecurity": (
