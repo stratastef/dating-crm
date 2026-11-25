@@ -1,22 +1,49 @@
 """Match cards: one card per match, moving through the pipeline stages."""
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, field_validator
-from sqlalchemy import text
+from pydantic import BaseModel, computed_field, field_validator
+from sqlalchemy import Connection, text
 from sqlalchemy.exc import IntegrityError
 
 from app.auth import CurrentUser, Db
 from app.voice import queue_profile
+from app.jobs import handler
 
 router = APIRouter()
 
 # The seven pipeline stages, in order. The `cards.stage` check constraint lists the same values.
 Stage = Literal["matched", "chatting", "number_swapped", "date_set", "dated", "seeing_them", "archived"]
 
-_COLUMNS = "id, app, external_id, name, stage, stage_changed_at, notes, next_action, due_date, created_at"
+_COLUMNS = (
+    "id, app, external_id, name, stage, stage_changed_at, notes, next_action, due_date, created_at,"
+    " stalled_at IS NOT NULL AS stalled"
+)
+
+# Only cards in these stages can be Stalled. Stalled is a flag (`cards.stalled_at`), not a stage.
+_STALLABLE = "('chatting', 'number_swapped', 'date_set')"
+
+
+@handler("mark_stalled", every=timedelta(hours=1))
+def mark_stalled(db: Connection, user_id: int, payload: dict) -> None:
+    """Flag the user's cards whose last message, from either side, is older than their `stalled_after_days`."""
+    # A card with no messages counts from its last stage change.
+    db.execute(
+        text(
+            f"""
+            UPDATE cards SET stalled_at = now()
+            FROM users
+            WHERE users.id = :user_id AND cards.user_id = users.id
+              AND cards.stalled_at IS NULL AND cards.stage IN {_STALLABLE}
+              AND COALESCE(
+                    (SELECT max(sent_at) FROM messages WHERE messages.card_id = cards.id), cards.stage_changed_at
+                  ) < now() - make_interval(days => users.stalled_after_days)
+            """
+        ),
+        {"user_id": user_id},
+    )
 
 
 class Card(BaseModel):
@@ -30,6 +57,13 @@ class Card(BaseModel):
     next_action: str | None
     due_date: date | None
     created_at: datetime
+    stalled: bool
+
+    @computed_field
+    @property
+    def suggested_actions(self) -> list[str]:
+        """What the app offers on a Stalled card. `archive` is `PATCH /cards/{id}` with `stage: archived`."""
+        return ["revive", "archive"] if self.stalled else []
 
 
 class NewCard(BaseModel):
@@ -100,6 +134,8 @@ def update_card(card_id: int, changes: CardChanges, user: CurrentUser, db: Db):
     if "stage" in fields:
         # The right-hand side sees the old row, so the time moves only when the stage does.
         assignments.append("stage_changed_at = CASE WHEN stage <> :stage THEN now() ELSE stage_changed_at END")
+        # Archiving, or any move out of the stallable stages, ends Stalled.
+        assignments.append(f"stalled_at = CASE WHEN :stage IN {_STALLABLE} THEN stalled_at END")
     row = db.execute(
         text(
             f"""
@@ -166,6 +202,12 @@ def add_message(card_id: int, message: NewMessage, user: CurrentUser, db: Db):
         raise HTTPException(status_code=404, detail="card not found")
     if message.sender == "me":
         queue_profile(db, user.id)  # the style profile is written from the user's own messages
+    if message.sender == "them":
+        # A reply clears Stalled. If it was an old message added late, the next `mark_stalled` run sets the flag again.
+        db.execute(
+            text("UPDATE cards SET stalled_at = NULL WHERE id = :id AND user_id = :user_id"),
+            {"id": card_id, "user_id": user.id},
+        )
     return row
 
 
