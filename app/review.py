@@ -26,33 +26,38 @@ class Draft(BaseModel):
 
 
 class QueueItem(BaseModel):
-    kind: str  # `draft` so far; handovers and paid-item approvals join later with their own kind
+    kind: str  # `draft` or `handover`; paid-item approvals join later with their own kind
     hot: bool
     card_id: int
     card_name: str
     draft: Draft | None  # set when `kind` is `draft`
+    suggestions: list[str] | None = None  # set when `kind` is `handover`: the suggested replies
 
 
 def is_hot_lead(db: Connection, card_id: int) -> bool:
-    """The only definition of a hot lead. So far: the match replied within the last hour, or Jev's hot-lead
-    triage flagged a pending draft of the card (`drafts.hot_lead`, see `app/jev.py`).
+    """The only definition of a hot lead. So far: the match replied within the last hour, Jev's hot-lead
+    triage flagged a pending draft of the card (`drafts.hot_lead`, see `app/jev.py`), or the card waits for
+    the user after a handover trigger (`cards.handover` is `pending`, see `app/handover.py`).
 
-    Date coordination and handovers are also hot (see the spec); add those signals here.
+    Date coordination is also hot (see the spec); add that signal here.
     """
     return db.execute(
         text(
             "SELECT EXISTS (SELECT 1 FROM messages WHERE card_id = :card_id AND sender = 'them'"
             " AND sent_at > now() - interval '1 hour')"
             " OR EXISTS (SELECT 1 FROM drafts WHERE card_id = :card_id AND status = 'pending' AND hot_lead)"
+            " OR EXISTS (SELECT 1 FROM cards WHERE id = :card_id AND handover = 'pending')"
         ),
         {"card_id": card_id},
     ).scalar_one()
 
 
-def notify_if_hot(db: Connection, user_id: int, card_id: int, name: str) -> None:
+def notify_if_hot(
+    db: Connection, user_id: int, card_id: int, name: str, title: str = "Hot lead", body: str | None = None
+) -> None:
     """Call when an item joins the queue. A hot lead is pushed at once; the rest waits in the queue silently."""
     if is_hot_lead(db, card_id):
-        send_push(db, user_id, "Hot lead", f"A draft for {name} is waiting for you", card_id=card_id)
+        send_push(db, user_id, title, body or f"A draft for {name} is waiting for you", card_id=card_id)
 
 
 def hand_on_approved_draft(db: Connection, user_id: int, draft: Draft) -> None:
@@ -87,6 +92,25 @@ def queue(user: CurrentUser, db: Db):
         )
         for row in rows
     ]
+    handovers = db.execute(
+        text(
+            "SELECT id, name, handover_suggestions FROM cards"
+            " WHERE user_id = :user_id AND handover = 'pending' ORDER BY id"
+        ),
+        {"user_id": user.id},
+    ).all()
+    # shortcut: handovers come before drafts, not by age. Store when the handover began if that order matters.
+    items = [
+        QueueItem(
+            kind="handover",
+            hot=is_hot_lead(db, row.id),
+            card_id=row.id,
+            card_name=row.name,
+            draft=None,
+            suggestions=row.handover_suggestions,
+        )
+        for row in handovers
+    ] + items
     return sorted(items, key=lambda item: not item.hot)  # stable, so each group stays oldest first
 
 

@@ -24,6 +24,10 @@ struct CardDetailView: View {
                 Text(error).foregroundStyle(.red)
             }
 
+            HandoverSection(
+                client: client, cardID: card.id, suggestions: card.handoverSuggestions ?? [], state: handover
+            )
+
             Section {
                 Picker("Stage", selection: $card.stage) {
                     ForEach(Stage.allCases) { Text($0.title).tag($0) }
@@ -94,6 +98,22 @@ struct CardDetailView: View {
         Binding(
             get: { card.dueDate != nil },
             set: { card.dueDate = $0 ? Calendar.current.startOfDay(for: .now) : nil }
+        )
+    }
+
+    // The server has stored the change already, so it goes into `saved` too and does not count as an edit.
+    private var handover: Binding<Handover?> {
+        Binding(
+            get: { card.handover },
+            set: { new in
+                card.handover = new
+                saved.handover = new
+                if new == nil {
+                    card.handoverSuggestions = []
+                    saved.handoverSuggestions = []
+                }
+                onSaved(saved)
+            }
         )
     }
 

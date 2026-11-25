@@ -32,6 +32,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/push.py` | `send_push()` and `POST /devices` |
 | `app/calendar.py` | Google Calendar: routes under `/calendar`, `free_slots()`, `hold_slot()`, `release_holds()`, `confirm_date()` |
 | `app/review.py` | Review queue: `GET /queue`, approve and dismiss a draft, `is_hot_lead()` |
+| `app/handover.py` | Handover: pauses a card on a handover trigger, suggested replies, take-over and hand-back, `is_paused()` |
 | `app/tinder.py` | `TinderConnector`: reads matches and messages from Tinder's unofficial web API |
 | `app/sync.py` | `PUT /connectors/{app}/token` and the `sync_matches` job |
 | `app/swipes.py` | Swipe copilot: like or pass suggestions and the user's swipes, routes under `/swipes` |
@@ -273,8 +274,8 @@ All in `app/review.py`. A pending draft waits in the queue until the user approv
 | `POST /drafts/{id}/approve` | Set the draft's `status` to `approved` and return it. `409` if it is no longer pending. |
 | `POST /drafts/{id}/dismiss` | Set the draft's `status` to `dismissed` and return it. `409` if it is no longer pending. |
 
-- A queue item is `{"kind", "hot", "card_id", "card_name", "draft"}`. `kind` is `draft` so far and `draft` holds the draft; a new kind of item adds its own `kind` and may leave `draft` null.
-- `is_hot_lead(db, card_id)` is the only definition of a hot lead. So far: the match sent a message within the last hour, or Jev's hot-lead triage flagged a pending draft of the card (`drafts.hot_lead`). Add date-coordination and handover signals there.
+- A queue item is `{"kind", "hot", "card_id", "card_name", "draft", "suggestions"}`. For kind `draft`, `draft` holds the draft. For kind `handover` (a card whose handover is pending, see "Handover"), `suggestions` holds the suggested replies and `draft` is null. A new kind of item adds its own `kind`.
+- `is_hot_lead(db, card_id)` is the only definition of a hot lead. So far: the match sent a message within the last hour, Jev's hot-lead triage flagged a pending draft of the card (`drafts.hot_lead`), or the card's handover is pending. Add the date-coordination signal there.
 - `POST /cards/{id}/drafts` calls `notify_if_hot()`, which sends one push at once for a hot lead and nothing otherwise. Call it wherever else an item joins the queue.
 - Approving sends the draft when its card's app can send: `hand_on_approved_draft(db, user_id, draft)` is called once per approved draft and queues the `send_draft` job (see "Drafts"). When the app cannot send (no connector, paused, `send` unavailable, card without `external_id`), the approval still succeeds, the draft stays `approved` and the user copies it.
 
@@ -308,6 +309,22 @@ Routes are in `app/reads.py`; the tables are `inferences` (one row per card and 
 - **Messages:** the screenshot usually repeats the end of the stored chat, so only what comes after that overlap is added, through `upsert_message()`.
 - **Answer:** `201` with a draft for the card, as `POST /cards/{id}/drafts` returns it, including its `409` until the style profile is written. On any error no card, message or draft is stored.
 - **Limits:** two matches with the same name on one app share a card. A screenshot of an older part of a chat is added again at the end. Message times are not read: new messages are stamped with the time of the import. The image is not kept. Reading a real screenshot with the real Claude API has not been tried; the tests use the stub.
+
+## Handover
+
+All in `app/handover.py`. When a new message from the match hits the handover trigger (`messages.handover` is not empty, see "Jev checks"), autopilot is paused for that card only and the user gets a push with suggested replies.
+
+| Route | Does |
+| --- | --- |
+| `POST /cards/{id}/take-over` | Keep the chat manual until `hand-back`. Returns `{"handover", "handover_suggestions"}`. |
+| `POST /cards/{id}/hand-back` | End the pause, pending or taken over. Returns the same two fields. |
+
+- A card has `handover` and `handover_suggestions`. `handover` is null (autopilot may chat), `pending` (a trigger hit and the user has not answered) or `taken_over`. A new message from `me` ends `pending`; only `hand-back` ends `taken_over`.
+- Before autopilot sends to a card, it must call `handover.is_paused(db, card_id)` and send nothing when it is true. This is next to `autopilot_allowed()`, which knows apps and jobs but not cards.
+- `POST /cards/{id}/messages` and `upsert_message` call `handover.incoming()` for a message from `them` and `handover.answered()` for one from `me`. Code that adds messages another way must call them too.
+- Suggested replies: one Claude call (purpose `handover`) writes up to three. Each goes through `jev.guardrail_hits()` and is dropped on any hit, so no suggestion denies being AI. There are none when Jev is unavailable, the AI budget is reached or Claude fails; the card is paused and the push is sent all the same.
+- The push goes through `notify_if_hot()`; a pending handover is a hot lead. Its body is the suggestions, one per line.
+- A hit on a message that is not the card's newest does nothing. A hit on a message older than a day pauses the card without a Claude call or a push, so a first sync of old chats costs nothing and sends nothing. A hit on a card that is already paused changes nothing.
 
 ## Preferences
 
@@ -348,8 +365,24 @@ Compose passes `TOKEN_VAULT_MASTER_KEY` from your shell or `.env` to the API and
 
 ## Audit log
 
-Every autopilot action must call `record_action(connection, user_id, type=..., app=..., target=..., trigger=...)` from `app.audit`, in the same transaction as the action. `type` is one of `message`, `like`, `pass`, `profile_change`, `calendar_hold`.
+Every autopilot action must call `record_action(connection, user_id, type=..., app=..., target=..., trigger=...)` from `app.audit`, in the same transaction as the action. `type` is one of `message`, `like`, `pass`, `profile_change`, `calendar_hold`, `purge`.
 The `audit_log` table is append-only (a trigger rejects `UPDATE` and `DELETE`). `GET /audit-log?app=&type=` lists the current user's entries, newest first.
+
+An entry about one match must name them only at the start of `target`, as `card:<cards.id>` or `match:<external_id>`, alone or followed by a space and details (`card:7 hold 2026-12-01T19:00:00+00:00`). It must never hold their name or message text: a purge finds the entries to delete by that start of `target` alone.
+
+## Find and purge
+
+A match can ask for their data to be deleted. Routes are in `app/purge.py`.
+
+| Route | Does |
+| --- | --- |
+| `GET /people?q=` | The caller's cards, on every app, whose name or handle (`external_id`) contains `q`, ignoring case. |
+| `POST /people/purge` | Delete the cards in `card_ids` and everything stored about them. Body: `{"card_ids": [1, 2], "confirm": "purge"}`. Returns `{"purged": 2}`. |
+
+- The purge cannot be undone. Without `"confirm": "purge"` the request is `422`. It runs in one transaction: if any card is not the caller's it is `404` and nothing is deleted.
+- Every table that holds data about a match must reference `cards` (directly or through another table) with `ON DELETE CASCADE`; deleting the card is the purge. `tests/test_purge.py` reads the foreign keys from the database, so a new card table fails `test_no_row_for_a_purged_person_remains_in_any_table` until that test seeds a row in it. Anything kept outside Postgres needs its own delete in `purge_people()`: today that is the Google Calendar events of the card's holds, held or confirmed, whose titles carry the match's name. No file about a match is kept on disk: `card_photos` holds URLs, an imported screenshot is not stored, and the files under `PHOTOS_DIR` are the user's own photos.
+- Audit log: the entries about the purged match are deleted, not kept or blanked, because `target` identifies the person. The `cards_purge_audit_log` trigger does it when the card is deleted, which is the only delete the append-only trigger lets through besides deleting the user. The purge then adds one entry per card: type `purge`, the card's app, target `card:<id>` (an id that now points at nothing), trigger `deletion request`.
+- Not covered: backups made before the purge still hold the data until they expire.
 
 ## Autonomy and kill switch
 

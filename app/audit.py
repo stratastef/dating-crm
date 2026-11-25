@@ -9,7 +9,7 @@ from sqlalchemy import Connection, text
 
 from app.auth import CurrentUser, Db
 
-ActionType = Literal["message", "like", "pass", "profile_change", "calendar_hold"]
+ActionType = Literal["message", "like", "pass", "profile_change", "calendar_hold", "purge"]
 
 router = APIRouter()
 
