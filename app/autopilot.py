@@ -6,6 +6,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlalchemy import Connection, text
 
+from app import llm
 from app.auth import CurrentUser, Db
 
 Job = Literal["chat", "profile", "swipe"]
@@ -68,6 +69,9 @@ def autopilot_block(db: Connection, user_id: int, app: str | None, job: Job) -> 
     ).one_or_none()
     if paused:
         return f"autopilot paused for {paused.app or 'all apps'}: {paused.reason}"
+    # The budget pause is not a stored pause: it ends by itself in a new month or when the cap is raised.
+    if llm.budget_reached(db, user_id):
+        return "autopilot paused for all apps: AI budget reached"
     level = autonomy_levels(db, user_id)[job]
     if level not in ("guardrails", "full"):
         return f"{job} autonomy is {level}"
