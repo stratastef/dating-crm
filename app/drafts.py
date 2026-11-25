@@ -5,8 +5,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import Connection, Row, text
 
-from app import calendar, handover, jev, llm, review, vault
+from app import calendar, jev, llm, vault
 from app.auth import CurrentUser, Db
+from app.card_lookup import chat_lines, conversation, own_card, unanswered
 from app.reads import read_lines
 from app.voice import queue_profile, similar_chats
 
@@ -42,16 +43,13 @@ _SYSTEM = (
 )
 
 
-def _chat(messages) -> list[str]:
-    """Prompt lines for (sender, body) pairs; sender is `me` or `them`."""
-    return [f"{sender}: {body}" for sender, body in messages]
-
-
 @router.post("/cards/{card_id}/drafts", response_model=Draft, status_code=201)
 def write_draft(card_id: int, user: CurrentUser, db: Db):
     """Write a draft for the card and store it: an opener when the card has no messages, a reply otherwise."""
+    from app.review import notify_if_hot  # imported here: app.review imports this module for `Draft`
+
     draft, name = draft_for(db, user.id, card_id)
-    review.notify_if_hot(db, user.id, card_id, name)
+    notify_if_hot(db, user.id, card_id, name)
     return draft
 
 
@@ -61,7 +59,7 @@ _TIME_RULE = "Name no day and no time to meet: free times from the calendar are 
 def _asked_for_a_time(db: Connection, user_id: int, card_id: int) -> bool:
     """True if the draft should offer times: the match's unanswered messages are about logistics, no slot is
     held for them yet, and the user's calendar is connected."""
-    if not any("logistics" in (message.handover or []) for message in handover.unanswered(db, user_id, card_id)):
+    if not any("logistics" in (message.handover or []) for message in unanswered(db, user_id, card_id)):
         return False
     held = db.execute(
         text(
@@ -86,21 +84,14 @@ def draft_for(db: Connection, user_id: int, card_id: int, rule: str = "", offer:
     offer = offer and _asked_for_a_time(db, user_id, card_id)
     if offer:
         rule = f"{rule} {_TIME_RULE}".strip()
-    card = db.execute(
-        text("SELECT app, name, notes FROM cards WHERE id = :id AND user_id = :user_id"),
-        {"id": card_id, "user_id": user_id},
-    ).one_or_none()
-    if not card:
-        raise HTTPException(status_code=404, detail="card not found")
+    card = own_card(db, user_id, card_id)
     profile = db.execute(
         text("SELECT profile FROM voice_profiles WHERE user_id = :user_id"), {"user_id": user_id}
     ).scalar_one_or_none()
     if not profile:
         raise HTTPException(status_code=409, detail="style profile not written yet")
     # shortcut: the whole conversation is sent, trim to the newest messages if chats get long.
-    messages = db.execute(
-        text("SELECT sender, body FROM messages WHERE card_id = :card_id ORDER BY sent_at, id"), {"card_id": card_id}
-    ).all()
+    messages = conversation(db, user_id, card_id)
     kind = "reply" if messages else "opener"
     prompt = "\n".join(
         [
@@ -108,7 +99,7 @@ def draft_for(db: Connection, user_id: int, card_id: int, rule: str = "", offer:
             f"<style_profile>\n{profile}\n</style_profile>",
             "<example_chats>",
             *(
-                "\n".join(["<chat>", *_chat((line["sender"], line["body"]) for line in chat.messages), "</chat>"])
+                "\n".join(["<chat>", *chat_lines((line["sender"], line["body"]) for line in chat.messages), "</chat>"])
                 for chat in similar_chats(db, user_id, card_id)
             ),
             "</example_chats>",
@@ -117,7 +108,7 @@ def draft_for(db: Connection, user_id: int, card_id: int, rule: str = "", offer:
             *read_lines(db, user_id, card_id),
             "</match_read>",
             "<conversation>",
-            *_chat(messages),
+            *chat_lines(messages),
             "</conversation>",
         ]
     )

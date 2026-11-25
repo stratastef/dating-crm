@@ -20,6 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from app import vault
 from app.audit import record_action
 from app.auth import CurrentUser, Db
+from app.card_lookup import find_card
 
 router = APIRouter()
 
@@ -135,11 +136,9 @@ def free_slots(
 
 
 def _card(db: Connection, user_id: int, card_id: int):
-    card = db.execute(
-        text("SELECT app, name FROM cards WHERE id = :id AND user_id = :user_id"), {"id": card_id, "user_id": user_id}
-    ).one_or_none()
+    card = find_card(db, user_id, card_id)
     if not card:
-        raise LookupError(f"card {card_id} not found")
+        raise LookupError(f"card {card_id} not found")  # not a 404: these functions also run in jobs
     return card
 
 

@@ -13,6 +13,7 @@ from app import calendar
 from app import handover
 from app import tombstones
 from app.auth import CurrentUser, Db
+from app.card_lookup import own_card
 from app.voice import queue_profile
 from app.autopilot import autopilot_allowed
 from app.jobs import enqueue, handler
@@ -275,13 +276,7 @@ def update_card(card_id: int, changes: CardChanges, user: CurrentUser, db: Db):
 
 @router.get("/cards/{card_id}", response_model=Card)
 def read_card(card_id: int, user: CurrentUser, db: Db):
-    row = db.execute(
-        text(f"SELECT {_COLUMNS} FROM cards WHERE id = :id AND user_id = :user_id"),
-        {"id": card_id, "user_id": user.id},
-    ).one_or_none()
-    if not row:
-        raise HTTPException(status_code=404, detail="card not found")
-    return row
+    return own_card(db, user.id, card_id, _COLUMNS)
 
 
 _MESSAGE_COLUMNS = "id, card_id, external_id, sender, body, sent_at, handover"

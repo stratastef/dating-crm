@@ -75,7 +75,8 @@ async def _upload(request: Request) -> bytes:
 @router.post("/photos", response_model=Photo, status_code=201)
 def upload(request: Request, data: Annotated[bytes, Depends(_upload)], user: CurrentUser, db: Db):
     """Store one photo. The body is the JPEG or PNG file itself, with its type in `Content-Type`."""
-    content_type = request.headers.get("content-type")
+    # As a client may send it: `Image/JPEG; charset=binary` is image/jpeg.
+    content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
     if content_type not in _FORMATS.values():
         raise HTTPException(status_code=415, detail="a photo must be image/jpeg or image/png")
     try:

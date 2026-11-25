@@ -11,6 +11,7 @@ from sqlalchemy import Connection, text
 from app import calendar, handover, jev, llm, review
 from app.auth import CurrentUser, Db
 from app.autopilot import autonomy_levels
+from app.card_lookup import unanswered
 from app.drafts import draft_for
 from app.jobs import handler
 from app.send import CHAT_STAGES, queue_send
@@ -92,7 +93,7 @@ def chat_reply(db: Connection, user_id: int, payload: dict) -> None:
 
     level = autonomy_levels(db, user_id)["chat"]
     # Every message the user has not answered counts, not only the newest: "when are you free?" then "??".
-    waiting = handover.unanswered(db, user_id, card_id)
+    waiting = unanswered(db, user_id, card_id)
     logistics = any("logistics" in (message.handover or []) for message in waiting)
     if logistics and level != "full":
         return  # guardrails mode: date logistics are the user's (the card is paused for handover anyway)

@@ -7,24 +7,11 @@ from sqlalchemy import Connection, text
 
 from app import calendar, paid_items
 from app.auth import CurrentUser, Db
+from app.drafts import _COLUMNS as _DRAFT_COLUMNS
+from app.drafts import Draft
 from app.push import send_push
 
 router = APIRouter()
-
-_DRAFT_COLUMNS = ("id", "card_id", "kind", "status", "original", "edited", "guardrail", "hot_lead")
-
-
-class Draft(BaseModel):
-    """Same shape as the draft the routes in `app/drafts.py` return."""
-
-    id: int
-    card_id: int
-    kind: str
-    status: str
-    original: str
-    edited: str | None
-    guardrail: list[str] | None
-    hot_lead: bool
 
 
 class QueueItem(BaseModel):
@@ -73,7 +60,7 @@ def notify_if_hot(
 
 def hand_on_approved_draft(db: Connection, user_id: int, draft: Draft) -> None:
     """Called once for each draft the user approves: queues its send when the card's app can send."""
-    from app.send import send_approved  # imported here: app.send imports app.drafts, which imports this module
+    from app.send import send_approved  # imported here: app.send imports app.cards, which leads back to this module
 
     send_approved(db, user_id, draft.id, trigger=f"copilot: user approved draft {draft.id}")
 
@@ -84,7 +71,7 @@ def queue(user: CurrentUser, db: Db):
     rows = db.execute(
         text(
             f"""
-            SELECT {", ".join(f"drafts.{column}" for column in _DRAFT_COLUMNS)}, cards.name AS card_name
+            SELECT {", ".join(f"drafts.{column}" for column in _DRAFT_COLUMNS.split(", "))}, cards.name AS card_name
             FROM drafts JOIN cards ON cards.id = drafts.card_id
             WHERE drafts.user_id = :user_id AND drafts.status = 'pending'
             ORDER BY drafts.created_at, drafts.id
@@ -137,7 +124,7 @@ def _decide(db: Connection, user_id: int, draft_id: int, status: str) -> Draft:
             f"""
             UPDATE drafts SET status = :status, updated_at = now()
             WHERE id = :id AND user_id = :user_id AND status = 'pending'
-            RETURNING {", ".join(_DRAFT_COLUMNS)}
+            RETURNING {_DRAFT_COLUMNS}
             """
         ),
         {"id": draft_id, "user_id": user_id, "status": status},

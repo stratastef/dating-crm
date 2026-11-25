@@ -2,12 +2,13 @@
 
 import json
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 from pydantic import BaseModel
 from sqlalchemy import Connection, text
 
 from app import llm
 from app.auth import CurrentUser, Db
+from app.card_lookup import own_card
 from app.jobs import enqueue, handler
 
 router = APIRouter()
@@ -101,11 +102,7 @@ def similar_chats(db: Connection, user_id: int, card_id: int, limit: int = 3) ->
 
 @router.get("/cards/{card_id}/similar-chats", response_model=list[PastChat])
 def read_similar_chats(card_id: int, user: CurrentUser, db: Db, limit: int = Query(3, ge=1, le=20)):
-    owned = db.execute(
-        text("SELECT 1 FROM cards WHERE id = :id AND user_id = :user_id"), {"id": card_id, "user_id": user.id}
-    ).first()
-    if not owned:
-        raise HTTPException(status_code=404, detail="card not found")
+    own_card(db, user.id, card_id)
     return similar_chats(db, user.id, card_id, limit)
 
 

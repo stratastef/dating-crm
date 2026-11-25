@@ -9,6 +9,7 @@ from sqlalchemy import text
 
 from app import llm
 from app.auth import CurrentUser, Db
+from app.card_lookup import conversation
 from app.cards import upsert_message
 from app.drafts import Draft, write_draft
 
@@ -86,13 +87,7 @@ def import_screenshot(image: Annotated[tuple[str, bytes], Depends(_image)], user
     ).scalar_one_or_none()
     stored = []
     if card_id:
-        stored = [
-            tuple(row)
-            for row in db.execute(
-                text("SELECT sender, body FROM messages WHERE card_id = :card_id ORDER BY sent_at, id"),
-                {"card_id": card_id},
-            )
-        ]
+        stored = [tuple(row) for row in conversation(db, user.id, card_id)]
     else:
         card_id = db.execute(
             text("INSERT INTO cards (user_id, app, name, stage) VALUES (:user_id, :app, :name, 'matched') RETURNING id"),

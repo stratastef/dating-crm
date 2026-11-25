@@ -14,6 +14,7 @@ from sqlalchemy import Connection, text
 from app import jev, llm, review
 from app.auth import CurrentUser, Db
 from app.autopilot import autonomy_levels, autopilot_allowed
+from app.card_lookup import chat_lines, conversation, unanswered
 
 router = APIRouter()
 
@@ -41,15 +42,12 @@ def suggest_replies(db: Connection, user_id: int, card_id: int, hits: list[str])
     profile = db.execute(
         text("SELECT profile FROM voice_profiles WHERE user_id = :user_id"), {"user_id": user_id}
     ).scalar_one_or_none()
-    messages = db.execute(
-        text("SELECT sender, body FROM messages WHERE card_id = :card_id ORDER BY sent_at, id"), {"card_id": card_id}
-    ).all()
     prompt = "\n".join(
         [
             f"<reasons>{', '.join(hits)}</reasons>",
             f"<style_profile>\n{profile or ''}\n</style_profile>",
             "<conversation>",
-            *(f"{sender}: {body}" for sender, body in messages),
+            *chat_lines(conversation(db, user_id, card_id)),
             "</conversation>",
         ]
     )
@@ -124,22 +122,6 @@ def incoming(db: Connection, user_id: int, card_id: int, message_id: int, body: 
         body="\n".join(suggestions) or "Autopilot paused this chat. Open it to reply or take over.",
     )
     return hits
-
-
-def unanswered(db: Connection, user_id: int, card_id: int) -> list:
-    """The match's messages since the user's last one, oldest first: `id`, `body`, `handover`."""
-    return db.execute(
-        text(
-            """
-            SELECT id, body, handover FROM messages
-            WHERE card_id = :card_id AND user_id = :user_id AND sender = 'them'
-              AND sent_at > coalesce((SELECT max(sent_at) FROM messages WHERE card_id = :card_id
-                                      AND user_id = :user_id AND sender = 'me'), '-infinity')
-            ORDER BY sent_at, id
-            """
-        ),
-        {"card_id": card_id, "user_id": user_id},
-    ).all()
 
 
 def answered(db: Connection, card_id: int) -> None:

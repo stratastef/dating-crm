@@ -12,6 +12,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/db.py` | `database_url()`, read from `DATABASE_URL` |
 | `app/auth.py` | `CurrentUser` and `Db` route dependencies, `create_user()` |
 | `app/cards.py` | Match cards and their messages: routes under `/cards` |
+| `app/card_lookup.py` | Shared reads of one card: `own_card()`, `find_card()`, `conversation()`, `chat_lines()`, `unanswered()` |
 | `app/llm.py` | `call()`, the only way to call Claude; records each call's cost |
 | `app/budget.py` | The monthly AI budget: `GET` and `PUT /budget` |
 | `app/drafts.py` | Copilot drafts for a card and the user's edits: `POST /cards/{id}/drafts`, `PATCH /drafts/{id}` |
@@ -122,6 +123,7 @@ A card is one match. Routes are in `app/cards.py`; tables are `cards` and `messa
 - `PATCH /cards/{id}` also takes `date_rating` (1 to 5) and `date_note`, both null until the user rates the date. A good date is a rating of 4 or 5: `is_good_date()` in `app/cards.py` is the only definition, and the card's `good_date` field is its result. The card's `led_to_date` is the chat's outcome label (see "Voice").
 - `app` is free text, for example `tinder` or `hinge`.
 - `external_id` is the ID the dating app gives the match or message. It is unique per user and app for cards, and per card for messages; a duplicate is `409`. Rows without one are never duplicates.
+- **Reading a card from other code:** use `app/card_lookup.py`, which every module can import. `own_card(db, user_id, card_id)` returns the user's card or raises `404` (for a route); `find_card()` returns `None` instead (for a job). `conversation()` is the card's messages as `(sender, body)`, oldest first, `chat_lines()` turns them into `sender: body` prompt lines, and `unanswered()` is the match's messages since the user's last one. Do not write these queries again.
 
 ## Background jobs
 
@@ -336,7 +338,7 @@ All in `app/handover.py`. When a new message from the match hits the handover tr
 - `POST /cards/{id}/messages` and `upsert_message` call `handover.incoming()` for a message from `them` and `handover.answered()` for one from `me`. Code that adds messages another way must call them too.
 - Suggested replies: one Claude call (purpose `handover`) writes up to three. Each goes through `jev.guardrail_hits()` and is dropped on any hit. Each is also judged together with the match's unanswered messages (`jev.answer_denies_ai(db, user_id, question, answer)`), so a bare "Nope" to "are you a bot?" is dropped too and no suggestion denies being AI. There are none when Jev is unavailable, the AI budget is reached or Claude fails; the card is paused and the push is sent all the same.
 - The push goes through `notify_if_hot()`; a pending handover is a hot lead. Its body is the suggestions, one per line.
-- A hit on any message the user has not answered pauses the card, newest or not: an app may deliver a batch newest first. A hit on a message with a later message from `me` does nothing. Chat autopilot reads the hits of every unanswered message the same way (`handover.unanswered()`). A message that is already answered, or older than a day, is not sent to Jev at all, so a first sync of old chats costs nothing, pauses nothing and sends nothing. Chat autopilot does not send alone while such an unchecked message is unanswered (see "Chat autopilot"). A hit on a card that is already paused changes nothing.
+- A hit on any message the user has not answered pauses the card, newest or not: an app may deliver a batch newest first. A hit on a message with a later message from `me` does nothing. Chat autopilot reads the hits of every unanswered message the same way (`unanswered()` in `app/card_lookup.py`). A message that is already answered, or older than a day, is not sent to Jev at all, so a first sync of old chats costs nothing, pauses nothing and sends nothing. Chat autopilot does not send alone while such an unchecked message is unanswered (see "Chat autopilot"). A hit on a card that is already paused changes nothing.
 
 ## Chat autopilot
 
