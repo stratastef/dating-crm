@@ -1,7 +1,7 @@
 """record app time and when a date was rated
 
-Revision ID: 0015_dashboard
-Revises: 0014_drafts
+Revision ID: 0016_dashboard
+Revises: 0015_devices
 """
 
 import sqlalchemy as sa
@@ -9,8 +9,8 @@ from alembic import op
 
 from app.tenancy import user_id_column
 
-revision = "0015_dashboard"
-down_revision = "0014_drafts"
+revision = "0016_dashboard"
+down_revision = "0015_devices"
 branch_labels = None
 depends_on = None
 

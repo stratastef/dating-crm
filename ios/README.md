@@ -10,6 +10,8 @@ The SwiftUI client for the API in the repo root. It needs Xcode 27 and an iOS 18
 | `DatingCRM/DatingCRMApp.swift` | App entry: shows `SignInView` or `BoardView`, depending on `Session`. |
 | `DatingCRM/Session.swift` | Sign-in state. Keeps the server URL in `UserDefaults` and the API token in the Keychain. |
 | `DatingCRM/ForegroundTimer.swift` | Measures each foreground stretch; the app entry reports it with `POST /time` when the app leaves the foreground. |
+| `DatingCRM/Push.swift` | `Push` (device token, tapped card) and `AppDelegate`, which receives both from UIKit. |
+| `DatingCRM.entitlements` | The push notification entitlement. |
 | `DatingCRM/API/APIClient.swift` | Every call to the server. |
 | `DatingCRM/API/Models.swift` | `Stage`, `Card`, `Message`, `Preferences`, `DashboardWeek`: the JSON the server sends. |
 | `DatingCRM/Screens/` | One file per screen. |
@@ -36,6 +38,14 @@ To run on your own iPhone, open the project in Xcode, pick your team under Signi
 Start the server (see the root `README.md`) and create a user with `uv run python -m app.auth you@example.com`. In the app, paste the server URL and the token that command printed. The app checks them with one `GET /cards` before it keeps them.
 
 A server on `localhost` or your local network may use plain `http`. Any other server needs `https`.
+
+## Push notifications
+
+After sign-in the app asks for permission to notify, gets a device token from Apple and sends it to the server with `POST /devices`. It does this on every launch. Tapping a push that carries a `card_id` opens that card on top of the board.
+
+- Push needs a real iPhone, a paid Apple developer account and the server's `APNS_*` settings (see the root `README.md`). Run from Xcode, the app gets a sandbox token, so the server also needs `APNS_SANDBOX=1`.
+- The simulator gets no device token without an Apple account, so the tests cover only `Push`: the registration request and which card a tap opens. Not verified on a device: the permission prompt, the token arriving in `AppDelegate`, delivery of a push, and the tap opening the card on screen.
+- Signing out does not unregister the device. The phone keeps getting that user's pushes until someone else signs in on it.
 
 ## Call the API
 

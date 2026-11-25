@@ -41,6 +41,15 @@ struct APIClient {
         try await send("PATCH", "drafts/\(draftID)", body: Self.encoder.encode(["edited": text]))
     }
 
+    func card(id: Int) async throws -> Card {
+        try await send("GET", "cards/\(id)")
+    }
+
+    /// Tells the server where to send this phone's push notifications. `token` is the APNs device token in hex.
+    func registerDevice(token: String) async throws {
+        try await data("POST", "devices", body: Self.encoder.encode(["token": token]))
+    }
+
     /// The preferences in force; empty until the user saves some.
     func preferences() async throws -> Preferences {
         try await send("GET", "preferences")
@@ -58,13 +67,15 @@ struct APIClient {
 
     /// Reports a stretch of time the user spent in the app.
     func recordTime(seconds: Int) async throws {
-        _ = try await data("POST", "time", body: Self.encoder.encode(["seconds": seconds]))
+        try await data("POST", "time", body: Self.encoder.encode(["seconds": seconds]))
     }
 
     private func send<Response: Decodable>(_ method: String, _ path: String, body: Data? = nil) async throws -> Response {
         try Self.decoder.decode(Response.self, from: await data(method, path, body: body))
     }
 
+    /// For routes that answer with no body, call this instead of `send`.
+    @discardableResult
     private func data(_ method: String, _ path: String, body: Data? = nil) async throws -> Data {
         var request = URLRequest(url: baseURL.appending(path: path))
         request.httpMethod = method

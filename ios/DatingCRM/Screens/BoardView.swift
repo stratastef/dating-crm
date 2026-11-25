@@ -3,13 +3,15 @@ import SwiftUI
 /// The pipeline board: the user's cards under the seven stages.
 struct BoardView: View {
     let client: APIClient
+    let push: Push
     let signOut: () -> Void
 
     @State private var cards: [Card] = []
     @State private var error: String?
+    @State private var path: [Card] = []
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 if let error {
                     Text(error).foregroundStyle(.red)
@@ -40,6 +42,12 @@ struct BoardView: View {
             }
             .refreshable { await load() }
             .task { await load() }
+            // A tapped push replaces whatever is open with its card.
+            .task(id: push.openedCardID) {
+                if let card = await push.takeOpenedCard(from: client) {
+                    path = [card]
+                }
+            }
         }
     }
 
