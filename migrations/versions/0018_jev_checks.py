@@ -1,14 +1,14 @@
 """store Jev check results on messages and drafts
 
-Revision ID: 0016_jev_checks
-Revises: 0015_devices
+Revision ID: 0018_jev_checks
+Revises: 0017_ai_budget
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0016_jev_checks"
-down_revision = "0015_devices"
+revision = "0018_jev_checks"
+down_revision = "0017_ai_budget"
 branch_labels = None
 depends_on = None
 
