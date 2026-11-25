@@ -1,10 +1,11 @@
 """The review queue: items that wait for the user, and the live push for the hot ones."""
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import Connection, text
 
-from app import paid_items
+from app import calendar, paid_items
 from app.auth import CurrentUser, Db
 from app.push import send_push
 
@@ -153,5 +154,13 @@ def approve_draft(draft_id: int, user: CurrentUser, db: Db):
 
 @router.post("/drafts/{draft_id}/dismiss", response_model=Draft)
 def dismiss_draft(draft_id: int, user: CurrentUser, db: Db):
-    """Drop a pending draft from the queue. Nothing is sent."""
-    return _decide(db, user.id, draft_id, "dismissed")
+    """Drop a pending draft from the queue. Nothing is sent, so the slots the draft offered are free again."""
+    draft = _decide(db, user.id, draft_id, "dismissed")
+    try:
+        calendar.release_holds(
+            db, user.id, draft.card_id, trigger=f"copilot: user dismissed draft {draft.id}", draft_id=draft.id
+        )
+    except httpx.HTTPError:
+        # Raising rolls the dismissal back, so the draft and the calendar stay in step.
+        raise HTTPException(status_code=502, detail="Google Calendar could not be reached; try again")
+    return draft

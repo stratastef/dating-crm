@@ -240,6 +240,7 @@ Routes are in `app/drafts.py`; the table is `drafts` (one row per draft).
 - **The `send_draft` job** sends the text (`edited` if set, else `original`) with the connector's `send`, stores the message on the card under the app's message ID (so sync does not add it twice), writes an audit log entry (`type: message`, `target: card:<id>`) and sets `sent`. If `send` became unavailable after the tap, nothing is sent and the draft goes back to `pending`.
 - **At most once:** the job commits `sending` before it calls the app. If the app answers with an error, or the worker dies before the job commits, the draft ends as `failed` and is never sent again, because the message may have gone out. A `failed` draft whose message did go out appears on the card at the next sync. To try again, write another draft.
 - The prompt holds the style profile, the card's app, name and notes, the match read (its `tone` sets the draft's tone), the conversation, and `similar_chats()` as examples.
+- **Offering a time:** every draft that offers a slot holds it, in every autonomy mode. When the match's unanswered messages hit `logistics`, no slot is held for the card yet and the calendar is connected, `draft_for()` tells Claude to name no day or time and adds the sentence from `calendar.offer_slots()`, which holds each slot it names for that draft. Without a connected calendar the draft offers nothing by itself; a time Claude or the user writes into the text is not held. `POST /drafts/{id}/dismiss` and a failed send release the draft's holds.
 - The write route returns `409` until the style profile is written, and `502` if Claude's reply is empty.
 - A draft also has `guardrail` and `hot_lead`, the results of its Jev checks (see below).
 
@@ -281,7 +282,7 @@ All in `app/review.py`. A pending draft waits in the queue until the user approv
 | --- | --- |
 | `GET /queue` | List what waits for the user, hot leads first, then oldest first. |
 | `POST /drafts/{id}/approve` | Set the draft's `status` to `approved` and return it. `409` if it is no longer pending. |
-| `POST /drafts/{id}/dismiss` | Set the draft's `status` to `dismissed` and return it. `409` if it is no longer pending. |
+| `POST /drafts/{id}/dismiss` | Set the draft's `status` to `dismissed` and return it. Releases the calendar holds of the slots the draft offered. `409` if it is no longer pending, `502` if Google could not be reached (the draft stays pending). |
 
 - A queue item is `{"kind", "hot", "card_id", "card_name", "draft", "suggestions"}`. For kind `draft`, `draft` holds the draft. For kind `handover` (a card whose handover is pending, see "Handover"), `suggestions` holds the suggested replies and `draft` is null. For kind `paid_item` (see "Paid items"), `paid_item` holds the proposal, `card_id` is null and `card_name` is the proposal's `name`; it is never hot. A new kind of item adds its own `kind`.
 - `is_hot_lead(db, card_id)` is the only definition of a hot lead. So far: the match sent a message within the last hour, Jev's hot-lead triage flagged a pending draft of the card (`drafts.hot_lead`), or the card's handover is pending. Add the date-coordination signal there.
@@ -347,7 +348,7 @@ All in `app/chat_autopilot.py`, plus the gate in `app/send.py`. With chat autono
 - **Any other code that sends alone** must go through `queue_send(..., unattended=True)` too.
 - **Which messages get a reply:** only the card's newest message, from the match, sent within the last day, on a card with no draft that is `pending`, `approved` or `sending`. If an older message from the match is still unanswered and was never checked for handover (`messages.handover` is null), the reply gets `unchecked` in its `guardrail` and waits for the user. So a first sync of old chats sends nothing, two messages in a row get one reply, and a draft left in the review queue stops further replies on that card until the user sends or dismisses it.
 - **Date logistics:** Claude is told to name no day, time or place, and `jev.names_logistics()` checks its text; a hit adds `logistics` to the draft's `guardrail`, so it goes to the user. In `guardrails` mode a message from the match about logistics hands the card over as before. In `full` mode the app coordinates a time alone and nothing else: a message whose only handover hit is `logistics` does not pause the card. A place to meet or exclusivity also hits `place_or_exclusivity`, so it hands the card over like every other trigger. For a time the job:
-  - offers up to 2 slots from `calendar.free_slots()`, calls `hold_slot()` for each and adds the sentence that names them itself, so the only times in a message sent alone are held slots;
+  - calls `calendar.offer_slots()`, which holds up to 2 free slots for the draft and returns the sentence that names them, so the only times in a message sent alone are held slots;
   - if the card has holds, asks Claude (purpose `date_coordination`) whether the match accepts one, declines all, or says something else. Accepted: `confirm_date()` for that slot and the card moves to `date_set`, where autopilot stops; the reply waits in the review queue. Declined: `release_holds()` and a new offer. Anything else, no free slot or no connected calendar: the draft goes to the user with `logistics`.
 - **Audit:** the sent message's entry has the trigger `chat autopilot (<level>): reply to message <messages.id>`. Holds, releases and confirmations have `chat autopilot (full): offered a time`, `match declined` and `match agreed`.
 - **AI disclosure:** `GET` and `PUT /settings/ai-disclosure` with `{"enabled": true}`, on by default. While on, the first message sent alone to a match ends with `DISCLOSURE` ("Heads up: an AI assistant helps me write my messages here."). First means the card has no `chat autopilot` message in the audit log. The sentence is part of the draft's `original`, so the guardrail checks it and the user sees it if the draft is held back. It is per user, not per match's country: keep it on where the law requires disclosure, such as the EU.
@@ -355,7 +356,7 @@ All in `app/chat_autopilot.py`, plus the gate in `app/send.py`. With chat autono
   - Only replies: openers to new matches are not sent alone.
   - Nothing queues a reply when autopilot is resumed, the autonomy is raised or a card is handed back; the match's next message does.
   - Offered slots are 19:00 to 21:00 on the next 7 days in `USER_TIMEZONE` (an IANA name such as `Europe/Berlin`, default `UTC`; Compose passes it to the API and worker). The slot sentence is English.
-  - Holds of a draft the user dismisses stay until the card is archived.
+  - A hold is tied to the draft that offers it (`calendar_holds.draft_id`). Dismissing that draft, or a failed send of it, releases its holds. If the user edits the offer out of a draft and sends it, the holds stay until the match declines or the card is archived. If a failed send did reach the match, they hold an offer for a slot that is free again.
   - Whether a message is about a place or exclusivity is Jev's judgement (`place_or_exclusivity`); when Jev cannot be asked the card is handed over.
   - Not run against the real Tinder, Claude, Jev or Google.
 
@@ -548,12 +549,14 @@ All take the caller's transaction as `db`. Datetimes must be timezone-aware.
 from app import calendar
 
 slots = calendar.free_slots(db, user_id, start, end, duration=timedelta(hours=2))  # [(start, end), ...]
-hold_id = calendar.hold_slot(db, user_id, card_id, start, end, trigger="chat autopilot: proposed a time")
-calendar.release_holds(db, user_id, card_id, trigger="match declined")
+sentence = calendar.offer_slots(db, user_id, card_id, draft_id, trigger="copilot: offered a time")  # "I'm free ... or ...", or None
+hold_id = calendar.hold_slot(db, user_id, card_id, start, end, trigger="chat autopilot: proposed a time", draft_id=draft_id)
+calendar.release_holds(db, user_id, card_id, trigger="match declined")  # draft_id=... for one draft's holds only
 calendar.confirm_date(db, user_id, card_id, trigger="match agreed", start=start)  # True if a hold was confirmed
 ```
 
 - `free_slots()` cuts the window into slots of `duration` from `start` and returns those that touch no busy time in Google and no row in `calendar_holds`. Choosing the window (which days and hours) is the caller's job.
+- `offer_slots()` is how a draft offers a time: it picks up to 2 free evenings (19:00 to 21:00 on the next 7 days in `USER_TIMEZONE`, a fixed v1 window), holds each with `hold_slot(..., draft_id=)` and returns the English sentence to add to the draft. `None` when no evening is free.
 - `hold_slot()` must be called for every slot a message offers. It creates a tentative event named "Hold: date with <name>". It raises `SlotTaken` if the slot is busy in Google or overlaps any slot held or confirmed for a match.
 - Two matches never get the same slot because the database refuses it: `calendar_holds` has an exclusion constraint, so no two rows of one user overlap. A second hold on an overlapping slot fails even if two jobs race.
 - `release_holds()` deletes the card's tentative events and their rows. Call it when the match declines. `PATCH /cards/{id}` with `stage: archived` calls it too.

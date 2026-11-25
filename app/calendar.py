@@ -8,6 +8,7 @@ The refresh token lives in the token vault under the app name `google_calendar`.
 import os
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode
+from zoneinfo import ZoneInfo
 
 import httpx
 from cryptography.fernet import Fernet, InvalidToken
@@ -147,10 +148,20 @@ def _audit(db: Connection, user_id: int, app: str, card_id: int, action: str, st
     record_action(db, user_id, type="calendar_hold", app=app, target=target, trigger=trigger)
 
 
-def hold_slot(db: Connection, user_id: int, card_id: int, start: datetime, end: datetime, *, trigger: str) -> int:
+def hold_slot(
+    db: Connection,
+    user_id: int,
+    card_id: int,
+    start: datetime,
+    end: datetime,
+    *,
+    trigger: str,
+    draft_id: int | None = None,
+) -> int:
     """Hold a slot offered to a card's match: a tentative event in the user's calendar. Returns the hold's ID.
 
-    Call it for every slot a message offers, in the transaction that stores or sends the message.
+    Call it for every slot a message offers, in the transaction that stores or sends the message. `draft_id`
+    is the draft whose text offers the slot: the hold is released when that draft is dismissed or fails.
     Raises `SlotTaken` if the slot is busy in Google or overlaps any slot held or confirmed for a match.
     """
     _check(start, end)
@@ -163,45 +174,85 @@ def hold_slot(db: Connection, user_id: int, card_id: int, start: datetime, end: 
         with db.begin_nested():
             hold_id = db.execute(
                 text(
-                    "INSERT INTO calendar_holds (user_id, card_id, slot)"
-                    " VALUES (:user_id, :card_id, tstzrange(:start, :end)) RETURNING id"
+                    "INSERT INTO calendar_holds (user_id, card_id, slot, draft_id)"
+                    " VALUES (:user_id, :card_id, tstzrange(:start, :end), :draft_id) RETURNING id"
                 ),
-                {"user_id": user_id, "card_id": card_id, "start": start, "end": end},
+                {"user_id": user_id, "card_id": card_id, "start": start, "end": end, "draft_id": draft_id},
             ).scalar_one()
     except IntegrityError:
         raise SlotTaken(f"{start.isoformat()} is already held for a match")
     # shortcut: if the transaction fails after this call, the tentative event stays in Google with no row;
     # add a sweep that deletes such events if that ever happens.
     event_id = google.create_tentative(token, start, end, f"Hold: date with {card.name}")
-    db.execute(text("UPDATE calendar_holds SET event_id = :event_id WHERE id = :id"), {"event_id": event_id, "id": hold_id})
+    db.execute(
+        text("UPDATE calendar_holds SET event_id = :event_id WHERE id = :id AND user_id = :user_id"),
+        {"event_id": event_id, "id": hold_id, "user_id": user_id},
+    )
     _audit(db, user_id, card.app, card_id, "hold", start, trigger)
     return hold_id
+
+
+# shortcut: the slots offered are 19:00 to 21:00 in the server's `USER_TIMEZONE` on the next 7 days, and the
+# sentence that names them is English. Make the window a user setting when a second user or another
+# language needs it.
+OFFER_HOUR = 19
+OFFER_DURATION = timedelta(hours=2)
+OFFER_DAYS = 7
+MAX_OFFERED = 2
+
+
+def _zone() -> ZoneInfo:
+    return ZoneInfo(os.environ.get("USER_TIMEZONE") or "UTC")
+
+
+def say(start: datetime) -> str:
+    """A slot's start as a message names it, in the user's timezone."""
+    return start.astimezone(_zone()).strftime("%a %d %b %H:%M")
+
+
+def offer_slots(db: Connection, user_id: int, card_id: int, draft_id: int, *, trigger: str) -> str | None:
+    """Pick up to `MAX_OFFERED` free evenings, hold each for the draft, and return the sentence that offers
+    them, for the caller to add to the draft's text. None, with nothing held, when no evening is free.
+
+    This is the one way a draft offers a time, so that every slot offered is held. Raises `NotConnected`.
+    """
+    first = (datetime.now(_zone()) + timedelta(days=1)).replace(hour=OFFER_HOUR, minute=0, second=0, microsecond=0)
+    slots = free_slots(db, user_id, first, first + timedelta(days=OFFER_DAYS), OFFER_DURATION)
+    offered = [slot for slot in slots if slot[0].astimezone(_zone()).hour == OFFER_HOUR][:MAX_OFFERED]
+    for start, end in offered:
+        hold_slot(db, user_id, card_id, start, end, trigger=trigger, draft_id=draft_id)
+    return f"I'm free {' or '.join(say(start) for start, _ in offered)}." if offered else None
 
 
 def _release(db: Connection, user_id: int, app: str, card_id: int, holds, trigger: str) -> None:
     for hold in holds:
         google.delete(_refresh_token(db, user_id), hold.event_id)
-        db.execute(text("DELETE FROM calendar_holds WHERE id = :id"), {"id": hold.id})
+        db.execute(
+            text("DELETE FROM calendar_holds WHERE id = :id AND user_id = :user_id"),
+            {"id": hold.id, "user_id": user_id},
+        )
         _audit(db, user_id, app, card_id, "release", hold.start, trigger)
 
 
-def _held(db: Connection, user_id: int, card_id: int) -> list:
-    """The card's holds that are not confirmed, earliest first."""
+def _held(db: Connection, user_id: int, card_id: int, draft_id: int | None = None) -> list:
+    """The card's holds that are not confirmed, earliest first. With `draft_id`, only those that draft offered."""
     return db.execute(
         text(
             "SELECT id, event_id, lower(slot) AS start FROM calendar_holds"
-            " WHERE user_id = :user_id AND card_id = :card_id AND status = 'held' ORDER BY lower(slot)"
+            " WHERE user_id = :user_id AND card_id = :card_id AND status = 'held'"
+            " AND (CAST(:draft_id AS bigint) IS NULL OR draft_id = :draft_id) ORDER BY lower(slot)"
         ),
-        {"user_id": user_id, "card_id": card_id},
+        {"user_id": user_id, "card_id": card_id, "draft_id": draft_id},
     ).all()
 
 
-def release_holds(db: Connection, user_id: int, card_id: int, *, trigger: str) -> None:
+def release_holds(db: Connection, user_id: int, card_id: int, *, trigger: str, draft_id: int | None = None) -> None:
     """Delete the card's tentative holds, in Google too. Call it when the match declines.
 
-    The confirmed event of a date that is set is kept. Does nothing if the card has no holds.
+    With `draft_id`, only the holds that draft offered: call it when the draft is dismissed or its send fails.
+    The confirmed event of a date that is set is kept. Does nothing if there are no such holds.
     """
-    holds = _held(db, user_id, card_id)
+    holds = _held(db, user_id, card_id, draft_id)
     if holds:
         _release(db, user_id, _card(db, user_id, card_id).app, card_id, holds, trigger)
 
@@ -232,7 +283,10 @@ def confirm_date(db: Connection, user_id: int, card_id: int, *, trigger: str, st
         return False
     card = _card(db, user_id, card_id)
     google.confirm(_refresh_token(db, user_id), agreed[0].event_id, f"Date with {card.name}")
-    db.execute(text("UPDATE calendar_holds SET status = 'confirmed' WHERE id = :id"), {"id": agreed[0].id})
+    db.execute(
+        text("UPDATE calendar_holds SET status = 'confirmed' WHERE id = :id AND user_id = :user_id"),
+        {"id": agreed[0].id, "user_id": user_id},
+    )
     _audit(db, user_id, card.app, card_id, "confirm", agreed[0].start, trigger)
     _release(db, user_id, card.app, card_id, [hold for hold in holds if hold.id != agreed[0].id], trigger)
     return True

@@ -424,6 +424,68 @@ def test_full_mode_hands_over_an_answer_that_neither_accepts_nor_declines(
     assert [draft["guardrail"] for draft in queued_for_review(client)] == [["logistics"]]
 
 
+# Every slot a draft offers is held, in every mode, and the hold goes when the draft is dismissed or fails.
+
+
+def test_a_copilot_draft_that_answers_a_question_about_time_offers_free_slots_and_holds_each(
+    app, client, card_id, jev, gcal, evenings  # noqa: F811
+):
+    jev.yes["logistics"] = ["when are you free"]
+    incoming(client, card_id, "when are you free?")  # chat autonomy is copilot
+
+    draft = client.post(f"/cards/{card_id}/drafts").json()
+
+    assert draft["original"] == f"{REPLY} I'm free {said(evenings[0])} or {said(evenings[1])}."
+    assert sorted(event["start"] for event in gcal.events.values()) == evenings[:2]
+    assert {event["status"] for event in gcal.events.values()} == {"tentative"}
+
+    assert client.post(f"/drafts/{draft['id']}/dismiss").status_code == 200
+    assert gcal.events == {}
+
+
+def test_dismissing_a_reply_autopilot_kept_for_the_user_releases_the_slots_it_offered(
+    app, client, card_id, tinder, jev, gcal, evenings  # noqa: F811
+):
+    autonomy(client, "full")
+    jev.yes = {"logistics": ["when are you free"], "overpromise": ["badly"]}
+    incoming(client, card_id, "when are you free?")
+    work(app)
+    (draft,) = queued_for_review(client)
+    assert len(gcal.events) == 2
+
+    client.post(f"/drafts/{draft['id']}/dismiss")
+
+    assert gcal.events == {}
+
+
+def test_a_send_that_fails_releases_the_slots_the_message_offered(app, client, card_id, tinder, jev, gcal, evenings):  # noqa: F811
+    autonomy(client, "full")
+    jev.yes["logistics"] = ["when are you free"]
+    tinder.status = 500
+
+    incoming(client, card_id, "when are you free?")
+    work(app)
+
+    assert gcal.events == {}
+
+
+def test_dismissing_a_later_draft_keeps_the_slots_an_earlier_message_offered(
+    app, client, card_id, tinder, jev, gcal, evenings, llm  # noqa: F811
+):
+    autonomy(client, "full")
+    jev.yes["logistics"] = ["when are you free", "where"]
+    incoming(client, card_id, "when are you free?")
+    work(app)
+    llm.replies = ["other", "good question"]
+    incoming(client, card_id, "where would we go?")
+    work(app)
+    (draft,) = queued_for_review(client)
+
+    client.post(f"/drafts/{draft['id']}/dismiss")
+
+    assert len(gcal.events) == 2
+
+
 @pytest.mark.parametrize("message", ["let's meet at joe's bar", "are we exclusive?"])
 def test_full_mode_hands_a_place_or_exclusivity_to_the_user(
     app, client, card_id, tinder, jev, gcal, evenings, message  # noqa: F811

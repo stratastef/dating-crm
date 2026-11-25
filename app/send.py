@@ -5,7 +5,7 @@ from sqlalchemy import Connection, Row, text
 
 from app.audit import record_action
 from app.auth import CurrentUser, Db
-from app import handover
+from app import calendar, handover
 from app.autopilot import autopilot_block
 from app.cards import upsert_message
 from app.connectors import CapabilityFailed, call, unavailable
@@ -143,21 +143,31 @@ def send_draft(db: Connection, user_id: int, payload: dict) -> None:
             ),
             {"id": draft_id, "user_id": user_id},
         ).scalar_one_or_none()
-    if claimed != "sending":
+    if claimed is None:
         return
     draft = db.execute(
         text(
             "SELECT coalesce(d.edited, d.original) AS body, d.guardrail, c.id AS card_id, c.app, c.external_id"
-            " FROM drafts d JOIN cards c ON c.id = d.card_id WHERE d.id = :id"
+            " FROM drafts d JOIN cards c ON c.id = d.card_id WHERE d.id = :id AND d.user_id = :user_id"
         ),
-        {"id": draft_id},
+        {"id": draft_id, "user_id": user_id},
     ).one()
 
     def finish(status: str) -> None:
         db.execute(
-            text("UPDATE drafts SET status = :status, updated_at = now() WHERE id = :id"),
-            {"id": draft_id, "status": status},
+            text("UPDATE drafts SET status = :status, updated_at = now() WHERE id = :id AND user_id = :user_id"),
+            {"id": draft_id, "user_id": user_id, "status": status},
         )
+        if status == "failed":
+            # The offer did not go out as far as the app knows, so the slots it named are free again.
+            # shortcut: if the message did reach the match before the error, they hold an offer for a slot
+            # that is no longer held. Keep the holds of a failed draft if that ever double-books.
+            calendar.release_holds(
+                db, user_id, draft.card_id, trigger=f"draft {draft_id} failed to send", draft_id=draft_id
+            )
+
+    if claimed == "failed":
+        return finish("failed")  # an earlier attempt died: only its holds are left to release
 
     if refusal(db, user_id, draft.app, draft.external_id, draft.guardrail):
         return finish("pending")  # nothing was sent: the user can tap again once the cause is fixed

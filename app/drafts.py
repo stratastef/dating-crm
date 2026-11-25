@@ -1,10 +1,11 @@
 """Copilot drafts: an opener or reply Claude writes for a card in the user's voice, and the user's edit of it."""
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import Connection, Row, text
 
-from app import jev, llm, review
+from app import calendar, handover, jev, llm, review, vault
 from app.auth import CurrentUser, Db
 from app.reads import read_lines
 from app.voice import queue_profile, similar_chats
@@ -54,12 +55,37 @@ def write_draft(card_id: int, user: CurrentUser, db: Db):
     return draft
 
 
-def draft_for(db: Connection, user_id: int, card_id: int, rule: str = "") -> tuple[Row, str]:
+_TIME_RULE = "Name no day and no time to meet: free times from the calendar are added after your text."
+
+
+def _asked_for_a_time(db: Connection, user_id: int, card_id: int) -> bool:
+    """True if the draft should offer times: the match's unanswered messages are about logistics, no slot is
+    held for them yet, and the user's calendar is connected."""
+    if not any("logistics" in (message.handover or []) for message in handover.unanswered(db, user_id, card_id)):
+        return False
+    held = db.execute(
+        text(
+            "SELECT EXISTS (SELECT 1 FROM calendar_holds"
+            " WHERE user_id = :user_id AND card_id = :card_id AND status = 'held')"
+        ),
+        {"user_id": user_id, "card_id": card_id},
+    ).scalar_one()
+    return not held and vault.read_token(db, user_id, calendar.VAULT_APP) is not None
+
+
+def draft_for(db: Connection, user_id: int, card_id: int, rule: str = "", offer: bool = True) -> tuple[Row, str]:
     """Have Claude write a draft for the card and store it as `pending`. Returns the draft and the match's name.
 
     `rule` is one more sentence for the task, for a caller that limits what the draft may say. Raises the
     same `HTTPException`s the route answers with.
+
+    When the match asked for a time (see `_asked_for_a_time()`), the draft ends with a sentence that offers
+    free slots, each held for this draft (`calendar.offer_slots()`). A caller that offers times itself
+    passes `offer=False`.
     """
+    offer = offer and _asked_for_a_time(db, user_id, card_id)
+    if offer:
+        rule = f"{rule} {_TIME_RULE}".strip()
     card = db.execute(
         text("SELECT app, name, notes FROM cards WHERE id = :id AND user_id = :user_id"),
         {"id": card_id, "user_id": user_id},
@@ -100,18 +126,32 @@ def draft_for(db: Connection, user_id: int, card_id: int, rule: str = "") -> tup
     original = llm.call(db, user_id, "draft", _SYSTEM, prompt).text.strip()
     if not original:
         raise HTTPException(status_code=502, detail="the draft was empty, try again")
+    # The draft is stored first: a hold names the draft that offers it.
+    draft_id = db.execute(
+        text(
+            "INSERT INTO drafts (user_id, card_id, kind, original)"
+            " VALUES (:user_id, :card_id, :kind, :original) RETURNING id"
+        ),
+        {"user_id": user_id, "card_id": card_id, "kind": kind, "original": original},
+    ).scalar_one()
+    if offer:
+        try:
+            times = calendar.offer_slots(db, user_id, card_id, draft_id, trigger="copilot: offered a time")
+        except httpx.HTTPError:
+            times = None  # Google could not be reached: the draft offers no time, and the user names one
+        if times:
+            original = f"{original} {times}"
+    # The checks judge the whole text that would go out, the offer included.
     draft = db.execute(
         text(
             f"""
-            INSERT INTO drafts (user_id, card_id, kind, original, guardrail, hot_lead)
-            VALUES (:user_id, :card_id, :kind, :original, :guardrail, :hot_lead)
-            RETURNING {_COLUMNS}
+            UPDATE drafts SET original = :original, guardrail = :guardrail, hot_lead = :hot_lead
+            WHERE id = :id AND user_id = :user_id RETURNING {_COLUMNS}
             """
         ),
         {
+            "id": draft_id,
             "user_id": user_id,
-            "card_id": card_id,
-            "kind": kind,
             "original": original,
             "guardrail": jev.guardrail_hits(db, user_id, original),
             "hot_lead": jev.is_hot_lead(db, user_id, original),
