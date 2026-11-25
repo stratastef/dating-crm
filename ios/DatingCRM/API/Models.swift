@@ -47,6 +47,10 @@ struct Card: Codable, Identifiable, Hashable {
     var handover: Handover?
     /// The replies suggested for the handover.
     var handoverSuggestions: [String]?
+    // prototype: decoded for the Pipeline prototype only. Optional so stubs without them still decode.
+    var stalled: Bool?
+    // prototype: an ISO timestamp kept as text; the shared decoder only parses plain days.
+    var stageChangedAt: String?
 
     /// True when the card is in Dated and has no rating yet: the app then asks for one.
     var needsDateRating: Bool { stage == .dated && dateRating == nil }
@@ -58,6 +62,8 @@ struct Message: Codable, Identifiable, Hashable {
     let id: Int
     var sender: Sender
     var body: String
+    // prototype: an ISO timestamp kept as text; the shared decoder only parses plain days.
+    var sentAt: String?
 }
 
 /// One week on the dashboard. `week` is local midnight of the Monday it starts on.
