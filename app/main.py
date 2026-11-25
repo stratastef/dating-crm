@@ -16,6 +16,7 @@ from app.jobs import enqueue
 from app.llm import BudgetReached
 from app.photos import router as photos_router
 from app.push import router as push_router
+from app.screenshots import router as screenshots_router
 from app.reads import router as reads_router
 from app.review import router as review_router
 from app.send import router as send_router
@@ -68,6 +69,7 @@ def create_app(url: str | None = None) -> FastAPI:
     app.include_router(drafts_router)
     app.include_router(photos_router)
     app.include_router(push_router)
+    app.include_router(screenshots_router)
     app.include_router(reads_router)
     app.include_router(review_router)
     app.include_router(send_router)

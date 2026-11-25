@@ -125,7 +125,7 @@ _SYSTEM = (
 )
 
 
-def _for_claude(path: Path) -> llm.ImageInput:
+def _for_claude(path: Path) -> tuple[str, bytes]:
     """The photo scaled down to at most 1024 pixels a side, as JPEG: enough to judge it, and cheap to send."""
     with Image.open(path) as image:
         image = ImageOps.exif_transpose(image).convert("RGB")

@@ -5,5 +5,14 @@
 	<!-- Push notifications. Xcode changes this to "production" when it signs a TestFlight or App Store build. -->
 	<key>aps-environment</key>
 	<string>development</string>
+	<!-- Shared with the share extension: the App Group holds the server URL, the Keychain group the API token. -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>$(APP_GROUP)</string>
+	</array>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)$(KEYCHAIN_GROUP)</string>
+	</array>
 </dict>
 </plist>

@@ -36,24 +36,21 @@ class Completion:
     output_tokens: int
 
 
-# One image for Claude to look at: a URL Claude fetches, or a file held here as (content type, bytes) with
-# content type `image/jpeg` or `image/png`.
-ImageInput = str | tuple[str, bytes]
-
-
-def _image_source(image: ImageInput) -> dict:
+def _source(image: str | tuple[str, bytes]) -> dict:
+    """The API's `source` for an image: a URL, or the bytes in base64."""
     if isinstance(image, str):
         return {"type": "url", "url": image}
     media_type, data = image
-    return {"type": "base64", "media_type": media_type, "data": base64.b64encode(data).decode()}
+    return {"type": "base64", "media_type": media_type, "data": base64.standard_b64encode(data).decode()}
 
 
-def complete(system: str, prompt: str, max_tokens: int = 16000, images: Sequence[ImageInput] = ()) -> Completion:
-    """Send one prompt to Claude and return its text and token usage.
+def complete(
+    system: str, prompt: str, max_tokens: int = 16000, images: Sequence[str | tuple[str, bytes]] = ()
+) -> Completion:
+    """Send one prompt to Claude and return its text and token usage. Claude sees `images` before the prompt.
 
+    An image is a URL Claude fetches, or `(media_type, data)` such as `("image/png", b"...")` to send the picture.
     The model is `ANTHROPIC_MODEL` (default `claude-fable-5-2`); the key is read from `ANTHROPIC_API_KEY`.
-    `images` are URLs Claude fetches or `(content type, bytes)` pairs; Claude sees them before the prompt, in
-    the order given.
     """
     message = anthropic.Anthropic().messages.create(
         model=os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL),
@@ -63,7 +60,7 @@ def complete(system: str, prompt: str, max_tokens: int = 16000, images: Sequence
             {
                 "role": "user",
                 "content": [
-                    *({"type": "image", "source": _image_source(image)} for image in images),
+                    *({"type": "image", "source": _source(image)} for image in images),
                     {"type": "text", "text": prompt},
                 ],
             }
@@ -87,13 +84,13 @@ def call(
     system: str,
     prompt: str,
     max_tokens: int = 16000,
-    images: Sequence[ImageInput] = (),
+    images: Sequence[str | tuple[str, bytes]] = (),
 ) -> Completion:
     """Send one prompt to Claude for a user and record what the call cost. Every feature calls Claude through this.
 
-    `purpose` names the feature, for example `draft`. `images` are images to show Claude: each a URL, or a
-    `(content type, bytes)` pair for a file held here. Raises `BudgetReached`, without calling Claude, while the
-    user's spend this month is at their cap. The call that reaches the cap sends the user a push.
+    `purpose` names the feature, for example `draft`. `images` are images to show Claude: URLs, or
+    `(media_type, data)` pairs. Raises `BudgetReached`, without calling Claude, while the user's spend this
+    month is at their cap. The call that reaches the cap sends the user a push.
     """
     # shortcut: two calls at the same moment can both pass this check, so spend can pass the cap by the cost
     # of the calls in flight. Lock the user row here if that ever matters.

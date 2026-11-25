@@ -41,6 +41,11 @@ struct APIClient {
         try await send("PATCH", "drafts/\(draftID)", body: Self.encoder.encode(["edited": text]))
     }
 
+    /// Has the server read a screenshot of a chat or profile into the match's card, and returns a draft for it.
+    func importScreenshot(jpeg: Data) async throws -> Draft {
+        try Self.decoder.decode(Draft.self, from: await data("POST", "screenshots", body: jpeg, contentType: "image/jpeg"))
+    }
+
     /// The match read of a card: empty until one is made.
     func read(cardID: Int) async throws -> [Inference] {
         try await send("GET", "cards/\(cardID)/read")

@@ -134,9 +134,9 @@ def has_message(db: Connection, card_id: int, external_id: str) -> bool:
 
 
 def upsert_message(
-    db: Connection, user_id: int, card_id: int, external_id: str, sender: str, body: str, sent_at: datetime | str
+    db: Connection, user_id: int, card_id: int, external_id: str | None, sender: str, body: str, sent_at: datetime | str
 ) -> None:
-    """Add a synced message unless the card already has it.
+    """Add a synced message unless the card already has it. Without an `external_id` it is always added.
 
     A new message has the same effects as one added through `POST /cards/{id}/messages`, and it also moves a
     Matched card to Chatting.
