@@ -6,7 +6,6 @@ replies, takes over or hands back. `taken_over`: the chat stays manual until the
 
 from typing import Literal
 
-import anthropic
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import Connection, text
@@ -53,7 +52,7 @@ def suggest_replies(db: Connection, user_id: int, card_id: int, hits: list[str])
     )
     try:
         reply = llm.call(db, user_id, "handover", _SYSTEM, prompt).text
-    except (RuntimeError, anthropic.AnthropicError):
+    except llm.Failed:
         return []  # budget reached, a refusal or an API error: the chat is still handed over
     lines = [line.strip() for line in reply.splitlines() if line.strip()][:MAX_SUGGESTIONS]
     # Each suggestion is also judged as the answer to what the match asked: alone, "Nope, why?" denies nothing.

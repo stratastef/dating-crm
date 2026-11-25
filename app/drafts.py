@@ -7,7 +7,7 @@ from sqlalchemy import Connection, Row, text
 
 from app import calendar, jev, llm, vault
 from app.auth import CurrentUser, Db
-from app.card_lookup import chat_lines, conversation, own_card, unanswered
+from app.card_lookup import chat_lines, conversation, find_card, unanswered
 from app.reads import read_lines
 from app.voice import queue_profile, similar_chats
 
@@ -48,9 +48,20 @@ def write_draft(card_id: int, user: CurrentUser, db: Db):
     """Write a draft for the card and store it: an opener when the card has no messages, a reply otherwise."""
     from app.review import notify_if_hot  # imported here: app.review imports this module for `Draft`
 
-    draft, name = draft_for(db, user.id, card_id)
+    try:
+        draft, name = draft_for(db, user.id, card_id)
+    except CannotDraft as error:
+        raise HTTPException(status_code=error.status, detail=str(error))
     notify_if_hot(db, user.id, card_id, name)
     return draft
+
+
+class CannotDraft(Exception):
+    """`draft_for()` wrote no draft. `status` is the HTTP status a route answers with; a job just catches it."""
+
+    def __init__(self, status: int, why: str):
+        super().__init__(why)
+        self.status = status
 
 
 _TIME_RULE = "Name no day and no time to meet: free times from the calendar are added after your text."
@@ -74,8 +85,8 @@ def _asked_for_a_time(db: Connection, user_id: int, card_id: int) -> bool:
 def draft_for(db: Connection, user_id: int, card_id: int, rule: str = "", offer: bool = True) -> tuple[Row, str]:
     """Have Claude write a draft for the card and store it as `pending`. Returns the draft and the match's name.
 
-    `rule` is one more sentence for the task, for a caller that limits what the draft may say. Raises the
-    same `HTTPException`s the route answers with.
+    `rule` is one more sentence for the task, for a caller that limits what the draft may say. Raises
+    `CannotDraft` when there is no such card, no style profile yet, or Claude's reply is empty.
 
     When the match asked for a time (see `_asked_for_a_time()`), the draft ends with a sentence that offers
     free slots, each held for this draft (`calendar.offer_slots()`). A caller that offers times itself
@@ -84,12 +95,14 @@ def draft_for(db: Connection, user_id: int, card_id: int, rule: str = "", offer:
     offer = offer and _asked_for_a_time(db, user_id, card_id)
     if offer:
         rule = f"{rule} {_TIME_RULE}".strip()
-    card = own_card(db, user_id, card_id)
+    card = find_card(db, user_id, card_id)
+    if not card:
+        raise CannotDraft(404, "card not found")
     profile = db.execute(
         text("SELECT profile FROM voice_profiles WHERE user_id = :user_id"), {"user_id": user_id}
     ).scalar_one_or_none()
     if not profile:
-        raise HTTPException(status_code=409, detail="style profile not written yet")
+        raise CannotDraft(409, "style profile not written yet")
     # shortcut: the whole conversation is sent, trim to the newest messages if chats get long.
     messages = conversation(db, user_id, card_id)
     kind = "reply" if messages else "opener"
@@ -116,7 +129,7 @@ def draft_for(db: Connection, user_id: int, card_id: int, rule: str = "", offer:
     # to a job if drafts get slow or many users draft at once.
     original = llm.call(db, user_id, "draft", _SYSTEM, prompt).text.strip()
     if not original:
-        raise HTTPException(status_code=502, detail="the draft was empty, try again")
+        raise CannotDraft(502, "the draft was empty, try again")
     # The draft is stored first: a hold names the draft that offers it.
     draft_id = db.execute(
         text(

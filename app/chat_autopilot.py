@@ -4,7 +4,7 @@ It composes existing pieces: `draft_for()` writes the reply, Jev checks it, `que
 sends it or leaves it in the review queue, and in full mode the calendar supplies and holds the times offered.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlalchemy import Connection, text
 
@@ -12,7 +12,7 @@ from app import calendar, handover, jev, llm, review
 from app.auth import CurrentUser, Db
 from app.autopilot import autonomy_levels
 from app.card_lookup import unanswered
-from app.drafts import draft_for
+from app.drafts import CannotDraft, draft_for
 from app.jobs import handler
 from app.send import CHAT_STAGES, queue_send
 
@@ -113,7 +113,7 @@ def chat_reply(db: Connection, user_id: int, payload: dict) -> None:
 
     try:
         draft, _ = draft_for(db, user_id, card_id, rule=_RULE, offer=False)  # this job offers times itself, below
-    except HTTPException:
+    except CannotDraft:
         return  # no style profile yet, or an empty draft: nothing to send
 
     body = [draft.original]

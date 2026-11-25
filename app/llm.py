@@ -27,6 +27,11 @@ class BudgetReached(RuntimeError):
     """The user's Claude spend this month is at their cap: no call is made."""
 
 
+# What `call()` raises when Claude gives no usable answer: the budget cap, a refusal, or an error of the API.
+# A caller that can go on without Claude catches `llm.Failed`, and never imports `anthropic` itself.
+Failed = (RuntimeError, anthropic.AnthropicError)
+
+
 @dataclass
 class Completion:
     text: str
