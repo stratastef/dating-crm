@@ -555,6 +555,7 @@ All in `app/swipes.py`; the table is `swipe_candidates` (one row per profile an 
 - The decision route answers with the candidate plus `applied`. `applied: false` means the app was not reached (connector unavailable or failed, see "Connectors"): the swipe is stored and the user swipes in the dating app by hand.
 - `apply_decision(db, user_id, app, profile_id, decision)` is the one function that swipes through a connector. Swipe autopilot must call it and `record_action()`. It sends a plain like or pass and never spends a paid item.
 - Not built: the swipe autonomy level is not read (a request from the user is the consent), and swiping without confirmation.
+- Not covered by find and purge: a candidate is not a card, so `POST /people/purge` leaves its row (name, bio, photo URLs) in `swipe_candidates`.
 
 ## Tinder connector
 
