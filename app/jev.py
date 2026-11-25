@@ -128,17 +128,19 @@ def is_hot_lead(message: str) -> bool:
         return False
 
 
-def dealbreaker_hit(bio: str, dealbreakers: list[str]) -> str | None:
+def dealbreaker_hit(bio: str, dealbreakers: list[str], strict: bool = False) -> str | None:
     """Swipe pre-filter for a candidate's bio: the first of the user's dealbreakers it shows, else None.
 
     None when Jev could not be asked: the profile then goes on to the next pre-filter, and the user decides.
+    With `strict`, `JevUnavailable` is raised instead: swipe autopilot must not swipe on an unchecked profile.
     """
     try:
         for dealbreaker in dealbreakers:
             if any(ask(sentence, "dealbreaker", dealbreaker) for sentence in sentences(bio)):
                 return dealbreaker
     except JevUnavailable:
-        pass
+        if strict:
+            raise
     return None
 
 
