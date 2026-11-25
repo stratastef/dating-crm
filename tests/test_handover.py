@@ -61,6 +61,17 @@ def test_no_suggestion_for_a_bot_or_ai_question_denies_being_ai(client, jev, llm
     assert apns.sent[0]["payload"]["aps"]["alert"]["body"] == "would a bot be this bad at replying"
 
 
+def test_no_suggestion_denies_being_ai_when_read_with_the_question_it_answers(client, jev, llm):
+    """"Nope, why?" denies nothing on its own; as the answer to "are you a bot?" it is a flat denial."""
+    jev.yes = {"asks_if_ai": ["are you a bot"], "answer_denies_ai": ["are you a bot? answer: nope"]}
+    card_id = card(client)
+    llm.reply = "Nope, why?\nwould a bot be this bad at replying"
+
+    incoming(client, card_id, "wait, are you a bot?")
+
+    assert client.get(f"/cards/{card_id}").json()["handover_suggestions"] == ["would a bot be this bad at replying"]
+
+
 def test_the_chat_is_handed_over_without_suggestions_when_claude_or_jev_cannot_be_asked(
     app, client, jev, llm, apns, monkeypatch
 ):

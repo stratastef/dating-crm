@@ -28,6 +28,11 @@ CHECKS: dict[str, str] = {
     "plays_on_insecurity": (
         "The sentence plays on the reader's insecurities, fears or weak spots to persuade or pressure them."
     ),
+    # Handover suggestions: a question and one suggested answer to it, judged together.
+    "answer_denies_ai": (
+        "The text is a question and its answer. The answer denies that its writer is an AI or a bot, or claims"
+        " the writer is human, also by a bare no."
+    ),
     # Match read, on each inference Claude replies. They do not trust the labels Claude gives its own inference.
     "about_other_person": (
         "The sentence describes what a person other than the dating match is like or who they are: a friend,"
@@ -143,6 +148,16 @@ def read_hits(inference: str) -> list[str]:
     `["unavailable"]` when Jev could not be asked, so the inference is dropped.
     """
     return _hits(inference, READ)
+
+
+def answer_denies_ai(question: str, answer: str) -> bool:
+    """Whether `answer`, read as the reply to `question`, denies being an AI: "Nope, why?" after "are you a
+    bot?". The sentence checks cannot see this, because each judges one sentence alone. True when Jev could
+    not be asked."""
+    try:
+        return ask(f"Question: {' '.join(question.split())} Answer: {' '.join(answer.split())}", "answer_denies_ai")
+    except JevUnavailable:
+        return True
 
 
 def names_logistics(message: str) -> bool:

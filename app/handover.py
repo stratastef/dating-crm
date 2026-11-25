@@ -58,7 +58,11 @@ def suggest_replies(db: Connection, user_id: int, card_id: int, hits: list[str])
     except (RuntimeError, anthropic.AnthropicError):
         return []  # budget reached, a refusal or an API error: the chat is still handed over
     lines = [line.strip() for line in reply.splitlines() if line.strip()][:MAX_SUGGESTIONS]
-    return [line for line in lines if not jev.guardrail_hits(line)]
+    # Each suggestion is also judged as the answer to what the match asked: alone, "Nope, why?" denies nothing.
+    question = " ".join(message.body for message in unanswered(db, user_id, card_id))
+    return [
+        line for line in lines if not jev.guardrail_hits(line) and not jev.answer_denies_ai(question, line)
+    ]
 
 
 def incoming(db: Connection, user_id: int, card_id: int, message_id: int, body: str) -> list[str]:
