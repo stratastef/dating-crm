@@ -1,6 +1,7 @@
 """The one place that calls Claude. Features call `llm.call(...)`, which records what each call cost."""
 
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -28,8 +29,8 @@ class Completion:
     output_tokens: int
 
 
-def complete(system: str, prompt: str, max_tokens: int = 16000) -> Completion:
-    """Send one prompt to Claude and return its text and token usage.
+def complete(system: str, prompt: str, max_tokens: int = 16000, images: Sequence[str] = ()) -> Completion:
+    """Send one prompt to Claude and return its text and token usage. `images` are URLs Claude fetches and sees.
 
     The model is `ANTHROPIC_MODEL` (default `claude-fable-5-2`); the key is read from `ANTHROPIC_API_KEY`.
     """
@@ -37,7 +38,15 @@ def complete(system: str, prompt: str, max_tokens: int = 16000) -> Completion:
         model=os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL),
         max_tokens=max_tokens,
         system=system,
-        messages=[{"role": "user", "content": prompt}],
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    *({"type": "image", "source": {"type": "url", "url": url}} for url in images),
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ],
     )
     if message.stop_reason == "refusal":
         # A refusal carries no usable text. Raising lets a job retry and then fail visibly.
@@ -50,13 +59,21 @@ def complete(system: str, prompt: str, max_tokens: int = 16000) -> Completion:
     )
 
 
-def call(db: Connection, user_id: int, purpose: str, system: str, prompt: str, max_tokens: int = 16000) -> Completion:
+def call(
+    db: Connection,
+    user_id: int,
+    purpose: str,
+    system: str,
+    prompt: str,
+    max_tokens: int = 16000,
+    images: Sequence[str] = (),
+) -> Completion:
     """Send one prompt to Claude for a user and record what the call cost. Every feature calls Claude through this.
 
-    `purpose` names the feature, for example `draft`. The cost row is written in the caller's transaction.
+    `purpose` names the feature, for example `draft`. `images` are URLs of images to show Claude. The cost row is written in the caller's transaction.
     """
     # `complete` is looked up at call time so tests can replace it with a stub.
-    completion = complete(system, prompt, max_tokens)
+    completion = complete(system, prompt, max_tokens, images)
     # A model missing from the table is charged at the default model's price, so its cost is never zero.
     # shortcut: cache reads and writes are not priced apart, add them when a caller turns on prompt caching.
     input_price, output_price = PRICES.get(completion.model, PRICES[DEFAULT_MODEL])
