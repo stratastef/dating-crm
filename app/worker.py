@@ -12,6 +12,7 @@ from app.db import database_url
 from app.jobs import run_once
 
 # Import every module that registers job handlers here, so the worker knows them.
+import app.sync  # noqa: F401
 
 log = logging.getLogger("worker")
 

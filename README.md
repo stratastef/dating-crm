@@ -17,6 +17,8 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/audit.py` | `record_action()` and `GET /audit-log` |
 | `app/autopilot.py` | Autonomy per job and the kill switch: `autopilot_allowed()`, `pause()`, `resume()` |
 | `app/connectors.py` | `Connector` contract, `call()`, `is_copilot_only()`, `alerts()` |
+| `app/tinder.py` | `TinderConnector`: reads matches and messages from Tinder's unofficial web API |
+| `app/sync.py` | `PUT /connectors/{app}/token` and the `sync_matches` job |
 | `migrations/versions/` | Alembic migrations |
 | `tests/` | pytest suite |
 | `compose.yaml` | `db`, `api` and `worker` services |
@@ -164,7 +166,7 @@ The worker runs such a job only if `autopilot_allowed()` is true at that moment.
 
 The contract is in `app/connectors.py`. The capabilities are `read_matches`, `read_messages`, `send`, `like` and `pass`.
 
-Add a connector: subclass `Connector`, set `app`, declare the `capabilities` it supports and implement the method for each one (`pass` is the method `pass_`). Leave a capability out of `capabilities` to leave it out of the build. Each method receives the session token; read it from the vault. A method raises any exception when the app refuses or breaks.
+Add a connector: subclass `Connector`, set `app`, declare the `capabilities` it supports and implement the method for each one (`pass` is the method `pass_`). Leave a capability out of `capabilities` to leave it out of the build. Each method receives the session token as its first argument. A method raises any exception when the app refuses or breaks.
 
 ```python
 class TinderConnector(Connector):
@@ -175,17 +177,69 @@ class TinderConnector(Connector):
     def read_messages(self, token: str, match_id: str) -> list[dict]: ...
 ```
 
-Never call a connector method directly. Go through `call()`, which enforces the rules below:
+Never call a connector method directly. Go through `call()`, which reads the user's token from the vault, passes it to the method and enforces the rules below:
 
 ```python
-matches = call(db, user_id, TinderConnector(), "read_matches", read_token(db, user_id, "tinder"))
+matches = call(db, user_id, TinderConnector(), "read_matches")
+messages = call(db, user_id, TinderConnector(), "read_messages", match_id)
 ```
 
 - **Switch a capability off:** set `CONNECTOR_DISABLED_CAPABILITIES=tinder:send,hinge:like` (comma-separated `app:capability`).
-- **Unavailable:** `call()` raises `CapabilityUnavailable` and does not touch the app when the capability is not declared, is disabled, or the app is copilot-only.
+- **Unavailable:** `call()` raises `CapabilityUnavailable` and does not touch the app when the capability is not declared, is disabled, the app is copilot-only, or the user has no stored token for the app.
 - **Fallback to copilot:** if the connector method raises, `call()` inserts a row in `connector_alerts` (`user_id`, `app`, `capability`, `error` = `repr()` of the exception) and raises `CapabilityFailed`, with the connector's exception as `__cause__`. The row is written in its own transaction, so it survives the failed job's rollback. That row is both the alert and the fallback: `is_copilot_only(db, user_id, app)` is true while the user has any alert for the app, and every capability of that app is then unavailable for that user. `alerts(db, user_id)` lists them. Delete the user's rows for an app to re-enable its connector.
 
 Test a connector's callers with a fake like `FakeConnector` in `tests/test_connectors.py`.
+
+## Sync
+
+`app/sync.py` copies an app's matches and messages into cards. It works for every connector listed in `CONNECTORS` there.
+
+- **Start:** `PUT /connectors/{app}/token` with `{"token": "..."}` stores the token in the vault, deletes the user's alerts for the app (so the connector is on again) and queues a `sync_matches` job with payload `{"app": app}`. It returns `204`, or `404` if the app has no connector.
+- **Schedule:** each run queues the next one `SYNC_INTERVAL` (15 minutes) later. The job queue has no recurring jobs, so this chain is the schedule. It stops when a run fails 5 times, for example after the token expires. Submit a token again to restart it.
+- **Cards:** a new match becomes a card in `matched`. `upsert_card()` in `app/cards.py` finds the card by `external_id`; on a later sync it changes only the name.
+- **Messages:** `upsert_message()` adds a message unless the card already has its `external_id`. A new message moves a card from `matched` to `chatting`. Sync never changes any other stage.
+- **Fewer requests:** sync reads a match's messages only when the match has messages and its newest one is not stored yet.
+- **Not built:** a match that disappears from the app (unmatched) keeps its card and stage.
+
+A connector's `read_matches` returns dicts with `id`, `name`, `has_messages` and `last_message_id` (`None` if unknown). Its `read_messages` returns dicts with `id`, `sender` (`me` or `them`), `body` and `sent_at`.
+
+## Tinder connector
+
+`app/tinder.py` reads your own Tinder account with your own web session token. It supports `read_matches` and `read_messages` only. Tinder's terms do not allow this API use; see Risks in the spec.
+
+### Capture and submit your token
+
+1. On your computer, log in at <https://tinder.com> in a desktop browser.
+2. Open the developer tools (F12), then the Network tab, and reload the page.
+3. Click any request to `api.gotinder.com` and copy the value of the `X-Auth-Token` request header. The same value is in Application > Local Storage > `https://tinder.com` under the key `TinderWeb/APIToken`.
+4. Send it to your server. `$API_TOKEN` is your Dating CRM token from `python -m app.auth`:
+
+```sh
+curl -X PUT http://localhost:8000/connectors/tinder/token \
+  -H "Authorization: Bearer $API_TOKEN" -H "Content-Type: application/json" \
+  -d '{"token": "<the X-Auth-Token value>"}'
+```
+
+The worker syncs within a second and then every 15 minutes. Check with `GET /cards?app=tinder`. The token is a password for your Tinder account: do not paste it anywhere else. When Tinder logs the web session out, sync fails, the app becomes copilot-only and an alert is stored; repeat the steps to resume.
+
+### Assumptions to confirm against your real account
+
+The connector was built from public write-ups of the web API and was never run against Tinder. The fixtures in `tests/fixtures/tinder/` are written by hand in that shape; they are not recordings. Compare each row with a real response in the Network tab and fix `app/tinder.py` and the fixtures where they differ.
+
+| Assumption | Used for |
+| --- | --- |
+| The token is in `localStorage` as `TinderWeb/APIToken` and is sent as the `X-Auth-Token` header | Capture, every request |
+| `X-Auth-Token` is the only header Tinder requires (no `app-version`, `platform` or device ID headers) | Every request |
+| `GET https://api.gotinder.com/v2/matches?count=60&message=0` lists matches without messages, and `message=1` those with messages | `read_matches`, `has_messages` |
+| `count=60` is accepted on both endpoints | Page size |
+| The response body is `{"data": {"matches": [...], "next_page_token": "..."}}`, and `next_page_token` is absent on the last page and sent back as `page_token` | Paging |
+| A match has `_id` and `person._id`, `person.name` | Card `external_id` and name, telling senders apart |
+| A match from `message=1` has `messages`, a list that includes its newest message, each with `_id` and `sent_date` | `last_message_id`. If the list is missing or empty, sync reads that match's messages on every run. If it holds only older messages, sync misses new ones |
+| `GET /v2/matches/{match_id}/messages?count=60` returns `{"data": {"messages": [...], "next_page_token": "..."}}` | `read_messages` |
+| A message has `_id`, `from` (a user ID), `message` (the text) and `sent_date` (ISO 8601) | Message `external_id`, sender, body, time |
+| A message whose `from` is not `person._id` is yours | `sender` |
+| An expired token gives HTTP `401` | Fallback to copilot |
+| One sync every 15 minutes does not trip Tinder's rate limits or bot detection | `SYNC_INTERVAL` |
 
 ## Add a migration
 

@@ -5,7 +5,7 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
-from sqlalchemy import text
+from sqlalchemy import Connection, text
 from sqlalchemy.exc import IntegrityError
 
 from app.auth import CurrentUser, Db
@@ -56,6 +56,63 @@ def create_card(card: NewCard, user: CurrentUser, db: Db):
         ).one()
     except IntegrityError:
         raise HTTPException(status_code=409, detail="a card with this app and external_id already exists")
+
+
+def upsert_card(db: Connection, user_id: int, app: str, external_id: str, name: str) -> int:
+    """Create the card for a synced match in Matched, or refresh its name. Returns the card id.
+
+    An existing card keeps its stage, notes, next action and due date.
+    """
+    return db.execute(
+        text(
+            """
+            INSERT INTO cards (user_id, app, external_id, name, stage)
+            VALUES (:user_id, :app, :external_id, :name, 'matched')
+            ON CONFLICT (user_id, app, external_id) DO UPDATE SET name = EXCLUDED.name
+            RETURNING id
+            """
+        ),
+        {"user_id": user_id, "app": app, "external_id": external_id, "name": name},
+    ).scalar_one()
+
+
+def has_message(db: Connection, card_id: int, external_id: str) -> bool:
+    return db.execute(
+        text("SELECT EXISTS (SELECT 1 FROM messages WHERE card_id = :card_id AND external_id = :external_id)"),
+        {"card_id": card_id, "external_id": external_id},
+    ).scalar_one()
+
+
+def upsert_message(
+    db: Connection, user_id: int, card_id: int, external_id: str, sender: str, body: str, sent_at: datetime | str
+) -> None:
+    """Add a synced message unless the card already has it. A new message moves a Matched card to Chatting."""
+    added = db.execute(
+        text(
+            """
+            INSERT INTO messages (user_id, card_id, external_id, sender, body, sent_at)
+            VALUES (:user_id, :card_id, :external_id, :sender, :body, CAST(:sent_at AS timestamptz))
+            ON CONFLICT (card_id, external_id) DO NOTHING
+            RETURNING id
+            """
+        ),
+        {
+            "user_id": user_id,
+            "card_id": card_id,
+            "external_id": external_id,
+            "sender": sender,
+            "body": body,
+            "sent_at": sent_at,
+        },
+    ).one_or_none()
+    if added:
+        db.execute(
+            text(
+                "UPDATE cards SET stage = 'chatting', stage_changed_at = now()"
+                " WHERE id = :card_id AND user_id = :user_id AND stage = 'matched'"
+            ),
+            {"card_id": card_id, "user_id": user_id},
+        )
 
 
 class CardChanges(BaseModel):
