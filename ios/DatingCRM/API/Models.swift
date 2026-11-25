@@ -49,6 +49,17 @@ struct Message: Codable, Identifiable, Hashable {
     var body: String
 }
 
+/// One week on the dashboard. `week` is local midnight of the Monday it starts on.
+struct DashboardWeek: Codable, Identifiable, Equatable {
+    var week: Date
+    var goodDates: Int
+    var hours: Double
+    /// nil when no time was recorded that week.
+    var goodDatesPerHour: Double?
+
+    var id: Date { week }
+}
+
 /// A message Claude wrote for a card. `original` is Claude's text; `edited` is the user's version of it.
 struct Draft: Codable, Identifiable, Hashable {
     enum Kind: String, Codable { case opener, reply }
@@ -80,6 +91,26 @@ struct Inference: Codable, Identifiable, Hashable {
     var title: String {
         let words = kind.replacing("_", with: " ")
         return words.prefix(1).uppercased() + words.dropFirst()
+    }
+}
+
+/// One thing that waits for the user's review. `kind` is `draft` so far; the server adds more kinds later.
+struct QueueItem: Codable, Identifiable, Hashable {
+    var kind: String
+    /// A hot lead: the server pushed it at once.
+    var hot: Bool
+    var cardID: Int
+    var cardName: String
+    /// Set when `kind` is `draft`.
+    var draft: Draft?
+
+    var id: String { "\(kind)-\(draft?.id ?? cardID)" }
+
+    // The key strategy turns `card_id` into `cardId`.
+    enum CodingKeys: String, CodingKey {
+        case kind, hot, draft
+        case cardID = "cardId"
+        case cardName
     }
 }
 

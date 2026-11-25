@@ -1,7 +1,7 @@
 """create card_photos and inferences tables, add the protected-trait opt-in
 
-Revision ID: 0016_match_read
-Revises: 0015_devices
+Revision ID: 0019_match_read
+Revises: 0018_jev_checks
 """
 
 import sqlalchemy as sa
@@ -9,8 +9,8 @@ from alembic import op
 
 from app.tenancy import user_id_column
 
-revision = "0016_match_read"
-down_revision = "0015_devices"
+revision = "0019_match_read"
+down_revision = "0018_jev_checks"
 branch_labels = None
 depends_on = None
 

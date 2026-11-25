@@ -24,6 +24,8 @@ def test_a_card_with_no_messages_gets_an_opener_written_from_the_style_profile(a
         "status": "pending",
         "original": "is biscuit accepting visitors",
         "edited": None,
+        "guardrail": [],
+        "hot_lead": False,
     }
     prompt = llm.prompts[-1]
     assert "opener" in prompt
