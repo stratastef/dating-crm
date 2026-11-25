@@ -25,6 +25,20 @@ CHECKS: dict[str, str] = {
         " health condition, sexual orientation, gender identity, age or national origin."
     ),
     "overpromise": "The sentence promises something the writer cannot be sure to keep, or guarantees an outcome.",
+    "plays_on_insecurity": (
+        "The sentence plays on the reader's insecurities, fears or weak spots to persuade or pressure them."
+    ),
+    # Match read, on each inference Claude replies. They do not trust the labels Claude gives its own inference.
+    "about_other_person": (
+        "The sentence describes what a person other than the dating match is like or who they are: a friend,"
+        " relative or stranger. Only saying that other people are present does not count."
+    ),
+    "guesses_protected_trait": (
+        "The sentence states or guesses a person's ethnicity, religion, health, sexuality or politics."
+    ),
+    "targets_insecurity": (
+        "The sentence names a person's insecurity, fear or weak spot, or a way to pressure or manipulate them."
+    ),
     # Handover trigger, on incoming messages.
     "asks_if_ai": "The sentence asks or suspects that the reader is a bot or an AI.",
     "logistics": "The sentence is about a commitment or logistics: a time, a place to meet, or exclusivity.",
@@ -41,7 +55,8 @@ CHECKS: dict[str, str] = {
     "hot_lead": "The sentence shows the chat is about to turn into a date, so a reply should go out right away.",
 }
 
-GUARDRAIL = ("denies_ai", "protected_trait", "overpromise")
+GUARDRAIL = ("denies_ai", "protected_trait", "overpromise", "plays_on_insecurity")
+READ = ("about_other_person", "guesses_protected_trait", "targets_insecurity")
 HANDOVER = ("asks_if_ai", "logistics", "place_or_exclusivity", "personal_info", "sensitive")
 
 # What a guardrail or handover result holds when Jev could not be asked. It counts as a hit.
@@ -120,6 +135,14 @@ def handover_hits(message: str) -> list[str]:
     `["unavailable"]` when Jev could not be asked, so the chat is handed over.
     """
     return _hits(message, HANDOVER)
+
+
+def read_hits(inference: str) -> list[str]:
+    """Limits of the match read for one inference (its value and evidence): the checks of `READ` it hits.
+
+    `["unavailable"]` when Jev could not be asked, so the inference is dropped.
+    """
+    return _hits(inference, READ)
 
 
 def names_logistics(message: str) -> bool:

@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import Connection, text
 
-from app import llm
+from app import jev, llm
 from app.auth import CurrentUser, Db
 
 router = APIRouter()
@@ -95,6 +95,14 @@ def _allowed(item: object, opted_in: bool) -> _Inferred | None:
         return None
     if inferred.kind not in KINDS | PROTECTED:
         return None
+    # The labels above are Claude's own. Jev judges the text itself; when it cannot, the inference is dropped.
+    hits = set(jev.read_hits(f"{inferred.value}\n{inferred.evidence}"))
+    if hits - {"guesses_protected_trait"}:
+        return None
+    if hits and not inferred.protected_trait:
+        if not opted_in:
+            return None
+        inferred.protected_trait = "unlabelled"  # stored as protected, so opting out hides it
     return inferred
 
 
