@@ -143,8 +143,7 @@ def write_profile(db: Connection, user_id: int, payload: dict) -> None:
             "</my_messages>",
         ]
     )
-    # `llm.complete` is looked up on the module at call time so tests can replace it.
-    profile = llm.complete(_SYSTEM, prompt).text
+    profile = llm.call(db, user_id, "voice_profile", _SYSTEM, prompt).text
     db.execute(
         text(
             """

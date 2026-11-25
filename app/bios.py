@@ -48,8 +48,7 @@ def rewrite(app: str, current: Bio, user: CurrentUser, db: Db):
     )
     # shortcut: Claude is called inside the request, which holds a database connection meanwhile. Move
     # to a job if rewrites get slow or many users rewrite at once.
-    # `llm.complete` is looked up on the module at call time so tests can replace it.
-    reply = llm.complete(_SYSTEM, prompt).text
+    reply = llm.call(db, user.id, "bio_rewrite", _SYSTEM, prompt).text
     try:
         return Bio.model_validate_json(reply)
     except ValidationError:
