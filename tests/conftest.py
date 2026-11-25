@@ -4,6 +4,8 @@ import sys
 import uuid
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, make_url, text
 
@@ -80,4 +82,39 @@ def llm(monkeypatch):
     """Every test gets the stub, so no test can call the real Claude API."""
     stub = StubLlm()
     monkeypatch.setattr("app.llm.complete", stub)
+    return stub
+
+
+class StubApns:
+    """Stands in for `app.push.post`, the one function that calls Apple. `sent` records each push.
+
+    A device token listed in `answers` gets that `(status, reason)`; the rest get `(200, "")`.
+    """
+
+    def __init__(self):
+        self.sent: list[dict] = []
+        self.answers: dict[str, tuple[int, str]] = {}
+
+    def __call__(self, url: str, headers: dict, payload: dict) -> tuple[int, str]:
+        self.sent.append({"url": url, "headers": headers, "payload": payload})
+        return self.answers.get(url.rsplit("/", 1)[-1], (200, ""))
+
+
+APNS_KEY = ec.generate_private_key(ec.SECP256R1())
+
+
+@pytest.fixture(autouse=True)
+def apns(monkeypatch):
+    """Every test gets the stub and a throwaway APNs key, so no test can call Apple."""
+    pem = APNS_KEY.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+    )
+    monkeypatch.setenv("APNS_KEY", pem.decode())
+    monkeypatch.setenv("APNS_KEY_ID", "KEY1234567")
+    monkeypatch.setenv("APNS_TEAM_ID", "TEAM123456")
+    monkeypatch.setenv("APNS_BUNDLE_ID", "com.datingcrm.app")
+    monkeypatch.delenv("APNS_SANDBOX", raising=False)
+    stub = StubApns()
+    stub.key = APNS_KEY  # for checking the signature of a push
+    monkeypatch.setattr("app.push.post", stub)
     return stub
