@@ -1,14 +1,14 @@
 """AI disclosure setting
 
-Revision ID: 0024_ai_disclosure
-Revises: 0023_purge
+Revision ID: 0025_ai_disclosure
+Revises: 0024_swipe_candidates
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0024_ai_disclosure"
-down_revision = "0023_purge"
+revision = "0025_ai_disclosure"
+down_revision = "0024_swipe_candidates"
 branch_labels = None
 depends_on = None
 

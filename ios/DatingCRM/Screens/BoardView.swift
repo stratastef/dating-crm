@@ -37,6 +37,7 @@ struct BoardView: View {
             }
             .toolbar {
                 NavigationLink("Review") { QueueView(client: client) }
+                NavigationLink("Swipe") { SwipeView(client: client) }
                 NavigationLink("Dashboard") { DashboardView(client: client) }
                 NavigationLink("Preferences") { PreferencesView(client: client) }
                 NavigationLink("Photos") { PhotosView(client: client) }

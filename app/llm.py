@@ -45,15 +45,20 @@ def _source(image: str | tuple[str, bytes]) -> dict:
 
 
 def complete(
-    system: str, prompt: str, max_tokens: int = 16000, images: Sequence[str | tuple[str, bytes]] = ()
+    system: str,
+    prompt: str,
+    max_tokens: int = 16000,
+    images: Sequence[str | tuple[str, bytes]] = (),
+    model: str | None = None,
 ) -> Completion:
     """Send one prompt to Claude and return its text and token usage. Claude sees `images` before the prompt.
 
     An image is a URL Claude fetches, or `(media_type, data)` such as `("image/png", b"...")` to send the picture.
-    The model is `ANTHROPIC_MODEL` (default `claude-fable-5-2`); the key is read from `ANTHROPIC_API_KEY`.
+    The model is `model`, else `ANTHROPIC_MODEL` (default `claude-fable-5-2`); the key is read from
+    `ANTHROPIC_API_KEY`.
     """
     message = anthropic.Anthropic().messages.create(
-        model=os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL),
+        model=model or os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL),
         max_tokens=max_tokens,
         system=system,
         messages=[
@@ -85,11 +90,12 @@ def call(
     prompt: str,
     max_tokens: int = 16000,
     images: Sequence[str | tuple[str, bytes]] = (),
+    model: str | None = None,
 ) -> Completion:
     """Send one prompt to Claude for a user and record what the call cost. Every feature calls Claude through this.
 
     `purpose` names the feature, for example `draft`. `images` are images to show Claude: URLs, or
-    `(media_type, data)` pairs. Raises `BudgetReached`, without calling Claude, while the user's spend this
+    `(media_type, data)` pairs. `model` picks a model other than the default. Raises `BudgetReached`, without calling Claude, while the user's spend this
     month is at their cap. The call that reaches the cap sends the user a push.
     """
     # shortcut: two calls at the same moment can both pass this check, so spend can pass the cap by the cost
@@ -97,7 +103,8 @@ def call(
     if budget_reached(db, user_id):
         raise BudgetReached("AI budget reached")
     # `complete` is looked up at call time so tests can replace it with a stub.
-    completion = complete(system, prompt, max_tokens, images)
+    # `model` is passed only when set, so a stub that does not take it still works.
+    completion = complete(system, prompt, max_tokens, images, **({"model": model} if model else {}))
     # A model missing from the table is charged at the default model's price, so its cost is never zero.
     # shortcut: cache reads and writes are not priced apart, add them when a caller turns on prompt caching.
     input_price, output_price = PRICES.get(completion.model, PRICES[DEFAULT_MODEL])

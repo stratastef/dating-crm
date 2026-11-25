@@ -127,6 +127,25 @@ struct QueueItem: Codable, Identifiable, Hashable {
     }
 }
 
+enum Swipe: String, Codable {
+    case like, pass
+
+    var title: String { self == .like ? "Like" : "Pass" }
+}
+
+/// A profile a dating app offers to swipe on, with the server's suggestion. The user decides.
+struct SwipeCandidate: Codable, Identifiable, Hashable {
+    let id: Int
+    var app: String
+    var name: String
+    var bio: String
+    var photos: [URL]
+    var suggestion: Swipe
+    var reason: String
+    /// Which pre-filter suggested: `jev` or `model`.
+    var source: String
+}
+
 /// What the user wants: wishes in plain words, plus must-haves and dealbreakers.
 struct Preferences: Codable, Equatable {
     var wishes = ""
