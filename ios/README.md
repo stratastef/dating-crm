@@ -10,7 +10,7 @@ The SwiftUI client for the API in the repo root. It needs Xcode 27 and an iOS 18
 | `DatingCRM/DatingCRMApp.swift` | App entry: shows `SignInView` or `BoardView`, depending on `Session`. |
 | `DatingCRM/Session.swift` | Sign-in state. Keeps the server URL in `UserDefaults` and the API token in the Keychain. |
 | `DatingCRM/API/APIClient.swift` | Every call to the server. |
-| `DatingCRM/API/Models.swift` | `Stage`, `Card`, `Message`: the JSON the server sends. |
+| `DatingCRM/API/Models.swift` | `Stage`, `Card`, `Message`, `Preferences`: the JSON the server sends. |
 | `DatingCRM/Screens/` | One file per screen. |
 | `DatingCRMTests/` | Unit tests (Swift Testing). `StubServer` stands in for the server. |
 | `Info.plist` | Only the keys that build settings cannot express. The rest of the Info.plist is generated. |

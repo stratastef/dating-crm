@@ -131,3 +131,28 @@ def test_every_pipeline_stage_is_accepted_and_nothing_else(client):
     assert client.patch(f"/cards/{card_id}", json={"stage": "stalled"}).status_code == 422
     assert client.post("/cards", json={"app": "hinge", "name": "Kim", "stage": "ghosted"}).status_code == 422
     assert client.post("/cards", json={"app": "hinge", "name": "Kim", "stage": "dated"}).json()["stage"] == "dated"
+
+
+def test_a_dated_card_keeps_its_rating_and_note(client):
+    card_id = client.post("/cards", json={"app": "tinder", "name": "Sam", "stage": "date_set"}).json()["id"]
+    assert client.get(f"/cards/{card_id}").json()["date_rating"] is None
+
+    rated = client.patch(f"/cards/{card_id}", json={"stage": "dated", "date_rating": 4, "date_note": "easy to talk to"})
+
+    assert rated.status_code == 200
+    card = client.get(f"/cards/{card_id}").json()
+    assert card["stage"] == "dated"
+    assert card["date_rating"] == 4
+    assert card["date_note"] == "easy to talk to"
+    assert client.patch(f"/cards/{card_id}", json={"date_rating": 0}).status_code == 422
+    assert client.patch(f"/cards/{card_id}", json={"date_rating": 6}).status_code == 422
+
+
+def test_a_good_date_is_a_rating_of_4_or_5(client):
+    card_id = client.post("/cards", json={"app": "tinder", "name": "Sam", "stage": "dated"}).json()["id"]
+
+    def good_date(rating):
+        return client.patch(f"/cards/{card_id}", json={"date_rating": rating}).json()["good_date"]
+
+    assert client.get(f"/cards/{card_id}").json()["good_date"] is False
+    assert [good_date(rating) for rating in (1, 2, 3, 4, 5)] == [False, False, False, True, True]

@@ -4,6 +4,7 @@ import sys
 import uuid
 
 import pytest
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, make_url, text
 
@@ -33,6 +34,11 @@ def database():
         with admin.connect() as connection:
             connection.execute(text(f'DROP DATABASE "{name}" WITH (FORCE)'))
         admin.dispose()
+
+
+@pytest.fixture(autouse=True)
+def master_key(monkeypatch):
+    monkeypatch.setenv("TOKEN_VAULT_MASTER_KEY", Fernet.generate_key().decode())
 
 
 @pytest.fixture
