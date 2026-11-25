@@ -551,6 +551,32 @@ def test_the_first_unattended_message_to_a_match_discloses_the_ai_by_default(app
     assert second == REPLY
 
 
+def test_the_card_says_whether_the_ai_was_disclosed_to_the_match(app, client, card_id, tinder):  # noqa: F811
+    autonomy(client, "guardrails")
+    assert client.get(f"/cards/{card_id}").json()["ai_disclosed"] is False
+
+    incoming(client, card_id)
+    work(app)
+
+    assert client.get(f"/cards/{card_id}").json()["ai_disclosed"] is True
+
+
+def test_a_match_who_got_undisclosed_replies_is_told_once_the_disclosure_is_turned_on(
+    app, client, card_id, tinder  # noqa: F811
+):
+    client.put("/settings/ai-disclosure", json={"enabled": False})
+    autonomy(client, "guardrails")
+    incoming(client, card_id)
+    work(app)
+    assert client.get(f"/cards/{card_id}").json()["ai_disclosed"] is False
+
+    client.put("/settings/ai-disclosure", json={"enabled": True})
+    incoming(client, card_id, "and bouldering?")
+    work(app)
+
+    assert DISCLOSURE not in sent(tinder)[0] and DISCLOSURE in sent(tinder)[1]
+
+
 def test_the_disclosure_is_checked_by_the_guardrail_like_the_rest_of_the_message(
     app, client, card_id, tinder, jev  # noqa: F811
 ):

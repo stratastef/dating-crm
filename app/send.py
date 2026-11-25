@@ -16,6 +16,10 @@ from app.sync import CONNECTORS
 router = APIRouter()
 
 
+# Chat autopilot adds this sentence to the first message it sends alone to a match while the user's AI
+# disclosure is on (`app/chat_autopilot.py`). Sending a message that carries it sets `cards.ai_disclosed`.
+DISCLOSURE = "Heads up: an AI assistant helps me write my messages here."
+
 # The stages in which autopilot chats. From Number swapped on the user texts off the app.
 CHAT_STAGES = ("matched", "chatting")
 
@@ -178,6 +182,12 @@ def send_draft(db: Connection, user_id: int, payload: dict) -> None:
     except CapabilityFailed:
         return finish("failed")  # no retry: the message may have reached the app before the error
     upsert_message(db, user_id, draft.card_id, sent["id"], "me", draft.body, sent["sent_at"])
+    if DISCLOSURE in draft.body:
+        # Whoever sent it, the match has now been told: chat autopilot does not add the sentence again.
+        db.execute(
+            text("UPDATE cards SET ai_disclosed = true WHERE id = :id AND user_id = :user_id"),
+            {"id": draft.card_id, "user_id": user_id},
+        )
     record_action(
         db, user_id, type="message", app=draft.app, target=f"card:{draft.card_id}", trigger=payload["trigger"]
     )
