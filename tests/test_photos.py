@@ -137,6 +137,9 @@ def test_an_accepted_edit_is_applied_to_the_photo_and_the_offer_is_gone(client, 
     assert accepted.json()["edit"] == LEFT_HALF and accepted.json()["suggested_edit"] is None
     assert Image.open(io.BytesIO(client.get(f"/photos/{photo_id}/image").content)).size == (20, 20)
     assert client.get(f"/photos/{photo_id}/preview").status_code == 404
+    (entry,) = client.get("/audit-log").json()
+    assert (entry["type"], entry["app"], entry["target"]) == ("profile_change", "all", f"photo:{photo_id}")
+    assert entry["trigger"] == "copilot: user accepted a photo edit"
 
 
 def test_a_rejected_edit_leaves_the_photo_as_uploaded(client, llm):
@@ -144,6 +147,7 @@ def test_a_rejected_edit_leaves_the_photo_as_uploaded(client, llm):
 
     rejected = client.put(f"/photos/{photo_id}/edit", json={"accept": False})
 
+    assert client.get("/audit-log").json() == []
     assert rejected.json()["edit"] is None and rejected.json()["suggested_edit"] is None
     assert client.get(f"/photos/{photo_id}/image").content == png(red_and_blue())
 

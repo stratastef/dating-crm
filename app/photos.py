@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, TypeAdapter, ValidationError, field_valid
 from sqlalchemy import text
 
 from app import llm
+from app.audit import record_action
 from app.auth import CurrentUser, Db
 
 router = APIRouter()
@@ -237,4 +238,14 @@ def decide(photo_id: int, decision: Decision, user: CurrentUser, db: Db):
     ).one_or_none()
     if not photo:
         raise HTTPException(status_code=404, detail="no edit on offer for this photo")
+    if decision.accept:
+        # A photo belongs to no one dating app, so the entry's app is `all`.
+        record_action(
+            db,
+            user.id,
+            type="profile_change",
+            app="all",
+            target=f"photo:{photo_id}",
+            trigger="copilot: user accepted a photo edit",
+        )
     return photo

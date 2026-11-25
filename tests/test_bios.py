@@ -56,6 +56,14 @@ def test_the_accepted_version_is_stored_per_app_and_per_user(client_for):
     assert bob.get("/bios/hinge").json() == {"bio": "", "prompts": {}}
 
 
+def test_accepting_a_bio_is_recorded_in_the_audit_log_without_its_text(client):
+    client.put("/bios/hinge", json={"bio": "climbs things.", "prompts": {}})
+
+    (entry,) = client.get("/audit-log").json()
+    assert (entry["type"], entry["app"], entry["target"]) == ("profile_change", "hinge", "bio")
+    assert entry["trigger"] == "copilot: user accepted a bio"
+
+
 def test_a_rewrite_needs_a_style_profile(client, llm):
     rewrite = client.post("/bios/hinge/rewrite", json={"bio": "I like climbing."})
 

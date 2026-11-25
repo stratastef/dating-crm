@@ -199,7 +199,8 @@ Routes are in `app/bios.py`; the table is `bios` (one row per user and app). A b
 
 - To regenerate, call the rewrite route again. To regenerate from an edit, send the edited text as the body.
 - The rewrite route returns `409` until the style profile is written, and `502` if Claude's reply is not a bio; the client can retry.
-- Nothing is written to a dating app: in copilot the user copies the accepted text.
+- Nothing is written to a dating app: in copilot the user copies the accepted text. Profile autopilot (the app changing a bio or photos in a dating app itself) is not built: no connector has a capability for it.
+- `PUT /bios/{app}` writes an audit log entry: type `profile_change`, that app, target `bio`, trigger `copilot: user accepted a bio`. The text is not in the log.
 
 ## Photos
 
@@ -220,6 +221,7 @@ Routes are in `app/photos.py`; the table is `photos` (one row per photo). A phot
 - Claude is called with the photos through `llm.call(..., images=[(content_type, data)])`. Each photo is sent scaled down to 1024 pixels a side.
 - The rank route returns `409` when the user has no photos, and `502` when Claude's reply does not rank exactly the user's photos or holds an edit outside the limits; nothing is stored then.
 - Nothing is uploaded to a dating app and nothing rotates photos: the user saves the photo they want and changes their profile themselves.
+- Accepting an edit writes an audit log entry: type `profile_change`, app `all` (a photo belongs to no one dating app), target `photo:<photos.id>`, trigger `copilot: user accepted a photo edit`. Rejecting writes none.
 - Not built: deleting a photo.
 
 ## Drafts
