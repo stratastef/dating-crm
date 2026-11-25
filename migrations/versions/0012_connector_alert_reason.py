@@ -1,14 +1,14 @@
 """add reason to connector_alerts
 
-Revision ID: 0011_alert_reason
-Revises: 0010_bios
+Revision ID: 0012_alert_reason
+Revises: 0011_preferences
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0011_alert_reason"
-down_revision = "0010_bios"
+revision = "0012_alert_reason"
+down_revision = "0011_preferences"
 branch_labels = None
 depends_on = None
 
