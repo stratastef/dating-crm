@@ -9,6 +9,8 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/main.py` | FastAPI app factory `create_app()` |
 | `app/worker.py` | Worker process entry point |
 | `app/db.py` | `database_url()`, read from `DATABASE_URL` |
+| `app/auth.py` | `CurrentUser` and `Db` route dependencies, `create_user()` |
+| `app/tenancy.py` | `user_id_column()` for tenant tables |
 | `migrations/versions/` | Alembic migrations |
 | `tests/` | pytest suite |
 | `compose.yaml` | `db`, `api` and `worker` services |
@@ -29,19 +31,49 @@ If port 5432 or 8000 is taken, set `DB_PORT` or `API_PORT`, for example `DB_PORT
 
 ## Run the tests
 
-The tests need a real Postgres. They use `DATABASE_URL`, which defaults to the Compose database on `localhost:5432`.
+The tests need a real Postgres server. They reach it through `DATABASE_URL`, which defaults to the Compose database on `localhost:5432`.
 
 ```sh
 docker compose up -d --wait db
 uv run pytest
 ```
 
-The tests share the local development database. Tests that write data must clean up after themselves.
+Each test run creates its own database (`test_<random>`) on that server, migrates it to head and drops it at the end. The development database is not touched, and runs from several worktrees can share one server. If you start a second Compose stack from another worktree, give it its own port and point the tests at it: `DB_PORT=5433 docker compose up -d --wait db`, then `DATABASE_URL=postgresql+psycopg://app:app@localhost:5433/app uv run pytest`. Compose names containers after the directory, so worktrees do not clash on container names.
+
+Fixtures in `tests/conftest.py`:
+
+| Fixture | Gives you |
+| --- | --- |
+| `client` | `TestClient` authenticated as a fresh user. All tables are emptied after each test. |
+| `client_for(email)` | Same, for a named user. Use it when a test needs two users. |
+| `app` | The FastAPI app, for unauthenticated requests: `TestClient(app)`. |
+
+## Authentication and tenancy
+
+Each user has one opaque API token. The client sends `Authorization: Bearer <token>`. Only the SHA-256 of the token is stored. Create a user and print their token once:
+
+```sh
+uv run python -m app.auth you@example.com
+```
+
+In a route, declare `user: CurrentUser` and `db: Db` (both from `app.auth`). `CurrentUser` rejects the request with `401` unless the token is valid. `Db` is a SQLAlchemy connection in one transaction per request.
+
+```python
+@app.get("/matches")
+def matches(user: CurrentUser, db: Db):
+    return db.execute(text("SELECT ... FROM matches WHERE user_id = :user_id"), {"user_id": user.id})
+```
+
+Every table except `users` is a tenant table. Declare its owner with `user_id_column()` from `app.tenancy` in the migration, and filter every query by `user.id`. A test fails if a table has no `user_id` column.
+
+```python
+op.create_table("matches", sa.Column("id", sa.BigInteger, sa.Identity(), primary_key=True), user_id_column(), ...)
+```
 
 ## Add a migration
 
 ```sh
-uv run alembic revision -m "create users table"   # writes a file in migrations/versions/
+uv run alembic revision -m "create matches table"  # writes a file in migrations/versions/
 uv run alembic upgrade head                        # applies it to DATABASE_URL
 ```
 
