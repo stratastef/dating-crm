@@ -9,7 +9,7 @@ from app.push import send_push
 
 router = APIRouter()
 
-_DRAFT_COLUMNS = ("id", "card_id", "kind", "status", "original", "edited")
+_DRAFT_COLUMNS = ("id", "card_id", "kind", "status", "original", "edited", "guardrail", "hot_lead")
 
 
 class Draft(BaseModel):
@@ -21,6 +21,8 @@ class Draft(BaseModel):
     status: str
     original: str
     edited: str | None
+    guardrail: list[str] | None
+    hot_lead: bool
 
 
 class QueueItem(BaseModel):
@@ -32,7 +34,8 @@ class QueueItem(BaseModel):
 
 
 def is_hot_lead(db: Connection, card_id: int) -> bool:
-    """The only definition of a hot lead. So far: the match replied within the last hour.
+    """The only definition of a hot lead. So far: the match replied within the last hour, or Jev's hot-lead
+    triage flagged a pending draft of the card (`drafts.hot_lead`, see `app/jev.py`).
 
     Date coordination and handovers are also hot (see the spec); add those signals here.
     """
@@ -40,6 +43,7 @@ def is_hot_lead(db: Connection, card_id: int) -> bool:
         text(
             "SELECT EXISTS (SELECT 1 FROM messages WHERE card_id = :card_id AND sender = 'them'"
             " AND sent_at > now() - interval '1 hour')"
+            " OR EXISTS (SELECT 1 FROM drafts WHERE card_id = :card_id AND status = 'pending' AND hot_lead)"
         ),
         {"card_id": card_id},
     ).scalar_one()
