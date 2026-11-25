@@ -1,5 +1,6 @@
 """The one place that calls Claude. Features call `llm.call(...)`, which records what each call cost."""
 
+import base64
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -35,9 +36,20 @@ class Completion:
     output_tokens: int
 
 
-def complete(system: str, prompt: str, max_tokens: int = 16000, images: Sequence[str] = ()) -> Completion:
-    """Send one prompt to Claude and return its text and token usage. `images` are URLs Claude fetches and sees.
+def _source(image: str | tuple[str, bytes]) -> dict:
+    """The API's `source` for an image: a URL, or the bytes in base64."""
+    if isinstance(image, str):
+        return {"type": "url", "url": image}
+    media_type, data = image
+    return {"type": "base64", "media_type": media_type, "data": base64.standard_b64encode(data).decode()}
 
+
+def complete(
+    system: str, prompt: str, max_tokens: int = 16000, images: Sequence[str | tuple[str, bytes]] = ()
+) -> Completion:
+    """Send one prompt to Claude and return its text and token usage. Claude sees `images` before the prompt.
+
+    An image is a URL Claude fetches, or `(media_type, data)` such as `("image/png", b"...")` to send the picture.
     The model is `ANTHROPIC_MODEL` (default `claude-fable-5-2`); the key is read from `ANTHROPIC_API_KEY`.
     """
     message = anthropic.Anthropic().messages.create(
@@ -48,7 +60,7 @@ def complete(system: str, prompt: str, max_tokens: int = 16000, images: Sequence
             {
                 "role": "user",
                 "content": [
-                    *({"type": "image", "source": {"type": "url", "url": url}} for url in images),
+                    *({"type": "image", "source": _source(image)} for image in images),
                     {"type": "text", "text": prompt},
                 ],
             }
@@ -72,13 +84,13 @@ def call(
     system: str,
     prompt: str,
     max_tokens: int = 16000,
-    images: Sequence[str] = (),
+    images: Sequence[str | tuple[str, bytes]] = (),
 ) -> Completion:
     """Send one prompt to Claude for a user and record what the call cost. Every feature calls Claude through this.
 
-    `purpose` names the feature, for example `draft`. `images` are URLs of images to show Claude. Raises
-    `BudgetReached`, without calling Claude, while the user's spend this month is at their cap. The call that
-    reaches the cap sends the user a push.
+    `purpose` names the feature, for example `draft`. `images` are images to show Claude: URLs, or
+    `(media_type, data)` pairs. Raises `BudgetReached`, without calling Claude, while the user's spend this
+    month is at their cap. The call that reaches the cap sends the user a push.
     """
     # shortcut: two calls at the same moment can both pass this check, so spend can pass the cap by the cost
     # of the calls in flight. Lock the user row here if that ever matters.
