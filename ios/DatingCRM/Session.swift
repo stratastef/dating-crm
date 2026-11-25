@@ -10,6 +10,10 @@ enum SignInError: LocalizedError {
 
 /// Who is signed in. `client` is nil until the user signs in, and is restored on launch.
 /// The server URL is kept in `UserDefaults`; the API token only in the Keychain.
+///
+/// The share extension reads the same session. The URL is in the App Group's defaults. The token needs no
+/// code: both targets list the same Keychain access group first in their entitlements, which makes it the
+/// group a new item is stored in.
 @Observable final class Session {
     private(set) var client: APIClient?
 
@@ -18,7 +22,7 @@ enum SignInError: LocalizedError {
     private let transport: APIClient.Transport?
     private let serverURLKey = "serverURL"
 
-    init(keychainService: String = "DatingCRM", defaults: UserDefaults = .standard, transport: APIClient.Transport? = nil) {
+    init(keychainService: String = "DatingCRM", defaults: UserDefaults = .appGroup, transport: APIClient.Transport? = nil) {
         self.keychainService = keychainService
         self.defaults = defaults
         self.transport = transport
@@ -72,5 +76,12 @@ enum SignInError: LocalizedError {
             kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlock,
         ]) { $1 }
         SecItemAdd(item as CFDictionary, nil)
+    }
+}
+
+extension UserDefaults {
+    /// The defaults the app and its share extension share: those of the App Group named by `AppGroup` in Info.plist.
+    static var appGroup: UserDefaults {
+        (Bundle.main.object(forInfoDictionaryKey: "AppGroup") as? String).flatMap(UserDefaults.init(suiteName:)) ?? .standard
     }
 }

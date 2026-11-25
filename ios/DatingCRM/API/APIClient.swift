@@ -41,6 +41,11 @@ struct APIClient {
         try await send("PATCH", "drafts/\(draftID)", body: Self.encoder.encode(["edited": text]))
     }
 
+    /// Has the server read a screenshot of a chat or profile into the match's card, and returns a draft for it.
+    func importScreenshot(jpeg: Data) async throws -> Draft {
+        try Self.decoder.decode(Draft.self, from: await data("POST", "screenshots", body: jpeg, contentType: "image/jpeg"))
+    }
+
     func card(id: Int) async throws -> Card {
         try await send("GET", "cards/\(id)")
     }
@@ -76,13 +81,15 @@ struct APIClient {
 
     /// For routes that answer with no body, call this instead of `send`.
     @discardableResult
-    private func data(_ method: String, _ path: String, body: Data? = nil) async throws -> Data {
+    private func data(
+        _ method: String, _ path: String, body: Data? = nil, contentType: String = "application/json"
+    ) async throws -> Data {
         var request = URLRequest(url: baseURL.appending(path: path))
         request.httpMethod = method
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         if let body {
             request.httpBody = body
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
         let (data, response) = try await transport(request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
