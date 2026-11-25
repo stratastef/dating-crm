@@ -1,5 +1,5 @@
-"""Tinder connector: reads the account owner's own matches, messages and candidates, sends messages, and likes
-and passes, with their web session token.
+"""Tinder connector: reads the account owner's own matches, messages and candidates, sends messages, likes and
+passes, and spends a Super Like or Boost the account holds, with their web session token.
 
 The API is unofficial. The request and response shapes here follow public write-ups of the web client and are
 not confirmed against a real account: see "Tinder connector" in the README for the list of assumptions.
@@ -16,7 +16,9 @@ PAGE_SIZE = 60
 
 class TinderConnector(Connector):
     app = "tinder"
-    capabilities = frozenset({"read_matches", "read_messages", "send", "read_candidates", "like", "pass"})
+    capabilities = frozenset(
+        {"read_matches", "read_messages", "send", "read_candidates", "like", "pass", "super_like", "boost"}
+    )
 
     transport: httpx.BaseTransport | None = None  # tests put a stub here; None is the real network
 
@@ -85,8 +87,22 @@ class TinderConnector(Connector):
             ]
 
     def like(self, token: str, profile_id: str) -> None:
-        """A free like. Paid items (Super Like, Boost) have their own endpoints and are never used here."""
+        """A free like. Paid items (Super Like, Boost) have their own endpoints and methods, below."""
         self._swipe(token, "like", profile_id)
+
+    def super_like(self, token: str, profile_id: str) -> bool:
+        """Spend one Super Like the account holds on a profile. False when it holds none; nothing is bought."""
+        return self._spend(token, f"/like/{profile_id}/super")
+
+    def boost(self, token: str) -> bool:
+        """Start one Boost the account holds. False when it holds none; nothing is bought."""
+        return self._spend(token, "/boost")
+
+    def _spend(self, token: str, path: str) -> bool:
+        with self._client(token) as client:
+            response = client.post(path)
+            response.raise_for_status()
+            return not response.json().get("limit_exceeded")
 
     def pass_(self, token: str, profile_id: str) -> None:
         self._swipe(token, "pass", profile_id)

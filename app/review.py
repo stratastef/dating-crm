@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import Connection, text
 
+from app import paid_items
 from app.auth import CurrentUser, Db
 from app.push import send_push
 
@@ -26,12 +27,13 @@ class Draft(BaseModel):
 
 
 class QueueItem(BaseModel):
-    kind: str  # `draft` or `handover`; paid-item approvals join later with their own kind
+    kind: str  # `draft`, `handover` or `paid_item`
     hot: bool
-    card_id: int
+    card_id: int | None  # null when `kind` is `paid_item`: a swipe candidate is not a card
     card_name: str
     draft: Draft | None  # set when `kind` is `draft`
     suggestions: list[str] | None = None  # set when `kind` is `handover`: the suggested replies
+    paid_item: paid_items.Proposal | None = None  # set when `kind` is `paid_item`
 
 
 def is_hot_lead(db: Connection, card_id: int) -> bool:
@@ -110,6 +112,11 @@ def queue(user: CurrentUser, db: Db):
             suggestions=row.handover_suggestions,
         )
         for row in handovers
+    ] + items
+    # Paid items are never hot, so they come after the hot leads.
+    items = [
+        QueueItem(kind="paid_item", hot=False, card_id=None, card_name=row.name, draft=None, paid_item=row._mapping)
+        for row in paid_items.waiting(db, user.id)
     ] + items
     return sorted(items, key=lambda item: not item.hot)  # stable, so each group stays oldest first
 
