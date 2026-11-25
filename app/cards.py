@@ -140,16 +140,19 @@ def upsert_card(db: Connection, user_id: int, app: str, external_id: str, name: 
     ).scalar_one()
 
 
-def has_message(db: Connection, card_id: int, external_id: str) -> bool:
+def has_message(db: Connection, user_id: int, card_id: int, external_id: str) -> bool:
     return db.execute(
-        text("SELECT EXISTS (SELECT 1 FROM messages WHERE card_id = :card_id AND external_id = :external_id)"),
-        {"card_id": card_id, "external_id": external_id},
+        text(
+            "SELECT EXISTS (SELECT 1 FROM messages"
+            " WHERE card_id = :card_id AND user_id = :user_id AND external_id = :external_id)"
+        ),
+        {"card_id": card_id, "user_id": user_id, "external_id": external_id},
     ).scalar_one()
 
 
 def _queue_reply(db: Connection, user_id: int, card_id: int) -> None:
     """Call after each new message from the match: chat autopilot answers it, if it may act (`app/chat_autopilot.py`)."""
-    app = db.execute(text("SELECT app FROM cards WHERE id = :id"), {"id": card_id}).scalar_one()
+    app = own_card(db, user_id, card_id).app
     if autopilot_allowed(db, user_id, app, "chat"):
         enqueue(db, user_id, "chat_reply", {"app": app, "card_id": card_id})
 
@@ -313,7 +316,7 @@ def insert_message(
         return None
     if sender == "me":
         queue_profile(db, user_id)
-        handover.answered(db, card_id)
+        handover.answered(db, user_id, card_id)
         return dict(row._mapping)
     # A reply clears Stalled. If it was an old message added late, the next `mark_stalled` run sets the flag again.
     db.execute(

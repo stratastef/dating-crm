@@ -278,7 +278,7 @@ def swipe_autopilot(db: Connection, user_id: int, payload: dict) -> None:
         for candidate in pending(db, user_id, app):
             if left <= 0 or not autopilot_allowed(db, user_id, app, "swipe"):
                 break
-            if paid_items.waits_for_approval(db, candidate.id):
+            if paid_items.waits_for_approval(db, user_id, candidate.id):
                 continue  # a paid item is proposed for this profile: autopilot waits for the user's answer
             decision, source = candidate.suggestion, candidate.source
             if (decision, source) != ("pass", "jev"):
@@ -295,9 +295,9 @@ def swipe_autopilot(db: Connection, user_id: int, payload: dict) -> None:
             db.execute(
                 text(
                     "UPDATE swipe_candidates SET decision = :decision, decided_at = now(), unattended = true"
-                    " WHERE id = :id"
+                    " WHERE id = :id AND user_id = :user_id"
                 ),
-                {"decision": decision, "id": candidate.id},
+                {"decision": decision, "id": candidate.id, "user_id": user_id},
             )
             record_action(
                 db, user_id, type=decision, app=app, target=f"candidate:{candidate.id}", trigger=_TRIGGERS[source]

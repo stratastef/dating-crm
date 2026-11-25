@@ -74,11 +74,14 @@ def waiting(db: Connection, user_id: int) -> list[Row]:
     return list(db.execute(text(f"{_SELECT} WHERE p.user_id = :user_id AND {_WAITS} ORDER BY p.id"), {"user_id": user_id}))
 
 
-def waits_for_approval(db: Connection, candidate_id: int) -> bool:
+def waits_for_approval(db: Connection, user_id: int, candidate_id: int) -> bool:
     """True while a paid item is proposed for this candidate: autopilot leaves the profile to the user."""
     return db.execute(
-        text("SELECT EXISTS (SELECT 1 FROM paid_item_proposals WHERE candidate_id = :id AND status = 'pending')"),
-        {"id": candidate_id},
+        text(
+            "SELECT EXISTS (SELECT 1 FROM paid_item_proposals"
+            " WHERE candidate_id = :id AND user_id = :user_id AND status = 'pending')"
+        ),
+        {"id": candidate_id, "user_id": user_id},
     ).scalar_one()
 
 
@@ -120,12 +123,18 @@ def spend(db: Connection, user_id: int, proposal: Row) -> str:
     except (CapabilityUnavailable, CapabilityFailed):
         spent = False
     if not spent:
-        db.execute(text("UPDATE paid_item_proposals SET status = 'failed' WHERE id = :id"), {"id": claimed.id})
+        db.execute(
+            text("UPDATE paid_item_proposals SET status = 'failed' WHERE id = :id AND user_id = :user_id"),
+            {"id": claimed.id, "user_id": user_id},
+        )
         return "failed"
     # A Super Like or Rose is also the swipe on that profile, and the user's own decision.
     db.execute(
-        text("UPDATE swipe_candidates SET decision = 'like', decided_at = now() WHERE id = :id"),
-        {"id": claimed.candidate_id},
+        text(
+            "UPDATE swipe_candidates SET decision = 'like', decided_at = now()"
+            " WHERE id = :id AND user_id = :user_id"
+        ),
+        {"id": claimed.candidate_id, "user_id": user_id},
     )
     record_action(
         db,
@@ -160,19 +169,21 @@ def _decide(db: Connection, user_id: int, proposal_id: int, status: str) -> Row:
     return row
 
 
-def _read(db: Connection, proposal_id: int) -> Row:
-    return db.execute(text(f"{_SELECT} WHERE p.id = :id"), {"id": proposal_id}).one()
+def _read(db: Connection, user_id: int, proposal_id: int) -> Row:
+    return db.execute(
+        text(f"{_SELECT} WHERE p.id = :id AND p.user_id = :user_id"), {"id": proposal_id, "user_id": user_id}
+    ).one()
 
 
 @router.post("/paid-items/{proposal_id}/approve", response_model=Proposal)
 def approve(proposal_id: int, user: CurrentUser, db: Db):
     """Approve a proposed paid item and spend it now. `status` in the answer is `spent` or `failed`."""
     spend(db, user.id, _decide(db, user.id, proposal_id, "approved"))
-    return _read(db, proposal_id)
+    return _read(db, user.id, proposal_id)
 
 
 @router.post("/paid-items/{proposal_id}/decline", response_model=Proposal)
 def decline(proposal_id: int, user: CurrentUser, db: Db):
     """Decline a proposed paid item. Nothing is spent."""
     _decide(db, user.id, proposal_id, "declined")
-    return _read(db, proposal_id)
+    return _read(db, user.id, proposal_id)

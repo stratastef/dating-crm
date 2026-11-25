@@ -69,24 +69,24 @@ def chat_reply(db: Connection, user_id: int, payload: dict) -> None:
         text("SELECT app, name, stage FROM cards WHERE id = :id AND user_id = :user_id FOR UPDATE"),
         {"id": card_id, "user_id": user_id},
     ).one_or_none()
-    if not card or card.stage not in CHAT_STAGES or handover.is_paused(db, card_id):
+    if not card or card.stage not in CHAT_STAGES or handover.is_paused(db, user_id, card_id):
         return
     newest = db.execute(
         text(
             "SELECT id, sender, body, handover, sent_at > now() - interval '1 day' AS recent FROM messages"
-            " WHERE card_id = :card_id ORDER BY sent_at DESC, id DESC LIMIT 1"
+            " WHERE card_id = :card_id AND user_id = :user_id ORDER BY sent_at DESC, id DESC LIMIT 1"
         ),
-        {"card_id": card_id},
+        {"card_id": card_id, "user_id": user_id},
     ).one_or_none()
     # An old message is not answered alone: a first sync reads whole chats.
     if not newest or newest.sender != "them" or not newest.recent:
         return
     under_way = db.execute(
         text(
-            "SELECT EXISTS (SELECT 1 FROM drafts WHERE card_id = :card_id"
+            "SELECT EXISTS (SELECT 1 FROM drafts WHERE card_id = :card_id AND user_id = :user_id"
             " AND status IN ('pending', 'approved', 'sending'))"
         ),
-        {"card_id": card_id},
+        {"card_id": card_id, "user_id": user_id},
     ).scalar_one()
     if under_way:
         return  # a draft waits for the user or is being sent: a second reply would cross it
@@ -155,8 +155,15 @@ def chat_reply(db: Connection, user_id: int, payload: dict) -> None:
     # The guardrail judges the whole text that would go out, the added sentences included.
     message = " ".join(body)
     db.execute(
-        text("UPDATE drafts SET original = :original, guardrail = :guardrail WHERE id = :id"),
-        {"id": draft.id, "original": message, "guardrail": jev.guardrail_hits(db, user_id, message) + for_user},
+        text(
+            "UPDATE drafts SET original = :original, guardrail = :guardrail WHERE id = :id AND user_id = :user_id"
+        ),
+        {
+            "id": draft.id,
+            "user_id": user_id,
+            "original": message,
+            "guardrail": jev.guardrail_hits(db, user_id, message) + for_user,
+        },
     )
     trigger = f"{TRIGGER} ({level}): reply to message {newest.id}"
     if not queue_send(db, user_id, draft.id, trigger, unattended=True):

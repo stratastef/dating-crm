@@ -38,7 +38,7 @@ def unattended_block(db: Connection, user_id: int, draft_id: int) -> str | None:
         return block
     if draft.guardrail != []:  # a hit, Jev unavailable (`["unavailable"]`) or never checked (null)
         return f"the draft guardrail was hit: {draft.guardrail}"
-    if handover.is_paused(db, draft.card_id):
+    if handover.is_paused(db, user_id, draft.card_id):
         return "the card is paused for handover"
     if draft.stage not in CHAT_STAGES:
         return f"the card is in {draft.stage}"

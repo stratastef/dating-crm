@@ -28,9 +28,12 @@ _SYSTEM = (
 )
 
 
-def is_paused(db: Connection, card_id: int) -> bool:
+def is_paused(db: Connection, user_id: int, card_id: int) -> bool:
     """True while the card is paused for handover (pending or taken over): autopilot must not send to it."""
-    return db.execute(text("SELECT handover IS NOT NULL FROM cards WHERE id = :id"), {"id": card_id}).scalar_one()
+    return db.execute(
+        text("SELECT handover IS NOT NULL FROM cards WHERE id = :id AND user_id = :user_id"),
+        {"id": card_id, "user_id": user_id},
+    ).scalar_one()
 
 
 def suggest_replies(db: Connection, user_id: int, card_id: int, hits: list[str]) -> list[str]:
@@ -123,11 +126,14 @@ def incoming(db: Connection, user_id: int, card_id: int, message_id: int, body: 
     return hits
 
 
-def answered(db: Connection, card_id: int) -> None:
+def answered(db: Connection, user_id: int, card_id: int) -> None:
     """Call for each new message from the user: their reply ends a pending handover. A taken-over card stays."""
     db.execute(
-        text("UPDATE cards SET handover = NULL, handover_suggestions = '{}' WHERE id = :id AND handover = 'pending'"),
-        {"id": card_id},
+        text(
+            "UPDATE cards SET handover = NULL, handover_suggestions = '{}'"
+            " WHERE id = :id AND user_id = :user_id AND handover = 'pending'"
+        ),
+        {"id": card_id, "user_id": user_id},
     )
 
 

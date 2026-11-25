@@ -15,7 +15,8 @@ def incoming(client, card_id: int, body: str):
 
 def paused(app, card_id: int) -> bool:
     with app.state.engine.begin() as db:
-        return handover.is_paused(db, card_id)
+        user_id = db.exec_driver_sql("SELECT user_id FROM cards WHERE id = %s", (card_id,)).scalar_one()
+        return handover.is_paused(db, user_id, card_id)
 
 
 def test_a_handover_hit_pauses_autopilot_for_that_card_only(app, client, jev):
