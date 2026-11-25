@@ -8,6 +8,7 @@ from app.autopilot import router as autopilot_router
 from app.bios import router as bios_router
 from app.budget import budget_reached_response, router as budget_router
 from app.cards import router as cards_router
+from app.dashboard import router as dashboard_router
 from app.db import database_url
 from app.drafts import router as drafts_router
 from app.jobs import enqueue
@@ -57,6 +58,7 @@ def create_app(url: str | None = None) -> FastAPI:
     app.include_router(budget_router)
     app.add_exception_handler(BudgetReached, budget_reached_response)
     app.include_router(cards_router)
+    app.include_router(dashboard_router)
     app.include_router(drafts_router)
     app.include_router(push_router)
     app.include_router(preferences_router)

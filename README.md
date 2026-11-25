@@ -18,6 +18,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/voice.py` | Questionnaire, style profile and similar past chats: routes under `/voice` |
 | `app/bios.py` | Bio and prompt rewrites per dating app: routes under `/bios` |
 | `app/preferences.py` | What the user wants, versioned: routes under `/preferences`, `current_preferences()` |
+| `app/dashboard.py` | Good dates per hour, weekly: `POST /time` and `GET /dashboard` |
 | `app/settings.py` | User settings: `GET` and `PATCH /settings` |
 | `app/tenancy.py` | `user_id_column()` for tenant tables |
 | `app/vault.py` | `store_token()`, `read_token()`, `delete_token()` for encrypted dating-app session tokens |
@@ -207,6 +208,19 @@ Routes are in `app/preferences.py`; the table is `preferences` (append-only, one
 | `GET /preferences/versions` | Every version, oldest first, each with `created_at`: the moment it came into force. |
 
 Server code reads the version in force with `current_preferences(db, user_id)` from `app.preferences`; it returns `version`, `wishes`, `must_haves` and `dealbreakers`.
+
+## Dashboard
+
+Routes are in `app/dashboard.py`; the table is `app_time` (one row per report).
+
+| Route | Does |
+| --- | --- |
+| `POST /time` with `{"seconds": 90}` | Record time the user spent in the app. 1 second to 1 day per report; returns `204`. |
+| `GET /dashboard` | One entry per week with recorded time or a good date, oldest first: `week` (its Monday), `good_dates`, `hours`, `good_dates_per_hour`. |
+
+- A week starts on Monday in UTC. `good_dates_per_hour` is `null` for a week with no recorded time.
+- A good date (`is_good_date()`) counts in the week of the card's `date_rated_at`: the moment of its first rating, not the day of the date.
+- Limit: hours are only the time the iOS app was in the foreground, as the app reports it; time in the dating apps is not counted, and a stretch is lost if the app is killed or suspended before it reports.
 
 ## Session token vault
 
