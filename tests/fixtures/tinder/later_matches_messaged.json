@@ -1,0 +1,77 @@
+{
+  "meta": {
+    "status": 200
+  },
+  "data": {
+    "matches": [
+      {
+        "_id": "5f00000000000000000000015f00000000000000000000b2",
+        "id": "5f00000000000000000000015f00000000000000000000b2",
+        "closed": false,
+        "dead": false,
+        "pending": false,
+        "is_super_like": false,
+        "created_date": "2026-11-18T10:00:00.000Z",
+        "last_activity_date": "2026-11-22T12:00:00.000Z",
+        "message_count": 0,
+        "messages": [
+          {
+            "_id": "64b00000000000000000b001",
+            "match_id": "5f00000000000000000000015f00000000000000000000b2",
+            "sent_date": "2026-11-22T12:00:00.000Z",
+            "message": "Hello there",
+            "to": "5f0000000000000000000001",
+            "from": "5f00000000000000000000b2",
+            "created_date": "2026-11-22T12:00:00.000Z",
+            "timestamp": 0
+          }
+        ],
+        "participants": [
+          "5f00000000000000000000b2"
+        ],
+        "person": {
+          "_id": "5f00000000000000000000b2",
+          "name": "Bea",
+          "bio": "",
+          "birth_date": "1995-01-01T00:00:00.000Z",
+          "gender": 1,
+          "photos": []
+        }
+      },
+      {
+        "_id": "5f00000000000000000000015f00000000000000000000c3",
+        "id": "5f00000000000000000000015f00000000000000000000c3",
+        "closed": false,
+        "dead": false,
+        "pending": false,
+        "is_super_like": false,
+        "created_date": "2026-11-17T10:00:00.000Z",
+        "last_activity_date": "2026-11-21T09:30:00.000Z",
+        "message_count": 0,
+        "messages": [
+          {
+            "_id": "64c00000000000000000c003",
+            "match_id": "5f00000000000000000000015f00000000000000000000c3",
+            "sent_date": "2026-11-21T09:30:00.000Z",
+            "message": "All good. Coffee on Friday?",
+            "to": "5f0000000000000000000001",
+            "from": "5f00000000000000000000c3",
+            "created_date": "2026-11-21T09:30:00.000Z",
+            "timestamp": 0
+          }
+        ],
+        "participants": [
+          "5f00000000000000000000c3"
+        ],
+        "person": {
+          "_id": "5f00000000000000000000c3",
+          "name": "Cleo",
+          "bio": "",
+          "birth_date": "1995-01-01T00:00:00.000Z",
+          "gender": 1,
+          "photos": []
+        }
+      }
+    ]
+  }
+}

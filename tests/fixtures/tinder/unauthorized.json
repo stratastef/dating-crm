@@ -1,0 +1,9 @@
+{
+  "meta": {
+    "status": 401
+  },
+  "error": {
+    "code": 40120,
+    "message": "Unauthorized"
+  }
+}

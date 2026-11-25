@@ -1,0 +1,176 @@
+"""Voice: the user's questionnaire answers and the style profile that drafts are written from."""
+
+import json
+
+from fastapi import APIRouter, Query
+from pydantic import BaseModel
+from sqlalchemy import Connection, text
+
+from app import llm
+from app.auth import CurrentUser, Db
+from app.card_lookup import own_card
+from app.jobs import enqueue, handler
+
+router = APIRouter()
+
+
+class Questionnaire(BaseModel):
+    answers: dict[str, str]  # question -> answer
+
+
+class Voice(BaseModel):
+    answers: dict[str, str]
+    profile: str | None  # null until the worker has generated it
+
+
+@router.put("/voice/questionnaire", response_model=Voice)
+def save_questionnaire(questionnaire: Questionnaire, user: CurrentUser, db: Db):
+    """Replace the user's questionnaire answers and queue a rewrite of the style profile."""
+    queue_profile(db, user.id)
+    return db.execute(
+        text(
+            """
+            INSERT INTO voice_profiles (user_id, answers) VALUES (:user_id, CAST(:answers AS jsonb))
+            ON CONFLICT (user_id) DO UPDATE SET answers = EXCLUDED.answers, updated_at = now()
+            RETURNING answers, profile
+            """
+        ),
+        {"user_id": user.id, "answers": json.dumps(questionnaire.answers)},
+    ).one()
+
+
+@router.get("/voice", response_model=Voice)
+def read_voice(user: CurrentUser, db: Db):
+    row = db.execute(
+        text("SELECT answers, profile FROM voice_profiles WHERE user_id = :user_id"), {"user_id": user.id}
+    ).one_or_none()
+    return row or Voice(answers={}, profile=None)
+
+
+class ChatMessage(BaseModel):
+    sender: str
+    body: str
+
+
+class PastChat(BaseModel):
+    card_id: int
+    similarity: float  # 0 to 1
+    date_rating: int | None  # the outcome label: null until the user rates the date
+    messages: list[ChatMessage]
+
+
+# How much more a chat that led to a good date counts in retrieval than an equally similar one.
+GOOD_DATE_BOOST = 1.5
+
+
+def similar_chats(db: Connection, user_id: int, card_id: int, limit: int = 3) -> list:
+    """The user's past chats that led to a date, most similar to the card's conversation first.
+
+    A chat that led to a good date ranks as if it were `GOOD_DATE_BOOST` times as similar.
+    """
+    from app.cards import is_good_date  # here, not at the top: `app.cards` imports this module
+
+    # shortcut: trigram similarity of the whole chat text, computed per query with no index. Move to
+    # embeddings (pgvector) if drafts need likeness of meaning rather than of wording.
+    # shortcut: every dated chat is read and ranked here, in Python. Rank in SQL if a user has thousands.
+    chats = db.execute(
+        text(
+            """
+            WITH chats AS (
+                SELECT c.id AS card_id, c.date_rating,
+                       string_agg(m.body, E'\n' ORDER BY m.sent_at, m.id) AS body,
+                       json_agg(json_build_object('sender', m.sender, 'body', m.body) ORDER BY m.sent_at, m.id)
+                           AS messages
+                FROM cards c JOIN messages m ON m.card_id = c.id
+                WHERE c.user_id = :user_id AND (c.id = :card_id OR c.led_to_date)
+                GROUP BY c.id
+            )
+            SELECT past.card_id, similarity(past.body, coalesce(given.body, '')) AS similarity, past.messages,
+                   past.date_rating
+            FROM chats past LEFT JOIN chats given ON given.card_id = :card_id
+            WHERE past.card_id <> :card_id
+            """
+        ),
+        {"user_id": user_id, "card_id": card_id},
+    ).all()
+    return sorted(
+        chats,
+        key=lambda chat: (chat.similarity * (GOOD_DATE_BOOST if is_good_date(chat.date_rating) else 1), chat.card_id),
+        reverse=True,
+    )[:limit]
+
+
+@router.get("/cards/{card_id}/similar-chats", response_model=list[PastChat])
+def read_similar_chats(card_id: int, user: CurrentUser, db: Db, limit: int = Query(3, ge=1, le=20)):
+    own_card(db, user.id, card_id)
+    return similar_chats(db, user.id, card_id, limit)
+
+
+def queue_profile(db: Connection, user_id: int) -> None:
+    """Queue a rewrite of the user's style profile. Call it whenever a message of theirs is stored."""
+    # One waiting job is enough: it reads everything stored by the time it runs.
+    # shortcut: a message stored while that job is already running is picked up only by the next rewrite.
+    waiting = db.execute(
+        text("SELECT 1 FROM jobs WHERE user_id = :user_id AND kind = 'voice_profile' AND status = 'queued'"),
+        {"user_id": user_id},
+    ).first()
+    if not waiting:
+        enqueue(db, user_id, "voice_profile")
+
+
+_SYSTEM = (
+    "You write a style profile of how one person texts on dating apps. A later step drafts messages in their"
+    " voice from this profile alone. Describe tone, humour, message length, punctuation, capitalisation, emoji"
+    " use, typical openers and how they ask someone out. Use only what the answers and messages show. Each edit"
+    " under `my_edits` is a draft written from the last profile and what the person sent instead: describe the"
+    " style so that the next draft needs no such edit. Reply with the profile only, under 300 words."
+)
+
+# shortcut: only the newest messages are read, summarise in batches if older chats turn out to matter.
+_MESSAGE_LIMIT = 200
+_EDIT_LIMIT = 20  # the newest edits of drafts
+
+
+@handler("voice_profile")
+def write_profile(db: Connection, user_id: int, payload: dict) -> None:
+    """Write the style profile from the questionnaire answers and the user's own stored messages."""
+    answers = db.execute(
+        text("SELECT answers FROM voice_profiles WHERE user_id = :user_id"), {"user_id": user_id}
+    ).scalar_one_or_none()
+    messages = db.execute(
+        text(
+            "SELECT body FROM messages WHERE user_id = :user_id AND sender = 'me'"
+            " ORDER BY sent_at DESC, id DESC LIMIT :limit"
+        ),
+        {"user_id": user_id, "limit": _MESSAGE_LIMIT},
+    ).scalars()
+    edits = db.execute(
+        text(
+            "SELECT original, edited FROM drafts WHERE user_id = :user_id AND edited <> original"
+            " ORDER BY updated_at DESC, id DESC LIMIT :limit"
+        ),
+        {"user_id": user_id, "limit": _EDIT_LIMIT},
+    ).all()
+    prompt = "\n".join(
+        [
+            "<questionnaire>",
+            *(f"Q: {question}\nA: {answer}" for question, answer in (answers or {}).items()),
+            "</questionnaire>",
+            "<my_messages>",
+            *reversed(list(messages)),
+            "</my_messages>",
+            "<my_edits>",
+            *(f"draft: {original}\nsent instead: {edited}" for original, edited in reversed(edits)),
+            "</my_edits>",
+        ]
+    )
+    profile = llm.call(db, user_id, "voice_profile", _SYSTEM, prompt).text
+    db.execute(
+        text(
+            """
+            INSERT INTO voice_profiles (user_id, profile) VALUES (:user_id, :profile)
+            ON CONFLICT (user_id) DO UPDATE SET profile = EXCLUDED.profile, updated_at = now()
+            """
+        ),
+        {"user_id": user_id, "profile": profile},
+    )

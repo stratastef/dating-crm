@@ -1,0 +1,93 @@
+from fastapi import FastAPI, HTTPException
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.audit import router as audit_router
+from app.auth import CurrentUser, Db
+from app.autopilot import router as autopilot_router
+from app.bios import router as bios_router
+from app.calendar import router as calendar_router
+from app.budget import budget_reached_response, router as budget_router
+from app.cards import router as cards_router
+from app.chat_autopilot import router as chat_autopilot_router
+from app.dashboard import router as dashboard_router
+from app.db import database_url
+from app.drafts import router as drafts_router
+from app.feedback import router as feedback_router
+from app.handover import router as handover_router
+from app.jobs import enqueue
+from app.llm import BudgetReached
+from app.paid_items import router as paid_items_router
+from app.photos import router as photos_router
+from app.purge import router as purge_router
+from app.push import router as push_router
+from app.screenshots import router as screenshots_router
+from app.reads import router as reads_router
+from app.review import router as review_router
+from app.send import router as send_router
+from app.preferences import router as preferences_router
+from app.swipes import router as swipes_router
+from app.sync import router as sync_router
+from app.voice import router as voice_router
+from app.settings import router as settings_router
+
+
+def create_app(url: str | None = None) -> FastAPI:
+    engine = create_engine(url or database_url(), pool_pre_ping=True)
+    app = FastAPI(title="Dating CRM")
+    app.state.engine = engine
+
+    @app.get("/health")
+    def health() -> dict[str, str]:
+        try:
+            with engine.connect() as connection:
+                connection.execute(text("SELECT 1"))
+        except SQLAlchemyError:
+            raise HTTPException(status_code=503, detail="database unreachable")
+        return {"status": "ok"}
+
+    @app.get("/me")
+    def me(user: CurrentUser) -> dict[str, str]:
+        return {"email": user.email}
+
+    @app.post("/jobs/ping")
+    def ping_job(user: CurrentUser, db: Db) -> dict[str, int]:
+        return {"id": enqueue(db, user.id, "ping")}
+
+    @app.get("/jobs/{job_id}")
+    def job(job_id: int, user: CurrentUser, db: Db) -> dict:
+        row = db.execute(
+            text("SELECT id, kind, status, attempts, last_error FROM jobs WHERE id = :id AND user_id = :user_id"),
+            {"id": job_id, "user_id": user.id},
+        ).one_or_none()
+        if not row:
+            raise HTTPException(status_code=404, detail="job not found")
+        return dict(row._mapping)
+
+    app.include_router(audit_router)
+    app.include_router(autopilot_router)
+    app.include_router(bios_router)
+    app.include_router(calendar_router)
+    app.include_router(budget_router)
+    app.add_exception_handler(BudgetReached, budget_reached_response)
+    app.include_router(cards_router)
+    app.include_router(chat_autopilot_router)
+    app.include_router(dashboard_router)
+    app.include_router(drafts_router)
+    app.include_router(feedback_router)
+    app.include_router(paid_items_router)
+    app.include_router(photos_router)
+    app.include_router(handover_router)
+    app.include_router(purge_router)
+    app.include_router(push_router)
+    app.include_router(screenshots_router)
+    app.include_router(reads_router)
+    app.include_router(review_router)
+    app.include_router(send_router)
+    app.include_router(preferences_router)
+    app.include_router(swipes_router)
+    app.include_router(sync_router)
+    app.include_router(voice_router)
+    app.include_router(settings_router)
+
+    return app

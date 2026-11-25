@@ -1,0 +1,28 @@
+[project]
+name = "dating-crm"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.20.1",
+    "anthropic>=2.14.0",
+    "cryptography>=50.0.2",
+    "fastapi>=0.165.0",
+    "httpx[http2]>=0.28.1",
+    "pillow>=13.0.0",
+    "psycopg[binary]>=3.3.9",
+    "sqlalchemy>=2.1.9",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.2.0",
+]
