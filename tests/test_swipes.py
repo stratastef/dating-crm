@@ -193,6 +193,22 @@ def test_an_answer_that_is_neither_like_nor_pass_suggests_nothing(signed_in, llm
     assert suggestions(signed_in) == {}
 
 
+def test_a_failed_model_call_skips_that_profile_and_screens_it_next_time(signed_in, llm, monkeypatch):
+    llm.reply = "like\nGood fit."
+    calls = []
+
+    def rate_limited_once(*args, **kwargs):
+        calls.append(args)
+        if len(calls) == 1:  # Dana's call
+            raise RuntimeError("429 rate limited")
+        return llm(*args, **kwargs)
+
+    monkeypatch.setattr("app.llm.complete", rate_limited_once)
+
+    assert set(suggestions(signed_in)) == {"Eve", "Fay"}
+    assert set(suggestions(signed_in)) == {"Dana", "Eve", "Fay"}
+
+
 def test_a_candidate_shows_age_distance_and_the_super_like_proposed_for_them_while_it_waits(signed_in, llm):
     llm.replies = ["pass\nNothing in common.", "super like\nShe climbs."]  # Dana, then Eve
 
