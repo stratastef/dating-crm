@@ -186,13 +186,32 @@ def tap_send(draft_id: int, user: CurrentUser, db: Db):
 
 
 @router.post("/drafts/{draft_id}/undo-send", response_model=Draft)
+@router.post("/drafts/{draft_id}/hold", response_model=Draft)
 def undo_send(draft_id: int, user: CurrentUser, db: Db):
-    """Take back the user's Send while its job has not started: the draft is `pending` again, its edit kept.
-    `409` once the worker has started sending it."""
+    """Take back a queued send while its job has not started: the user's Undo of their Send, or Hold on a planned
+    send. The draft is `pending` again, its edit kept, so it waits in the review queue. `409` once the worker has
+    started sending it."""
     card = _card(db, user.id, draft_id)
     if not card:
         raise HTTPException(status_code=404, detail="draft not found")
     draft = cancel_send(db, user.id, draft_id)
+    if not draft:
+        raise HTTPException(status_code=409, detail=f"the draft is {card.status}")
+    return present(db, user.id, [draft])[0]
+
+
+@router.post("/drafts/{draft_id}/send-now", response_model=Draft, status_code=202)
+def send_now(draft_id: int, user: CurrentUser, db: Db):
+    """Send now on a planned send: its job is taken back and the draft queued again through `queue_send()`, to
+    go out at once, as the user's send. `409` says why when it cannot be sent, or once the worker has started."""
+    card = _card(db, user.id, draft_id)
+    if not card:
+        raise HTTPException(status_code=404, detail="draft not found")
+    why = refusal(db, user.id, card.app, card.external_id, card.guardrail)
+    if why:
+        raise HTTPException(status_code=409, detail=why)
+    trigger = f"copilot: user tapped send now on draft {draft_id}"
+    draft = cancel_send(db, user.id, draft_id) and queue_send(db, user.id, draft_id, trigger)
     if not draft:
         raise HTTPException(status_code=409, detail=f"the draft is {card.status}")
     return present(db, user.id, [draft])[0]

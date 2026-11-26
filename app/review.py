@@ -94,7 +94,7 @@ def queue(user: CurrentUser, db: Db):
     drafts = db.execute(
         text(
             f"""
-            SELECT {", ".join(f"drafts.{column}" for column in _DRAFT_COLUMNS.split(", "))}, drafts.created_at,
+            SELECT {", ".join(f"drafts.{column}" for column in _DRAFT_COLUMNS.split(", "))},
                    drafts.copied_at, drafts.updated_at,
                    cards.name AS card_name, answered.body AS message_body, answered.sent_at AS message_sent_at
             FROM drafts JOIN cards ON cards.id = drafts.card_id

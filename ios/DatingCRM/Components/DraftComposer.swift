@@ -2,13 +2,14 @@ import SwiftUI
 import UIKit
 
 /// The card's draft, docked at the bottom of its chat like a composer, on Liquid Glass (ADR 0003, ADR 0009). It
-/// docks the first draft of the card's draft list (`Card.drafts`, newest first) in one of three states:
+/// docks autopilot's planned send (`Card.plannedSend`) first: a ring draining until it goes out, its time and
+/// reason, its text, Hold and Send now. Otherwise it docks the first draft of the card's draft list
+/// (`Card.drafts`, newest first) in one of three states:
 /// - pending: editable under the AI draft marker, with Send where the app can send it and Copy where it cannot;
 /// - copied: "Copied, not sent yet", with Clear and Copy again;
 /// - failed: why, still editable, with Copy and Retry.
 ///
-/// With no draft it offers Write draft in Matched and Chatting, and shows nothing from Number swapped on or while
-/// autopilot has a planned send (`Card.plannedSend`, shown in the chat). Without
+/// With neither it offers Write draft in Matched and Chatting, and shows nothing from Number swapped on. Without
 /// a style profile, Write draft sets `needsVoice` and the card opens the voice questionnaire.
 struct DraftComposer: View {
     let client: APIClient
@@ -31,10 +32,12 @@ struct DraftComposer: View {
     private var datingApp: String { card.app.capitalized }
 
     var body: some View {
-        if let draft {
+        if let planned = card.plannedSend {  // it answers already: no second reply
+            plannedDock(planned)
+        } else if let draft {
             dock(draft)
                 .onChange(of: draft.id, initial: true) { text = draft.text }
-        } else if card.stage.chatsInApp && card.plannedSend == nil {  // a planned send answers already: no second reply
+        } else if card.stage.chatsInApp {
             box {
                 if let error {
                     ErrorRow(text: error) { await write() }
@@ -91,7 +94,7 @@ struct DraftComposer: View {
                         Button("Copy") { Task { await act(draft, send: false) } }
                             .buttonStyle(.secondaryCapsule)
                     }
-                    // Send now, Hold and "Send at" (send timing) go here, next to Send.
+                    // "Send at" (send timing) goes here, next to Send.
                     // A failed send the app cannot retry now offers Copy only.
                     if !waitsForEdit, draft.sendable || !failed {
                         Button(failed ? "Retry" : draft.sendable ? "Send" : "Copy") {
@@ -100,6 +103,42 @@ struct DraftComposer: View {
                         .buttonStyle(.primaryCapsule)
                         .disabled(text.isEmpty)
                     }
+                }
+            }
+            .disabled(busy)
+        }
+    }
+
+    /// Autopilot's planned send: it goes out alone at its send time unless the user holds it or sends it now.
+    private func plannedDock(_ planned: Draft) -> some View {
+        let about = VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                PlannedRing(draft: planned)
+                Text("Replies \(planned.sendAt.map { RelativeTime.around($0) } ?? "soon")").font(.headline)
+            }
+            if let reason = planned.timingReason, !reason.isEmpty {
+                Text(reason.prefix(1).uppercased() + reason.dropFirst()).font(.subheadline).foregroundStyle(.secondaryText)
+            }
+            Inset {
+                AIMarker(.autopilot)
+                Text(planned.text)
+            }
+        }
+        return box {
+            // At the largest text sizes it scrolls above the buttons: the text that goes out is never cut.
+            ViewThatFits(in: .vertical) {
+                about
+                ScrollView { about }
+            }
+            if let error {
+                ErrorRow(text: error) { await reload() }
+            }
+            AdaptiveStack(spacing: 8) {
+                Button("Hold") { Task { await hold(planned) } }
+                    .buttonStyle(.secondaryCapsule)
+                if planned.sendable {  // the app cannot send it now: Hold only, and it goes to Review
+                    Button("Send now") { Task { await sendNow(planned) } }
+                        .buttonStyle(.primaryCapsule)
                 }
             }
             .disabled(busy)
@@ -178,6 +217,39 @@ struct DraftComposer: View {
             _ = try await client.undoSend(draftID: draft.id)
         } catch let late as APIError where late.status == 409 {
             toast = Toast(text: "Too late to undo the message to \(card.name).")
+        } catch {
+            self.error = error.localizedDescription
+        }
+        await reload()
+    }
+
+    /// Send now: the planned send goes out at once, and the card reloads until it is in the chat.
+    private func sendNow(_ planned: Draft) async {
+        busy = true
+        defer { busy = false }
+        do {
+            try await client.sendNow(draftID: planned.id)
+            error = nil
+            toast = Toast(text: "Sending to \(card.name)…")
+            Task { await sent() }
+        } catch let refused as APIError where refused.status == 409 {
+            error = "Not sent now: it is already going out, or \(datingApp) cannot send it."
+            await reload()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    /// Hold: the planned send does not go out. The draft docks again as pending, and waits in Review.
+    private func hold(_ planned: Draft) async {
+        busy = true
+        defer { busy = false }
+        do {
+            _ = try await client.hold(draftID: planned.id)
+            error = nil
+            toast = Toast(text: "Held. It waits in Review.")
+        } catch let late as APIError where late.status == 409 {
+            toast = Toast(text: "Too late to hold the message to \(card.name).")
         } catch {
             self.error = error.localizedDescription
         }

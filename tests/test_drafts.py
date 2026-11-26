@@ -39,6 +39,7 @@ def test_a_card_with_no_messages_gets_an_opener_written_from_the_style_profile(a
         "sendable": False,  # Hinge has no connector
         "send_at": body["send_at"],  # when it is best sent: see `tests/test_send_timing.py`
         "timing_reason": "a fresh match",
+        "created_at": body["created_at"],
     }
     assert body["send_at"]
     prompt = llm.prompts[-1]

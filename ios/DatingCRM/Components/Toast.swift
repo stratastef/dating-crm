@@ -72,13 +72,8 @@ private struct Countdown: View {
     @State private var left = 1.0
 
     var body: some View {
-        Circle()
-            .trim(from: 0, to: motionReduced ? 1 : left)
-            .stroke(.accent, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-            .rotationEffect(.degrees(-90))
+        Ring(left: motionReduced ? 1 : left)
             .opacity(motionReduced ? left : 1)
-            .frame(width: 22, height: 22)
-            .accessibilityHidden(true)  // the toast's text says it is sending
             .onAppear {
                 withAnimation(.linear(duration: 5)) { left = 0 }
             }

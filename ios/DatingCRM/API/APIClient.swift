@@ -125,6 +125,18 @@ struct APIClient {
         try await send("POST", "drafts/\(draftID)/undo-send")
     }
 
+    /// Send now on autopilot's planned send: it goes out at once instead of at its send time. `409` means the
+    /// worker already started sending it, or the app cannot send it now.
+    func sendNow(draftID: Int) async throws {
+        try await data("POST", "drafts/\(draftID)/send-now")
+    }
+
+    /// Hold on autopilot's planned send: it does not go out, and the draft waits in Review, pending. `409` means
+    /// the worker already started sending it.
+    func hold(draftID: Int) async throws -> Draft {
+        try await send("POST", "drafts/\(draftID)/hold")
+    }
+
     /// Everything that waits for the user's review, hot leads first.
     func queue() async throws -> [QueueItem] {
         try await send("GET", "queue")

@@ -238,6 +238,8 @@ struct Draft: Codable, Identifiable, Hashable {
     var timingReason: String?
     /// `pending`, `copied` or `failed` on the card's draft list; also `approved`, `sending`, `sent`, `dismissed`.
     var status = "pending"
+    /// When it was written: a planned send's ring drains from here to `sendAt`. Nil from an older server.
+    var createdAt: Date?
 
     /// What to show and copy: the user's edit when there is one.
     var text: String { edited ?? original }
