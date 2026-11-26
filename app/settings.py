@@ -10,7 +10,7 @@ from app.auth import CurrentUser, Db
 
 router = APIRouter()
 
-_COLUMNS = "stalled_after_days, time_zone, setup_dismissed"
+_COLUMNS = "stalled_after_days, time_zone, setup_dismissed, push_name_previews, blur_photos"
 
 
 class Settings(BaseModel):
@@ -20,6 +20,10 @@ class Settings(BaseModel):
     time_zone: str
     # The user hid "Finish setup" on Today. The steps stay under You.
     setup_dismissed: bool
+    # Hot-lead and handover pushes name the match and quote the suggestions. Off: they name nobody.
+    push_name_previews: bool
+    # The app blurs faces until tapped (ADR 0009). Only the app reads it.
+    blur_photos: bool
 
 
 class SettingsChange(BaseModel):
@@ -28,6 +32,8 @@ class SettingsChange(BaseModel):
     stalled_after_days: int | None = Field(default=None, ge=1)
     time_zone: str | None = None
     setup_dismissed: bool | None = None
+    push_name_previews: bool | None = None
+    blur_photos: bool | None = None
 
     @field_validator("time_zone")
     @classmethod
@@ -58,7 +64,9 @@ def update_settings(change: SettingsChange, user: CurrentUser, db: Db):
         text(
             "UPDATE users SET stalled_after_days = COALESCE(:stalled_after_days, stalled_after_days),"
             " time_zone = COALESCE(:time_zone, time_zone),"
-            f" setup_dismissed = COALESCE(:setup_dismissed, setup_dismissed) WHERE id = :id RETURNING {_COLUMNS}"
+            " setup_dismissed = COALESCE(:setup_dismissed, setup_dismissed),"
+            " push_name_previews = COALESCE(:push_name_previews, push_name_previews),"
+            f" blur_photos = COALESCE(:blur_photos, blur_photos) WHERE id = :id RETURNING {_COLUMNS}"
         ),
         {"id": user.id, **change.model_dump()},
     ).one()

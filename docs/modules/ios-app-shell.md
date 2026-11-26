@@ -8,7 +8,7 @@ The signed-in app is `MainTabView` (`ios/DatingCRM/Screens/MainTabView.swift`): 
 | Review | `QueueView`: the review queue as faces in glass (see "Review"). The tab's badge is the review count from Today's last load. |
 | Pipeline | `PipelineView`: `GET /pipeline` grouped by who acts next (see "Pipeline" below). A tapped push switches to this tab and opens the card. Search (minimized to a toolbar button) filters the loaded cards by name and opens every group; the plus button opens `NewCardSheet` to add a card by hand. |
 | Swipe | `SwipeView`: the Off state, one at a time or the list, as the Swipe layout says (see "Swipe copilot", On the phone) |
-| You | `YouView`: the Dashboard headline (`DashboardHeadline`, links to `DashboardView`), Autopilot (`AutopilotView`), Preferences, Swipe layout (`SwipeLayoutSection`), Connected apps (`ConnectedAppsView`), Calendar (`CalendarView`), Profile (Photos, Bios and prompts, Voice), Account (Settings, Sign out, which asks first) |
+| You | `YouView`: the Dashboard headline (`DashboardHeadline`, links to `DashboardView`), Autopilot (`AutopilotView`), Preferences, Swipe layout (`SwipeLayoutSection`), Connected apps (`ConnectedAppsView`), Calendar (`CalendarView`), Profile (Photos, Bios and prompts, Voice), Settings (Notifications `NotificationsView`, Privacy `PrivacyView`, Activity log `ActivityLogView`, Find and purge `PurgeView`), Sign out, which asks first |
 
 ## Look (ADR 0009, `docs/design/mockups/a3-combined.html`)
 
@@ -31,6 +31,7 @@ The shared components are in `ios/DatingCRM/Components/`, one file each:
 | `RelativeTime.since/day/due`, `TimeAgoText` | `RelativeTime.swift` | "10m", "4d", "Today", "Sat", "2 days late"; the year only when it is not this year. |
 | `Avatar(name:photo:)` | `Avatar.swift` | The photo at 48 pt, or the monogram in New York on the soft accent. Puts the row's separator 14 pt past itself. |
 | `FacePhoto(name:photo:)` | `FacePhoto.swift` | A face that fills its frame: the photo, or a 96 pt monogram at the top of the soft accent. For Review items and the card header. |
+| `.blurredFace()` (`BlurredFace`) | `BlurredFace.swift` | Blur photos (ADR 0009): put it on a loaded face image, inside its clip. With the setting on, the face is blurred until tapped, and that tap reveals instead of reaching the row. `Avatar`, `FacePhoto` and Swipe's photos use it; a new face (the card header) uses one of those or this. The setting is the server's (`blur_photos`); the app keeps a copy in `@AppStorage(BlurredFace.key)`, which `MainTabView` refreshes on launch and `PrivacyView` on each change. |
 | `AdaptiveStack` | `AdaptiveStack.swift` | Side by side, stacked at accessibility text sizes. For row metadata and button pairs. |
 | `AutonomySections(levels:choose:)` | `AutonomySections.swift` | One list section per job (Chat, Optimize profiles, Swipe) listing the four levels with `AutonomyLevel.summary`. The host loads the levels and saves the choice. Used by `AutopilotView` and the setup step. |
 | `.autosave(value, saved:) { save }` | `Autosave.swift` | Saves a second after the last change and when the view goes away. Pass `value` as `saved` until loaded. Ignore errors from a cancelled save. |
@@ -93,7 +94,7 @@ Every `Card` carries its card summary (see "Cards and messages"): `stageChangedA
 
 ## Simulator checks
 
-Besides the Debug sign-in (`DCRM_SERVER`, `DCRM_TOKEN`) and `DCRM_TAB`, `DCRM_OPEN=voice`, `dashboard`, `preferences`, `connected-apps`, `calendar`, `swipe-layout`, `photos` or `bios` pushes that screen under You on launch: `SIMCTL_CHILD_DCRM_TAB=you SIMCTL_CHILD_DCRM_OPEN=voice xcrun simctl launch …`. `DCRM_SETUP=1` opens setup instead of the tabs, or on one step with its name (`DCRM_SETUP=voice`; see "Setup").
+Besides the Debug sign-in (`DCRM_SERVER`, `DCRM_TOKEN`) and `DCRM_TAB`, `DCRM_OPEN=voice`, `dashboard`, `preferences`, `connected-apps`, `calendar`, `swipe-layout`, `photos`, `bios`, `notifications`, `privacy`, `activity-log` or `purge` pushes that screen under You on launch: `SIMCTL_CHILD_DCRM_TAB=you SIMCTL_CHILD_DCRM_OPEN=voice xcrun simctl launch …`. `DCRM_SETUP=1` opens setup instead of the tabs, or on one step with its name (`DCRM_SETUP=voice`; see "Setup").
 
 ## Limits
 
@@ -101,4 +102,4 @@ Besides the Debug sign-in (`DCRM_SERVER`, `DCRM_TOKEN`) and `DCRM_TAB`, `DCRM_OP
 - Not verified on screen: typing, autosave, the save error under a field and Edit on Voice and Preferences (screenshots only, no taps).
 - Not verified on screen: reorder, delete, Accept edit and Keep original on Photos; Rewrite, Accept and the Voice link on Bios. The rewrite needs Claude and a tap, so it was never shown.
 - Not verified on screen: the toast (Review's Dismiss and Swipe's Pass and Like show one, but nothing was tapped) and VoiceOver reading the AI marker and badges. Review's buttons, the card link and the profile sheet were not tapped either: screenshots only.
-- Error text is still system red, under 4.5:1 on white, outside `ErrorRow`. Settings is still a grey grouped form until its ticket.
+- Error text is still system red, under 4.5:1 on white, outside `ErrorRow`. 

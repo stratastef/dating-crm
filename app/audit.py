@@ -38,6 +38,9 @@ class AuditEntry(BaseModel):
     target: str
     trigger: str
     created_at: datetime
+    # The person `target` is about, read from their card or swipe candidate now: the log itself never holds a
+    # name. Null for the user's own things (`bio`, `photo:`, `account`) and for a `match:` target.
+    name: str | None
 
 
 @router.get("/audit-log")
@@ -45,11 +48,16 @@ def audit_log(user: CurrentUser, db: Db, app: str | None = None, type: str | Non
     # shortcut: returns the whole log, add pagination when it grows past a few thousand rows.
     rows = db.execute(
         text(
-            "SELECT id, type, app, target, trigger, created_at FROM audit_log"
-            " WHERE user_id = :user_id"
-            " AND (CAST(:app AS text) IS NULL OR app = :app)"
-            " AND (CAST(:type AS text) IS NULL OR type = :type)"
-            " ORDER BY id DESC"
+            "SELECT audit_log.id, audit_log.type, audit_log.app, audit_log.target, audit_log.trigger, audit_log.created_at,"
+            " coalesce(cards.name, swipe_candidates.name) AS name FROM audit_log"
+            " LEFT JOIN cards ON cards.user_id = :user_id"
+            "  AND 'card:' || cards.id = split_part(audit_log.target, ' ', 1)"
+            " LEFT JOIN swipe_candidates ON swipe_candidates.user_id = :user_id"
+            "  AND 'candidate:' || swipe_candidates.id = split_part(audit_log.target, ' ', 1)"
+            " WHERE audit_log.user_id = :user_id"
+            " AND (CAST(:app AS text) IS NULL OR audit_log.app = :app)"
+            " AND (CAST(:type AS text) IS NULL OR audit_log.type = :type)"
+            " ORDER BY audit_log.id DESC"
         ),
         {"user_id": user.id, "app": app, "type": type},
     )
