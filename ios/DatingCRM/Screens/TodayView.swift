@@ -147,7 +147,7 @@ struct TodayView: View {
             _ = try await client.update(card)
             await load()
         } catch {
-            self.error = error.localizedDescription
+            self.error = "The rating was not saved. Check your connection, then rate the date again."
         }
     }
 }
