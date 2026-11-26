@@ -114,7 +114,8 @@ struct SwipeTests {
         let client = server.client()
         let held = Held(after: .milliseconds(50)) { _ = try? await client.swipe(candidateID: 7, .like) }
 
-        try await Task.sleep(for: .milliseconds(200))
+        // A busy CI runner can take seconds: wait for the send instead of guessing how long it takes.
+        for _ in 0..<250 where server.requests.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
 
         #expect(server.requests.map(\.url?.absoluteString) == ["https://crm.test/swipes/7/decision"])
         #expect(!held.undo())  // too late: it is on the dating app
