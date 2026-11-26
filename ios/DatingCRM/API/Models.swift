@@ -61,11 +61,40 @@ struct Card: Codable, Identifiable, Hashable {
     /// nil when unknown: the row shows the monogram.
     var leadPhotoUrl: URL?
 
+    // Where the Pipeline lists the card, and why: the server's codes, worded by `pipelineStatus`.
+    /// `waiting_for_you`, `handled_by_autopilot`, `waiting_for_them`, `texting_off_app` or `archived`.
+    var pipelineGroup: String?
+    /// Why the card is Waiting for you, such as `draft_in_review`; nil in the other groups.
+    var reason: String?
+    /// With reason `handover`: the check that hit, such as `logistics`.
+    var handoverTrigger: String?
+    /// When the card is Handled by autopilot: `writing_opener`, `drafting_reply` or `sent_waiting`.
+    var autopilotActivity: String?
+
     /// True when the card is in Dated and has no rating yet: the app then asks for one.
     var needsDateRating: Bool { stage == .dated && dateRating == nil }
 
     /// The row's time: the last message, or the last stage change when there are no messages.
     var lastActivity: Date? { lastMessage?.sentAt ?? stageChangedAt }
+}
+
+/// One Pipeline group from `GET /pipeline`, its cards in the server's order: hot leads, then the latest activity.
+struct PipelineGroup: Codable, Identifiable, Hashable {
+    var group: String
+    var cards: [Card]
+
+    var id: String { group }
+
+    var title: String {
+        switch group {
+        case "waiting_for_you": "Waiting for you"
+        case "handled_by_autopilot": "Handled by autopilot"
+        case "waiting_for_them": "Waiting for them"
+        case "texting_off_app": "Texting off-app"
+        case "archived": "Archived"
+        default: group
+        }
+    }
 }
 
 /// A card's newest message, as its summary carries it. `body` is the first 100 characters.
@@ -166,7 +195,7 @@ struct Inference: Codable, Identifiable, Hashable {
     }
 }
 
-/// One thing that waits for the user's review. `kind` is `draft` or `handover`; the server adds more kinds later.
+/// One thing that waits for the user's review: `draft`, `handover` or `paid_item`. The server adds more kinds later.
 struct QueueItem: Codable, Identifiable, Hashable {
     var kind: String
     /// A hot lead: the server pushed it at once.
@@ -174,8 +203,14 @@ struct QueueItem: Codable, Identifiable, Hashable {
     /// Nil when `kind` is `paid_item`: a profile to swipe on is not a card.
     var cardID: Int?
     var cardName: String
+    /// The card summary, for the face, the dating app and opening the card. Nil when `cardID` is.
+    var card: Card?
     /// Set when `kind` is `draft`.
     var draft: Draft?
+    /// The match's message the item is about: the one a reply answers, or the one that fired a handover.
+    var message: QuotedMessage?
+    /// Set when `kind` is `handover`: the server's codes for the handover checks `message` hit.
+    var triggers: [String]?
     /// Set when `kind` is `handover`: the suggested replies.
     var suggestions: [String]?
     /// Set when `kind` is `paid_item`.
@@ -185,10 +220,16 @@ struct QueueItem: Codable, Identifiable, Hashable {
 
     // The key strategy turns `card_id` into `cardId`.
     enum CodingKeys: String, CodingKey {
-        case kind, hot, draft, suggestions, paidItem
+        case kind, hot, card, draft, message, triggers, suggestions, paidItem
         case cardID = "cardId"
         case cardName
     }
+}
+
+/// A message from the match, quoted on a Review item.
+struct QuotedMessage: Codable, Hashable {
+    var body: String
+    var sentAt: Date
 }
 
 /// A Super Like, Rose or Boost the server proposes to spend. It is spent only when the user approves.
@@ -202,8 +243,19 @@ struct PaidItem: Codable, Identifiable, Hashable {
     var reason: String
     /// `pending`, `declined`, `spent`, or `failed`: approved, but the dating app did not spend it.
     var status: String
+    /// The swipe candidate the item is for, whose profile Review opens. Nil for a Boost.
+    var candidateID: Int?
+    /// The candidate's first photo. Nil for a Boost or a profile without photos.
+    var photoUrl: URL?
+    /// What the item costs, in the dating app's words ("$1.99"). Nil when the app did not report it.
+    var cost: String?
 
     var title: String { "\(item.replacingOccurrences(of: "_", with: " ").capitalized) on \(app.capitalized)" }
+
+    enum CodingKeys: String, CodingKey {
+        case id, app, item, name, reason, status, photoUrl, cost
+        case candidateID = "candidateId"
+    }
 }
 
 enum Swipe: String, Codable {

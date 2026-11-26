@@ -158,17 +158,9 @@ def test_a_pending_handover_is_a_hot_lead_in_the_queue_until_it_is_taken_over(cl
     old = (datetime.now(UTC) - timedelta(hours=3)).isoformat()  # not hot as a recent reply
     client.post(f"/cards/{card_id}/messages", json={"sender": "them", "body": "Saturday at 8?", "sent_at": old})
 
-    assert client.get("/queue").json() == [
-        {
-            "kind": "handover",
-            "hot": True,
-            "card_id": card_id,
-            "card_name": "Ada",
-            "draft": None,
-            "suggestions": ["saturday works"],
-            "paid_item": None,
-        }
-    ]
+    [item] = client.get("/queue").json()
+    assert (item["kind"], item["hot"], item["card_id"], item["card_name"]) == ("handover", True, card_id, "Ada")
+    assert (item["draft"], item["suggestions"], item["paid_item"]) == (None, ["saturday works"], None)
 
     client.post(f"/cards/{card_id}/take-over")
 

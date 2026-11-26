@@ -14,6 +14,12 @@ enum RelativeTime {
         }
     }
 
+    /// How long ago, in a sentence: "just now", "3h ago", "4d ago", then "on Nov 5".
+    static func ago(_ date: Date, now: Date = .now, calendar: Calendar = .current) -> String {
+        let short = since(date, now: now, calendar: calendar)
+        return short == "now" ? "just now" : now.timeIntervalSince(date) < 7 * 86400 ? "\(short) ago" : "on \(short)"
+    }
+
     /// A due day: "Today", "Tomorrow", "Sat" within the week, then the date. Past days are "1 day late", "2 days late".
     static func due(_ day: Date, now: Date = .now, calendar: Calendar = .current) -> String {
         let days = daysFrom(now, to: day, calendar: calendar)

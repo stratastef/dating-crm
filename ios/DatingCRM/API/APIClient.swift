@@ -52,6 +52,11 @@ struct APIClient {
         try await send("GET", "cards")
     }
 
+    /// Every card, grouped by who acts next. Empty groups are left out.
+    func pipeline() async throws -> [PipelineGroup] {
+        try await send("GET", "pipeline")
+    }
+
     /// Adds a card by hand, for a match on an app without a connector.
     func addCard(name: String, app: String, stage: Stage) async throws -> Card {
         try await send("POST", "cards", body: Self.encoder.encode(["name": name, "app": app, "stage": stage.rawValue]))
