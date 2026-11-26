@@ -107,7 +107,7 @@ def sync_matches(db: Connection, user_id: int, payload: dict) -> None:
 def _sync_app(db: Connection, user_id: int, app: str) -> None:
     connector = CONNECTORS[app]()
     for match in call(db, user_id, connector, "read_matches"):
-        card_id = upsert_card(db, user_id, app, match["id"], match["name"])
+        card_id = upsert_card(db, user_id, app, match["id"], match["name"], match["has_messages"])
         if card_id is None or not match["has_messages"]:  # None: the user purged this match
             continue
         # One request per match is the costly part, so skip it when the newest message is already stored.

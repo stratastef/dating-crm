@@ -185,8 +185,8 @@ def test_autopilot_handles_the_chats_it_can_act_on_and_says_what_it_is_doing(cli
     assert activities == {"Kim": "drafting_reply", "Sam": "sent_waiting"}
 
 
-def test_a_new_match_waits_for_your_opener_while_autopilot_sends_no_openers(client, user_id):  # noqa: F811
-    """Chat autopilot only replies (`docs/modules/chat-autopilot.md`); openers sent alone come with #73."""
+def test_a_match_added_by_hand_waits_for_your_opener(client, user_id):  # noqa: F811
+    """Chat autopilot writes openers only to new matches sync finds (`tests/test_openers.py`)."""
     autonomy(client, "autopilot")
     linked(client, "Ada", "match-ada", stage="matched")
 
