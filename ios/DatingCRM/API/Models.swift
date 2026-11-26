@@ -163,6 +163,30 @@ struct DashboardWeek: Codable, Identifiable, Equatable {
     var id: Date { week }
 }
 
+/// The Dashboard: the weeks, the headline (good dates per hour this week against the four-week average), this
+/// month's funnel and this month's AI spend.
+struct Dashboard: Codable, Equatable {
+    var weeks: [DashboardWeek]
+    /// Good dates per hour this week; nil with no time recorded this week.
+    var thisWeek: Double?
+    /// Good dates per hour over the four weeks before this one; nil with no time recorded in them.
+    var fourWeekAverage: Double?
+    var funnel: Funnel
+    /// This month's AI spend over this month's good dates; nil with no good date this month.
+    var spendPerGoodDateUsd: Double?
+    /// This month's AI spend against the cap.
+    var budget: Budget
+
+    /// Cards that reached each stage this month. `good` counts good dates rated this month.
+    struct Funnel: Codable, Equatable {
+        var matched: Int
+        var chatting: Int
+        var dateSet: Int
+        var dated: Int
+        var good: Int
+    }
+}
+
 /// A message Claude wrote for a card. `original` is Claude's text; `edited` is the user's version of it.
 struct Draft: Codable, Identifiable, Hashable {
     enum Kind: String, Codable { case opener, reply }
@@ -352,7 +376,7 @@ struct Budget: Codable, Equatable {
     /// "$8.20 of $30": cents only when there are any.
     var spentOfCap: String { "\(Self.dollars(spendUsd)) of \(Self.dollars(capUsd))" }
 
-    private static func dollars(_ usd: Double) -> String {
+    static func dollars(_ usd: Double) -> String {
         // en_US: "$30", not "US$30" outside the US. The app is not localized.
         usd.formatted(
             .currency(code: "USD").locale(Locale(identifier: "en_US"))
