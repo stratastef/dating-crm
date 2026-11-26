@@ -8,7 +8,7 @@ The signed-in app is `MainTabView` (`ios/DatingCRM/Screens/MainTabView.swift`): 
 | Review | `QueueView` |
 | Pipeline | `BoardView`. A tapped push switches to this tab and opens the card. |
 | Swipe | `SwipeView` |
-| You | `YouView`: Dashboard, Autopilot (`AutopilotView`), Preferences, Profile (Photos, Voice), Account (Settings, Sign out) |
+| You | `YouView`: Dashboard, Autopilot (`AutopilotView`), Preferences, Profile (Photos, Voice), Account (Settings, Sign out, which asks first) |
 
 ## Look (ADR 0009, `docs/design/mockups/a3-combined.html`)
 

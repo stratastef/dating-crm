@@ -8,7 +8,7 @@ The SwiftUI client for the API in the repo root. It needs Xcode 27 and an iOS 26
 | --- | --- |
 | `DatingCRM.xcodeproj` | The app target, the share extension target `DatingCRMShare` and one unit test target. |
 | `DatingCRM/DatingCRMApp.swift` | App entry: shows `SignInView` or `MainTabView` (the five tabs), depending on `Session`. |
-| `DatingCRM/Session.swift` | Sign-in state. Keeps the server URL in `UserDefaults` and the API token in the Keychain. |
+| `DatingCRM/Session.swift` | Sign-in state: phone number sign-in, developer sign-in, sign-out. Keeps the server URL in `UserDefaults` and this device's API token in the Keychain, where the share extension reads both. |
 | `DatingCRM/ForegroundTimer.swift` | Measures each foreground stretch; the app entry reports it with `POST /time` when the app leaves the foreground. |
 | `DatingCRM/Push.swift` | `Push` (device token, tapped card) and `AppDelegate`, which receives both from UIKit. |
 | `DatingCRM.entitlements` | The push notification entitlement. |
@@ -41,7 +41,12 @@ To run on your own iPhone, open the project in Xcode, pick your team under Signi
 
 ## Sign in
 
-Start the server (see the root `README.md`) and create a user with `uv run python -m app.auth you@example.com`. In the app, paste the server URL and the token that command printed. The app checks them with one `GET /cards` before it keeps them.
+`SignInView` asks for the phone number, then for the sign-in code the server texts to it ("your Dating CRM code"). A new code can be asked for 30 seconds after the last. A refusal (wrong or expired code, too many tries, no account for the number) shows in plain words under the field. See `docs/modules/sign-in.md` for the routes.
+
+- The server is `ServerURL` in `Info.plist`, `http://localhost:8000` for now. Set it to the production server before a TestFlight build.
+- Without an SMS provider the server writes the code to its log (`SMS to +1…: 123456 is your Dating CRM code`). Give your account a phone number first: `uv run python -m app.sign_in you@example.com +491701234567`.
+- Developer sign-in: a two-second press on the "Dating CRM" title opens a sheet for a server URL and an API token from `uv run python -m app.auth you@example.com`. The app checks them with one `GET /cards` before it keeps them.
+- Sign out sits under You and asks first. It revokes this device's token on the server (`POST /sign-out`), which also stops this phone's pushes, then forgets the session even if the server cannot be reached.
 
 A server on `localhost` or your local network may use plain `http`. Any other server needs `https`.
 
@@ -53,6 +58,8 @@ Debug builds sign in from the launch environment, store nothing and skip the pus
 SIMCTL_CHILD_DCRM_SERVER=http://localhost:8047 SIMCTL_CHILD_DCRM_TOKEN=<token> SIMCTL_CHILD_DCRM_TAB=review \
   xcrun simctl launch <udid> com.datingcrm.app
 ```
+
+`DCRM_SERVER` without a token points the phone number sign-in at that server. `DCRM_PHONE=+15555550100` opens the code step for that number without sending a code.
 
 ## Share a screenshot
 
@@ -78,7 +85,7 @@ After sign-in the app asks for permission to notify, gets a device token from Ap
 
 - Push needs a real iPhone, a paid Apple developer account and the server's `APNS_*` settings (see `docs/modules/push-notifications.md`). Run from Xcode, the app gets a sandbox token, so the server also needs `APNS_SANDBOX=1`.
 - The simulator gets no device token without an Apple account, so the tests cover only `Push`: the registration request and which card a tap opens. Not verified on a device: the permission prompt, the token arriving in `AppDelegate`, delivery of a push, and the tap opening the card on screen.
-- Signing out does not unregister the device. The phone keeps getting that user's pushes until someone else signs in on it.
+- Signing out unregisters the device: the server deletes it with this device's API token.
 
 ## Review queue
 

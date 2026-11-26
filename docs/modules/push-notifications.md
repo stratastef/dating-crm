@@ -10,7 +10,7 @@ send_push(db, user_id, "Hot lead", "Ada replied", card_id=card_id)
 
 - The push goes to every device the user registered. With `card_id`, tapping it opens that card in the app; without, it opens the app.
 - It is best effort and never raises for an APNs failure: a refusal or a network error is logged as a warning.
-- The iOS app registers its device with `POST /devices` and body `{"token": "<APNs device token in hex>"}`. A token belongs to the user who registered it last. When Apple answers `410` or `BadDeviceToken` for a token, its row in `devices` is deleted.
+- The iOS app registers its device with `POST /devices` and body `{"token": "<APNs device token in hex>"}`. A device belongs to the user and API token that registered it last. `POST /sign-out` revokes that API token and deletes the device with it, so the phone gets no more pushes. When Apple answers `410` or `BadDeviceToken` for a token, its row in `devices` is deleted.
 - Settings, passed by Compose to the API and worker. While any of the first four is unset, `send_push()` sends nothing and logs one line at `INFO`.
 
 | Variable | Value |

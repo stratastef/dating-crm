@@ -18,6 +18,26 @@ struct APIClient {
     var token: String
     var transport: Transport = { try await URLSession.shared.data(for: $0) }
 
+    // Sign-in. The first two need no token: call them on a client whose token is "".
+
+    /// Texts a sign-in code to the phone number (E.164). `403` means no account has the number: an invite code
+    /// is needed. `429` means too many codes were asked for.
+    func requestSignInCode(phone: String) async throws {
+        try await data("POST", "sign-in/code", body: Self.encoder.encode(["phone": phone]))
+    }
+
+    /// Trades the phone number and sign-in code for an API token for this device. `401` means a wrong code,
+    /// `410` an expired one, `429` too many tries.
+    func signIn(phone: String, code: String) async throws -> String {
+        let signedIn: SignedIn = try await send("POST", "sign-in", body: Self.encoder.encode(["phone": phone, "code": code]))
+        return signedIn.token
+    }
+
+    /// Revokes this device's token. The server stops sending this phone the user's pushes.
+    func signOut() async throws {
+        try await data("POST", "sign-out")
+    }
+
     func cards() async throws -> [Card] {
         try await send("GET", "cards")
     }
@@ -291,7 +311,7 @@ struct APIClient {
         }
         var request = URLRequest(url: url)
         request.httpMethod = method
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         if let body {
             request.httpBody = body
             request.setValue(contentType, forHTTPHeaderField: "Content-Type")
@@ -333,6 +353,10 @@ struct APIClient {
         encoder.dateEncodingStrategy = .formatted(dayFormat)
         return encoder
     }()
+}
+
+private struct SignedIn: Decodable {
+    let token: String
 }
 
 private struct SwipeDecided: Decodable {

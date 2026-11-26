@@ -5,6 +5,10 @@
 	<!-- The App Group whose defaults hold the server URL. Set by the APP_GROUP build setting. -->
 	<key>AppGroup</key>
 	<string>$(APP_GROUP)</string>
+	<!-- The server the app signs in to with a phone number. shortcut: the local stack until there is a
+	     production server; set it before a TestFlight build. -->
+	<key>ServerURL</key>
+	<string>http://localhost:8000</string>
 	<!-- Lets the app reach a development server over plain http on localhost or the LAN. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
