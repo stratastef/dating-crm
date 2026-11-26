@@ -1,7 +1,7 @@
-"""API authentication: one opaque bearer token per user.
+"""API authentication: one opaque bearer token per signed-in device.
 
 The client sends `Authorization: Bearer <token>`. Only the SHA-256 of the token is stored.
-Create a user and print their token once: `python -m app.auth <email>`.
+Create a user and print their token once: `python -m app.auth <email>`. The app gets its token from `POST /sign-in`.
 """
 
 import hashlib
@@ -21,7 +21,8 @@ from app.db import database_url
 @dataclass(frozen=True)
 class User:
     id: int
-    email: str
+    email: str | None
+    token_id: int  # the token this request came with: the device it came from
 
 
 def _hash(token: str) -> str:
@@ -29,14 +30,22 @@ def _hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def create_user(connection: Connection, email: str) -> str:
-    """Insert a user and return their API token. The token cannot be recovered later."""
+def issue_token(connection: Connection, user_id: int) -> str:
+    """Return a new API token for one device of the user. The token cannot be recovered later."""
     token = secrets.token_urlsafe(32)
     connection.execute(
-        text("INSERT INTO users (email, token_hash) VALUES (:email, :token_hash)"),
-        {"email": email, "token_hash": _hash(token)},
+        text("INSERT INTO api_tokens (user_id, token_hash) VALUES (:user_id, :token_hash)"),
+        {"user_id": user_id, "token_hash": _hash(token)},
     )
     return token
+
+
+def create_user(connection: Connection, email: str | None, phone: str | None = None) -> str:
+    """Insert a user and return an API token for them."""
+    user_id = connection.execute(
+        text("INSERT INTO users (email, phone) VALUES (:email, :phone) RETURNING id"), {"email": email, "phone": phone}
+    ).scalar_one()
+    return issue_token(connection, user_id)
 
 
 def _connection(request: Request) -> Iterator[Connection]:
@@ -53,12 +62,15 @@ def _current_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(HTTPBearer(auto_error=False))],
 ) -> User:
     row = credentials and db.execute(
-        text("SELECT id, email FROM users WHERE token_hash = :token_hash"),
+        text(
+            "SELECT t.user_id, u.email, t.id AS token_id FROM api_tokens t JOIN users u ON u.id = t.user_id"
+            " WHERE t.token_hash = :token_hash"
+        ),
         {"token_hash": _hash(credentials.credentials)},
     ).one_or_none()
     if not row:
         raise HTTPException(status_code=401, detail="invalid or missing token", headers={"WWW-Authenticate": "Bearer"})
-    return User(id=row.id, email=row.email)
+    return User(id=row.user_id, email=row.email, token_id=row.token_id)
 
 
 # Declare `user: CurrentUser` in a route to require authentication and get the caller.

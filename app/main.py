@@ -25,7 +25,7 @@ def create_app(url: str | None = None) -> FastAPI:
         return {"status": "ok"}
 
     @app.get("/me")
-    def me(user: CurrentUser) -> dict[str, str]:
+    def me(user: CurrentUser) -> dict[str, str | None]:
         return {"email": user.email}
 
     @app.post("/jobs/ping")

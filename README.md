@@ -11,7 +11,9 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/modules.py` | Imports every module in `app/`: a module joins the API by defining `router`, the worker by using `@handler` |
 | `app/jobs.py` | Job queue: `enqueue()`, `@handler`, `run_once()`, `enqueue_recurring()` |
 | `app/db.py` | `database_url()`, read from `DATABASE_URL` |
-| `app/auth.py` | `CurrentUser` and `Db` route dependencies, `create_user()` |
+| `app/auth.py` | `CurrentUser` and `Db` route dependencies, `create_user()`, `issue_token()` |
+| `app/sign_in.py` | Sign-in by phone number and sign-in code: `POST /sign-in/code`, `POST /sign-in`, `POST /sign-out` |
+| `app/sms.py` | `send()`, the only way to text a phone |
 | `app/cards.py` | Match cards and their messages: routes under `/cards` |
 | `app/card_lookup.py` | Shared reads of one card: `own_card()`, `find_card()`, `conversation()`, `chat_lines()`, `unanswered()` |
 | `app/llm.py` | `call()`, the only way to call Claude; records each call's cost |
@@ -84,6 +86,7 @@ Read the doc for a module before you change it or call it. Review rules live in 
 - [Paid items](docs/modules/paid-items.md)
 - [Tinder connector](docs/modules/tinder-connector.md)
 - [iOS app shell and shared components](docs/modules/ios-app-shell.md)
+- [Sign-in](docs/modules/sign-in.md)
 
 ## Run the stack
 
@@ -119,10 +122,11 @@ Fixtures in `tests/conftest.py`:
 | `apns` | The stub that replaces `app.push.post` in every test. See "Push notifications". |
 | `jev` | The stub that replaces `app.jev.ask` in every test. See "Jev checks". |
 | `gcal` | The stub that replaces `app.calendar.google` in every test. See "Google Calendar holds". |
+| `sms` | The stub that replaces `app.sms.send` in every test. See "Sign-in". |
 
 ## Authentication and tenancy
 
-Each user has one opaque API token. The client sends `Authorization: Bearer <token>`. Only the SHA-256 of the token is stored. Create a user and print their token once:
+Each signed-in device has its own opaque API token, which the app gets by signing in with a phone number and a sign-in code (see [Sign-in](docs/modules/sign-in.md)). The client sends `Authorization: Bearer <token>`. Only the SHA-256 of the token is stored. Create a user and print a token once, for the developer sign-in:
 
 ```sh
 uv run python -m app.auth you@example.com
