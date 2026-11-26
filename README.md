@@ -55,6 +55,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `migrations/versions/` | Alembic migrations |
 | `tests/` | pytest suite |
 | `compose.yaml` | `db`, `api` and `worker` services |
+| `compose.prod.yaml` | Production overrides on the VPS. See [docs/deploy.md](docs/deploy.md). |
 | `ios/` | SwiftUI app. See [ios/README.md](ios/README.md). |
 
 Requirements: Docker, [uv](https://docs.astral.sh/uv/). Python 3.12 is pinned in `.python-version`.
@@ -178,3 +179,4 @@ Commit `uv.lock`.
 ## CI
 
 `.github/workflows/ci.yml` runs four jobs on every push and pull request: `test` (`uv run pytest` against Postgres), `lint` (`uv run ruff check .` and `uv run pyright`), `stack` (builds the images, starts Compose and calls `/health`) and `ios` (`xcodebuild test` on Xcode 26.6, older than a local Xcode 27; see `ios/README.md`). Run the first two locally before you report a ticket done.
+A push to `main` that passes `test`, `lint` and `stack` also runs `deploy`, which ships the API to the VPS. See [docs/deploy.md](docs/deploy.md).

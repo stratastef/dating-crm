@@ -1,0 +1,36 @@
+# Production on the VPS, layered over compose.yaml. The deploy writes COMPOSE_FILE and IMAGE_TAG
+# into /opt/dating-crm/.env, so a plain `docker compose` there uses both files. See docs/deploy.md.
+services:
+  db:
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in PRODUCTION_ENV}
+    # The host's 5432 belongs to another project; nothing outside Compose needs the database.
+    ports: !reset []
+
+  api:
+    image: ghcr.io/stratastef/dating-crm:${IMAGE_TAG:?}
+    build: !reset null
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://app:${POSTGRES_PASSWORD:?}@db:5432/app
+      # compose.yaml defaults to the log fake for local development; production must name its provider.
+      SMS_PROVIDER: ${SMS_PROVIDER:?set SMS_PROVIDER in PRODUCTION_ENV}
+    # Reached only through Caddy on the shared `edge` network.
+    ports: !reset []
+    networks:
+      default:
+      edge:
+        aliases: [dating-crm-api]
+
+  worker:
+    image: ghcr.io/stratastef/dating-crm:${IMAGE_TAG:?}
+    build: !reset null
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://app:${POSTGRES_PASSWORD:?}@db:5432/app
+
+networks:
+  # Created once on the VPS (`docker network create edge`); the host's Caddy joins it too.
+  edge:
+    external: true
