@@ -22,7 +22,6 @@ def test_a_draft_for_a_match_who_replied_within_the_hour_sends_a_push_at_once(ap
 
     assert len(apns.sent) == 1
     assert apns.sent[0]["payload"]["card_id"] == card_id
-    assert "Ada" in apns.sent[0]["payload"]["aps"]["alert"]["body"]
 
 
 def test_a_draft_for_any_other_match_sends_no_push(app, client, llm, apns):

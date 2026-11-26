@@ -71,8 +71,14 @@ def is_hot_lead(db: Connection, user_id: int, card_id: int) -> bool:
 def notify_if_hot(
     db: Connection, user_id: int, card_id: int, name: str, title: str = "Hot lead", body: str | None = None
 ) -> None:
-    """Call when an item joins the queue. A hot lead is pushed at once; the rest waits in the queue silently."""
+    """Call when an item joins the queue. A hot lead is pushed at once; the rest waits in the queue silently.
+
+    The push shows on the lock screen, so without the user's name previews it names nobody and quotes nothing.
+    """
     if is_hot_lead(db, user_id, card_id):
+        previews = db.execute(text("SELECT push_name_previews FROM users WHERE id = :id"), {"id": user_id}).scalar_one()
+        if not previews:
+            title, body = "Hot lead", "Someone replied. A draft is ready."
         send_push(db, user_id, title, body or f"A draft for {name} is waiting for you", card_id=card_id)
 
 
