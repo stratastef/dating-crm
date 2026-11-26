@@ -69,6 +69,32 @@ struct APIClientTests {
         #expect(try sentJSON(request) == ["name": "Ada", "app": "feeld", "stage": "chatting"] as NSDictionary)
     }
 
+    @Test func readsThePipelineGroupedByWhoActsNext() async throws {
+        server.respond("""
+        [{"group": "waiting_for_you", "cards": [
+           {"id": 1, "app": "tinder", "name": "Ada", "stage": "chatting", "notes": "", "stalled": false, "hot": true,
+            "pipeline_group": "waiting_for_you", "reason": "handover", "handover_trigger": "logistics",
+            "autopilot_activity": null}]},
+         {"group": "handled_by_autopilot", "cards": [
+           {"id": 2, "app": "tinder", "name": "Bea", "stage": "matched", "notes": "", "stalled": false, "hot": false,
+            "pipeline_group": "handled_by_autopilot", "reason": null, "handover_trigger": null,
+            "autopilot_activity": "drafting_reply"}]}]
+        """)
+
+        let groups = try await server.client().pipeline()
+
+        #expect(groups.map(\.group) == ["waiting_for_you", "handled_by_autopilot"])
+        #expect(groups.map(\.title) == ["Waiting for you", "Handled by autopilot"])
+        let ada = try #require(groups.first?.cards.first)
+        #expect((ada.pipelineGroup, ada.reason, ada.handoverTrigger) == ("waiting_for_you", "handover", "logistics"))
+        let bea = try #require(groups.last?.cards.first)
+        #expect((bea.pipelineGroup, bea.reason, bea.autopilotActivity) == ("handled_by_autopilot", nil, "drafting_reply"))
+        let request = try #require(server.requests.first)
+        #expect(request.httpMethod == "GET")
+        #expect(request.url?.absoluteString == "https://crm.test/pipeline")
+        #expect(request.httpBody == nil)
+    }
+
     @Test func boardStagesAreTheServersSevenInPipelineOrder() {
         #expect(Stage.allCases.map(\.rawValue) == [
             "matched", "chatting", "number_swapped", "date_set", "dated", "seeing_them", "archived",

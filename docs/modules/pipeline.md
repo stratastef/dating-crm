@@ -39,4 +39,4 @@ Autopilot sends no openers yet, so a new match is `opener_due` even when autopil
 
 - A reason: add it to `Reason` in its precedence slot and add its check to `_reason()` at the same place. Fetch what it needs in `place()` with one query over all the cards (`card_id = ANY(:ids)`), like `failed`.
 - An activity: add it to `Activity` and set it in the `handled_by_autopilot` branch of `place()`.
-- The app maps each code to its copy (`PipelineView`); a code it does not know shows no status line.
+- The app words each code in `Card.pipelineStatus` (`ios/DatingCRM/Screens/PipelineView.swift`); a code it does not know shows no status line.
