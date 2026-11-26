@@ -64,6 +64,9 @@ The VPS also runs the `vmte` project (`/opt/vmte`, deployed by another developer
   TWILIO_ACCOUNT_SID=
   TWILIO_AUTH_TOKEN=
   TWILIO_SENDER=
+  # Until Twilio works (#50): your own number(s) sign in with this code, nothing is texted. Remove when SMS works.
+  SIGN_IN_FIXED_CODE=
+  SIGN_IN_FIXED_CODE_PHONES=
   JEV_BASE_URL=
   JEV_API_KEY=
   JEV_TOOL=

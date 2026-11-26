@@ -9,6 +9,7 @@ the sign-in that uses it creates the account. Give an existing account a phone n
 import hashlib
 import hmac
 import logging
+import os
 import re
 import secrets
 import sys
@@ -54,6 +55,14 @@ def _refusal(status: int, detail: str) -> JSONResponse:
     return JSONResponse(status_code=status, content={"detail": detail})
 
 
+def _fixed_code(phone: str) -> str | None:
+    """`SIGN_IN_FIXED_CODE` (six digits) for a number listed in `SIGN_IN_FIXED_CODE_PHONES` (comma-separated E.164),
+    else None. shortcut: lets the owner sign in before SMS works; remove once Twilio sends codes (#50)."""
+    code = os.environ.get("SIGN_IN_FIXED_CODE", "")
+    phones = os.environ.get("SIGN_IN_FIXED_CODE_PHONES", "").replace(" ", "").split(",")
+    return code if re.fullmatch(r"\d{6}", code) and phone in phones else None
+
+
 def _hash(phone: str, code: str) -> str:
     return hashlib.sha256(f"{phone} {code}".encode()).hexdigest()
 
@@ -78,7 +87,8 @@ def send_code(body: CodeRequest, request: Request, db: Db) -> JSONResponse | Non
             text("SELECT id FROM invite_codes WHERE code_hash = :code_hash AND used_at IS NULL"),
             {"code_hash": code_hash(body.invite_code)},
         ).scalar_one_or_none()
-    code = f"{secrets.randbelow(10**6):06d}"
+    fixed = _fixed_code(body.phone)
+    code = fixed or f"{secrets.randbelow(10**6):06d}"
     # A phone number has one live code: a new one replaces the last.
     db.execute(text("UPDATE sign_in_codes SET code_hash = NULL WHERE phone = :phone"), {"phone": body.phone})
     db.execute(
@@ -97,6 +107,8 @@ def send_code(body: CodeRequest, request: Request, db: Db) -> JSONResponse | Non
     )
     if not user_id and not invite_id:
         return _refusal(403, "invite_code_invalid" if body.invite_code else "invite_code_needed")
+    if fixed:
+        return None  # the number's owner already knows the code: nothing is texted
     try:
         sms.send(body.phone, f"{code} is your Dating CRM code. It expires in {CODE_MINUTES} minutes.")
     except sms.NotSent as error:

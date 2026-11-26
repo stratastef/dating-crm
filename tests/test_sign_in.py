@@ -365,3 +365,25 @@ def test_with_sms_provider_log_the_code_goes_to_the_server_log_and_not_to_twilio
     assert twilio.sent == []
     [logged] = re.findall(r"\b(\d{6}) is your Dating CRM code", caplog.text)
     assert sign_in(device, logged).status_code == 200
+
+
+def test_a_number_listed_for_the_fixed_code_signs_in_with_it_and_gets_no_text(app, account, sms, monkeypatch):
+    monkeypatch.setenv("SIGN_IN_FIXED_CODE", "222222")
+    monkeypatch.setenv("SIGN_IN_FIXED_CODE_PHONES", f"+15555550199, {PHONE}")
+    device = TestClient(app)
+
+    assert device.post("/sign-in/code", json={"phone": PHONE}).status_code == 204
+
+    assert sms.sent == []
+    assert device.post("/sign-in", json={"phone": PHONE, "code": "222222"}).status_code == 200
+
+
+def test_the_fixed_code_never_works_for_a_number_not_listed(app, account, sms, monkeypatch):
+    monkeypatch.setenv("SIGN_IN_FIXED_CODE", "222222")
+    monkeypatch.setenv("SIGN_IN_FIXED_CODE_PHONES", "+15555550199")
+    device = TestClient(app)
+
+    assert device.post("/sign-in/code", json={"phone": PHONE}).status_code == 204
+
+    assert sms.code(PHONE) != "222222" or pytest.skip("the random code happened to be 222222")
+    assert device.post("/sign-in", json={"phone": PHONE, "code": "222222"}).status_code == 401
