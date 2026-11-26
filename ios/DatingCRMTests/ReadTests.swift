@@ -8,13 +8,15 @@ struct ReadTests {
     @Test func loadsTheReadOfACardWithEvidenceAndConfidence() async throws {
         server.respond("""
         [{"id": 7, "card_id": 1, "kind": "texting_style", "value": "short, lots of emoji",
-          "evidence": "'omg yes 😂'", "confidence": 0.85, "corrected": null}]
+          "evidence": "'omg yes 😂'", "confidence": 0.85, "corrected": null, "confidence_word": "Sure"}]
         """)
 
         let read = try await server.client().read(cardID: 1)
 
         #expect(read == [
-            Inference(id: 7, kind: "texting_style", value: "short, lots of emoji", evidence: "'omg yes 😂'", confidence: 0.85)
+            Inference(
+                id: 7, kind: "texting_style", value: "short, lots of emoji", evidence: "'omg yes 😂'", confidence: 0.85,
+                confidenceWord: "Sure")
         ])
         #expect(read[0].title == "Texting style")
         #expect(read[0].text == "short, lots of emoji")
@@ -35,7 +37,7 @@ struct ReadTests {
     @Test func aCorrectionReplacesTheInferredValue() async throws {
         server.respond("""
         {"id": 7, "card_id": 1, "kind": "tone", "value": "bold", "evidence": "teases back", "confidence": 0.6,
-         "corrected": "sincere"}
+         "corrected": "sincere", "confidence_word": "Likely"}
         """)
 
         let corrected = try await server.client().correct(inferenceID: 7, text: "sincere")

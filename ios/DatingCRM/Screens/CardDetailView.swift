@@ -2,8 +2,9 @@ import SwiftUI
 
 /// One card: the match's face as its header, then two tabs. Chat is the conversation as bubbles, with the handover
 /// banner at its end and the draft docked below like a composer (`DraftComposer`). Details holds the stage, next
-/// action, due date, notes and match read. The card opens on Chat in Matched and Chatting and on Details from
-/// Number swapped on. Scrolled past the header, the navigation bar shows the face and name instead.
+/// action, due date, notes, the date's rating and note, and the match read; edits save as the user makes them. The
+/// card opens on Chat in Matched and Chatting and on Details from Number swapped on. Scrolled past the header, the
+/// navigation bar shows the face and name instead.
 struct CardDetailView: View {
     enum Tab: String, CaseIterable, Identifiable {
         case chat = "Chat", details = "Details"
@@ -20,6 +21,7 @@ struct CardDetailView: View {
     @State private var messages: [Message] = []
     @State private var loaded = false
     @State private var error: String?
+    @State private var saveError: String?
     @State private var askForRating = false
     @State private var collapsed = false
     @State private var toast: Toast?
@@ -62,14 +64,6 @@ struct CardDetailView: View {
                     }
                 }
             }
-            if tab == .details {
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Save") {
-                        Task { await save() }
-                    }
-                    .disabled(card == saved)
-                }
-            }
         }
         .navigationDestination(isPresented: $needsVoice) { VoiceView(client: client) }
         .onChange(of: card.stage) {
@@ -79,9 +73,10 @@ struct CardDetailView: View {
             DateRatingSheet(name: card.name) { rating, note in
                 card.dateRating = rating
                 card.dateNote = note
-                Task { await save() }
             }
         }
+        // On the whole card, not the Details tab: switching to Chat keeps the debounce, leaving saves at once.
+        .autosave(Edits(card), saved: Edits(saved)) { await save($0) }
         .task { await load() }
     }
 
@@ -179,17 +174,37 @@ struct CardDetailView: View {
                 Picker("Stage", selection: $card.stage) {
                     ForEach(Stage.allCases) { Text($0.title).tag($0) }
                 }
-                TextField("Next action", text: nextAction)
-                Toggle("Due date", isOn: hasDueDate)
-                if let dueDate = card.dueDate {
-                    DatePicker("Due", selection: Binding(get: { dueDate }, set: { card.dueDate = $0 }), displayedComponents: .date)
-                }
+                .frame(minHeight: 44)
+                failure(\.stage)
             }
             Section {
-                TextField("Notes", text: $card.notes, axis: .vertical)
-                    .lineLimit(3...)
+                GrowingField(label: "Next action", prompt: "What to do next", text: nextAction)
+                failure(\.nextAction)
+                Toggle("Due date", isOn: hasDueDate)
+                    .frame(minHeight: 44)
+                if let dueDate = card.dueDate {
+                    DatePicker("Due", selection: Binding(get: { dueDate }, set: { card.dueDate = $0 }), displayedComponents: .date)
+                        .frame(minHeight: 44)
+                }
+                failure(\.dueDate)
+            } header: {
+                Text("Next action").foregroundStyle(Color.primary)
+            }
+            Section {
+                GrowingField(label: "Notes", prompt: "What to remember about them", text: $card.notes)
+                failure(\.notes)
             } header: {
                 Text("Notes").foregroundStyle(Color.primary)
+            }
+            if card.dateRating != nil || card.needsDateRating {
+                RatingPicker(title: "The date", rating: $card.dateRating)
+                Section {
+                    failure(\.dateRating)
+                    GrowingField(label: "Date note", prompt: "What stood out", text: dateNote)
+                    failure(\.dateNote)
+                } header: {
+                    Text("Date note").foregroundStyle(Color.primary)
+                }
             }
             ReadSection(client: client, cardID: card.id)
         }
@@ -207,6 +222,17 @@ struct CardDetailView: View {
         Binding(get: { card.nextAction ?? "" }, set: { card.nextAction = $0.isEmpty ? nil : $0 })
     }
 
+    private var dateNote: Binding<String> {
+        Binding(get: { card.dateNote ?? "" }, set: { card.dateNote = $0 })
+    }
+
+    /// The save error, under a field whose edit the server does not have yet.
+    @ViewBuilder private func failure<Value: Equatable>(_ field: KeyPath<Edits, Value>) -> some View {
+        if let saveError, Edits(card)[keyPath: field] != Edits(saved)[keyPath: field] {
+            ErrorRow(text: saveError) { await save(Edits(card)) }
+        }
+    }
+
     private var hasDueDate: Binding<Bool> {
         Binding(
             get: { card.dueDate != nil },
@@ -218,16 +244,7 @@ struct CardDetailView: View {
         do {
             let fresh = try await client.card(id: card.id)
             messages = try await client.messages(cardID: card.id)
-            // Unsaved Details edits stay; everything else is the server's.
-            let edited = card != saved ? card : nil
-            saved = fresh
-            card = fresh
-            if let edited {
-                card.stage = edited.stage
-                card.notes = edited.notes
-                card.nextAction = edited.nextAction
-                card.dueDate = edited.dueDate
-            }
+            take(fresh)
             error = nil
         } catch {
             self.error = "The card did not load. Check your connection, then tap to try again."
@@ -256,15 +273,47 @@ struct CardDetailView: View {
         onSaved(saved)
     }
 
-    private func save() async {
+    /// Takes the server's copy of the card. Details edits it does not have yet stay; everything else is the server's.
+    private func take(_ fresh: Card) {
+        let edits = Edits(card)
+        let unsaved = edits != Edits(saved)
+        saved = fresh
+        card = fresh
+        if unsaved { edits.apply(to: &card) }
+    }
+
+    private func save(_ edits: Edits) async {
+        var changed = saved
+        edits.apply(to: &changed)
         do {
-            saved = try await client.update(card)
-            card = saved
-            error = nil
+            take(try await client.update(changed))
+            saveError = nil
             onSaved(saved)
         } catch {
-            self.error = error.localizedDescription
+            if !Task.isCancelled {
+                saveError = "Not saved. Check your connection, then tap to try again."
+            }
         }
+    }
+}
+
+/// What the Details tab edits. The autosave compares these, not the whole card, whose summary only the server sets.
+private struct Edits: Equatable {
+    var stage: Stage
+    var notes: String
+    var nextAction: String?
+    var dueDate: Date?
+    var dateRating: Int?
+    var dateNote: String?
+
+    init(_ card: Card) {
+        (stage, notes, nextAction, dueDate, dateRating, dateNote) =
+            (card.stage, card.notes, card.nextAction, card.dueDate, card.dateRating, card.dateNote)
+    }
+
+    func apply(to card: inout Card) {
+        (card.stage, card.notes, card.nextAction, card.dueDate, card.dateRating, card.dateNote) =
+            (stage, notes, nextAction, dueDate, dateRating, dateNote)
     }
 }
 
