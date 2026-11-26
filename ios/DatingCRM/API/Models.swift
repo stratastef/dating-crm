@@ -203,6 +203,12 @@ struct Preferences: Codable, Equatable {
     var dealbreakers: [String] = []
 }
 
+/// The voice questionnaire: the server's questions and the user's answers, keyed by the question's text.
+struct Voice: Decodable, Equatable {
+    var questions: [String]
+    var answers: [String: String]
+}
+
 /// One of the user's own photos on the server.
 struct ProfilePhoto: Codable, Identifiable, Equatable {
     let id: Int

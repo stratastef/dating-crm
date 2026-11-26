@@ -33,6 +33,20 @@ def test_a_card_with_no_messages_gets_an_opener_written_from_the_style_profile(a
     assert "hinge" in prompt and "Sam" in prompt and "Has a dog called Biscuit" in prompt
 
 
+def test_a_draft_is_written_with_the_preferences_in_force(app, client, llm):
+    write_profile(app, client, llm, "Short, lowercase, teasing.")
+    client.put("/preferences", json={"wishes": "someone outdoorsy", "must_haves": ["wants kids"], "dealbreakers": []})
+    client.put("/preferences", json={"wishes": "someone bookish", "must_haves": ["lives nearby"], "dealbreakers": []})
+    card_id = client.post("/cards", json={"app": "hinge", "name": "Sam"}).json()["id"]
+
+    llm.reply = "what are you reading"
+    client.post(f"/cards/{card_id}/drafts")
+
+    prompt = llm.prompts[-1]
+    assert "someone bookish" in prompt and "lives nearby" in prompt
+    assert "someone outdoorsy" not in prompt
+
+
 def test_a_card_with_messages_gets_a_reply_written_from_the_conversation_and_similar_past_chats(app, client, llm):
     dated = client.post("/cards", json={"app": "tinder", "name": "Kim", "stage": "dated"}).json()["id"]
     client.post(f"/cards/{dated}/messages", json={"sender": "them", "body": "do you climb outdoors too"})
