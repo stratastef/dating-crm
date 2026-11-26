@@ -43,6 +43,8 @@ The VPS also runs the `vmte` project (`/opt/vmte`, deployed by another developer
 - The `PRODUCTION_ENV` secret: the server's environment, one `NAME=value` per line, set with `gh secret set PRODUCTION_ENV --repo stratastef/dating-crm < production.env`. GitHub secrets cannot be read back, so keep the file in your password manager. It is the only copy of `TOKEN_VAULT_MASTER_KEY` outside the VPS: without it, a restored backup cannot decrypt any session token.
 
   ```sh
+  # Never change these two after the first deploy. Postgres keeps the password it was created with,
+  # and a new master key cannot decrypt the tokens already stored.
   # openssl rand -hex 32 (hex, because it goes inside DATABASE_URL)
   POSTGRES_PASSWORD=
   # openssl rand -base64 32 | tr '+/' '-_'
