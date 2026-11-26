@@ -26,6 +26,7 @@ x-app: &app
     JEV_API_KEY: ${JEV_API_KEY:-}
     JEV_TOOL: ${JEV_TOOL:-}
     JEV_MODEL: ${JEV_MODEL:-}
+    JEV_PROVIDER: ${JEV_PROVIDER:-} # llm: the checks ask the default model, for demos (docs/modules/jev-checks.md)
     USER_TIMEZONE: ${USER_TIMEZONE:-}
     PHOTOS_DIR: /data/photos
   volumes:

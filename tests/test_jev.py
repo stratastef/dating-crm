@@ -124,6 +124,43 @@ def test_a_failing_jev_counts_as_a_hit(real_jev, monkeypatch, me):
     assert jev_module.is_hot_lead(*me, "hello there") is False
 
 
+@pytest.fixture
+def model_jev(monkeypatch, llm):
+    """The checks answered by the default model (`JEV_PROVIDER=llm`): `llm.reply` is the model's answer."""
+    monkeypatch.setenv("JEV_PROVIDER", "llm")
+    return llm
+
+
+def test_the_demo_provider_asks_every_check_of_a_message_in_one_model_call(model_jev, jev, me):
+    # Two sentences times the four guardrail checks: items 1 and 2 are `denies_ai` for each sentence.
+    model_jev.reply = (
+        'Here you go:\n```json\n{"1": true, "2": false, "3": false, "4": false, "5": false, "6": false, "7": false,'
+        ' "8": false}\n```'
+    )
+
+    assert jev_module.guardrail_hits(*me, "I'm a real <human>. Promise.") == ["denies_ai"]
+
+    assert len(model_jev.prompts) == 1
+    assert "<sentence>I'm a real &lt;human&gt;.</sentence>" in model_jev.prompts[0]
+    assert jev_module.CHECKS["denies_ai"] in model_jev.prompts[0]
+    assert jev.asked == []  # treg's Jev is never asked
+    db, _ = me
+    assert db.exec_driver_sql("SELECT purpose FROM llm_calls").scalars().all() == ["jev"]
+
+
+@pytest.mark.parametrize(
+    "reply",
+    ["no idea", '{"1": false}', '{"1": "no", "2": "no", "3": "no", "4": "no", "5": "no"}'],
+    ids=["not json", "verdict missing", "verdict not a boolean"],
+)
+def test_the_demo_provider_fails_closed_on_an_answer_it_cannot_read(model_jev, me, reply):
+    model_jev.reply = reply
+
+    assert jev_module.guardrail_hits(*me, "hello there") == ["unavailable"]
+    assert jev_module.handover_hits(*me, "hello there") == ["unavailable"]
+    assert jev_module.is_hot_lead(*me, "hello there") is False
+
+
 def test_an_incoming_message_is_stored_with_its_handover_result(app, client, jev):
     jev.yes["logistics"] = ["saturday"]
     card_id = client.post("/cards", json={"app": "hinge", "name": "Sam"}).json()["id"]
