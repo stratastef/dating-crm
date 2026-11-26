@@ -11,7 +11,7 @@ struct SettingsTests {
         return (request.httpMethod, request.url?.absoluteString, body ?? nil)
     }
 
-    // Kill switch.
+    // Pause.
 
     @Test func readsWhatIsPaused() async throws {
         server.respond(#"{"all": false, "apps": ["tinder"]}"#)
@@ -50,23 +50,27 @@ struct SettingsTests {
     // Autonomy per job.
 
     @Test func readsTheAutonomyLevelOfEachJob() async throws {
-        server.respond(#"{"chat": "guardrails", "profile": "copilot", "swipe": "off"}"#)
+        server.respond(#"{"chat": "autopilot", "profile": "full_autopilot", "swipe": "off"}"#)
 
         let levels = try await server.client().autonomy()
 
-        #expect(levels == ["chat": .guardrails, "profile": .copilot, "swipe": .off])
+        #expect(levels == ["chat": .autopilot, "profile": .fullAutopilot, "swipe": .off])
         #expect(try sent().url == "https://crm.test/autonomy")
     }
 
     @Test func setsTheAutonomyLevelOfOneJob() async throws {
-        server.respond(#"{"chat": "full", "profile": "copilot", "swipe": "off"}"#)
+        server.respond(#"{"chat": "full_autopilot", "profile": "copilot", "swipe": "off"}"#)
 
-        let levels = try await server.client().setAutonomy(job: "chat", level: .full)
+        let levels = try await server.client().setAutonomy(job: "chat", level: .fullAutopilot)
 
-        #expect(levels["chat"] == .full)
+        #expect(levels["chat"] == .fullAutopilot)
         #expect(try sent().method == "PUT")
         #expect(try sent().url == "https://crm.test/autonomy/chat")
-        #expect(try sent().body == ["level": "full"])
+        #expect(try sent().body == ["level": "full_autopilot"])
+    }
+
+    @Test func thePickerNamesTheLevelsAsTheGlossaryDoes() {
+        #expect(AutonomyLevel.allCases.map(\.title) == ["Off", "Copilot", "Autopilot", "Full autopilot"])
     }
 
     // Budget and spend.

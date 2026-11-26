@@ -1,4 +1,4 @@
-"""Autonomy level per job and the kill switch: both decide whether autopilot may act."""
+"""Autonomy level per job and Pause: both decide whether autopilot may act."""
 
 from typing import Literal
 
@@ -10,7 +10,7 @@ from app import llm
 from app.auth import CurrentUser, Db
 
 Job = Literal["chat", "profile", "swipe"]
-Level = Literal["off", "copilot", "guardrails", "full"]
+Level = Literal["off", "copilot", "autopilot", "full_autopilot"]
 
 DEFAULT_LEVELS: dict[str, str] = {"chat": "copilot", "profile": "copilot", "swipe": "off"}
 
@@ -73,13 +73,13 @@ def autopilot_block(db: Connection, user_id: int, app: str | None, job: Job) -> 
     if llm.budget_reached(db, user_id):
         return "autopilot paused for all apps: AI budget reached"
     level = autonomy_levels(db, user_id)[job]
-    if level not in ("guardrails", "full"):
+    if level not in ("autopilot", "full_autopilot"):
         return f"{job} autonomy is {level}"
     return None
 
 
 def autopilot_allowed(db: Connection, user_id: int, app: str | None, job: Job) -> bool:
-    """True if the app may act alone: nothing is paused and the job's autonomy is guardrails or full."""
+    """True if the app may act alone: nothing is paused and the job's autonomy is autopilot or full_autopilot."""
     return autopilot_block(db, user_id, app, job) is None
 
 

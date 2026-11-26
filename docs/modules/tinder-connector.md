@@ -1,6 +1,6 @@
 # Tinder connector
 
-`app/tinder.py` reads your own Tinder account with your own web session token. It supports `read_matches`, `read_messages`, `send`, `read_candidates`, `like` and `pass`, and the paid items `super_like` and `boost`, which are spent only on the user's approval (see "Paid items"). A message goes out when the user taps send on a draft (see "Drafts"), or on its own only with chat autonomy at `guardrails` or `full` (see "Chat autopilot"). A like or pass goes out when the user swipes on a candidate (see "Swipe copilot"), or on its own only once the user turns swipe autopilot on (see "Swipe autopilot"). Set `CONNECTOR_DISABLED_CAPABILITIES=tinder:send` to keep it read-only. Tinder's terms do not allow this API use; see Risks in the spec.
+`app/tinder.py` reads your own Tinder account with your own web session token. It supports `read_matches`, `read_messages`, `send`, `read_candidates`, `like` and `pass`, and the paid items `super_like` and `boost`, which are spent only on the user's approval (see "Paid items"). A message goes out when the user taps send on a draft (see "Drafts"), or on its own only with chat autonomy at `autopilot` or `full_autopilot` (see "Chat autopilot"). A like or pass goes out when the user swipes on a candidate (see "Swipe copilot"), or on its own only once the user turns swipe autopilot on (see "Swipe autopilot"). Set `CONNECTOR_DISABLED_CAPABILITIES=tinder:send` to keep it read-only. Tinder's terms do not allow this API use; see Risks in the spec.
 
 ## Capture and submit your token
 

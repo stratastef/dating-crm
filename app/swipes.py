@@ -251,9 +251,9 @@ def set_limits(body: Limits, user: CurrentUser, db: Db):
 def swipe_autopilot(db: Connection, user_id: int, payload: dict) -> None:
     """Swipe alone on the user's candidates, on every app whose swipe autopilot is allowed.
 
-    The worker skips the job unless swipe autonomy is guardrails or full (it is off by default) and nothing is
+    The worker skips the job unless swipe autonomy is autopilot or full_autopilot (it is off by default) and nothing is
     paused for all apps. The job asks `autopilot_allowed()` again for each app and before each swipe, so a pause
-    of one app (a ban signal), the kill switch or the budget cap stops it in the middle of a run.
+    of one app (a ban signal), a pause of all apps or the budget cap stops it in the middle of a run.
     """
     wants = current_preferences(db, user_id)
     allowed = limits(db, user_id)

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Everything that limits what the app does alone: the kill switch, autonomy per job, the AI budget, the
+/// Everything that limits what the app does alone: Pause, autonomy per job, the AI budget, the
 /// privacy switches, and find-and-purge for a match who asks for their data to be deleted.
 struct SettingsView: View {
     let client: APIClient
@@ -56,7 +56,7 @@ struct SettingsView: View {
                 Toggle("Pause \(app.capitalized)", isOn: paused(app: app))
             }
         } header: {
-            Text("Kill switch")
+            Text("Pause")
         } footer: {
             Text("A pause stops what the app does alone. A draft you send yourself still goes out.")
         }
@@ -72,7 +72,7 @@ struct SettingsView: View {
         } header: {
             Text("Autonomy")
         } footer: {
-            Text("Copilot: you approve everything. Guardrails and Full: the app acts alone within its limits.")
+            Text("Copilot: you approve everything. Autopilot and Full autopilot: the app acts alone within its limits.")
         }
     }
 
