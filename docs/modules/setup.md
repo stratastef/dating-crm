@@ -21,7 +21,7 @@ Each step reads the route or helper that owns it (`sync.connected_apps`, `calend
 
 **Today's setup summary.** `GET /today` has `setup`: `{"steps_left": n}`, or `null` once the user dismissed it (`users.setup_dismissed`, migration `t70_setup_dismissed`) or no step is left. `setup.summary(user, db)` computes it.
 
-## iOS
+## On the phone
 
 **When setup runs.** Right after a phone number sign-in that created the account (`Session.isNewAccount`, see "Sign-in"), `DatingCRMApp` shows `SetupView` instead of the tabs. Ending setup sets `isNewAccount` back to `false`. After a relaunch it is false, so Today's "Finish setup" is the way back.
 

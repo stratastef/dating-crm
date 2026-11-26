@@ -177,4 +177,4 @@ Commit `uv.lock`.
 
 ## CI
 
-`.github/workflows/ci.yml` runs four jobs on every push and pull request: `test` (`uv run pytest` against Postgres), `lint` (`uv run ruff check .` and `uv run pyright`), `stack` (builds the images, starts Compose and calls `/health`) and `ios` (`xcodebuild test`). Run the first two locally before you report a ticket done.
+`.github/workflows/ci.yml` runs four jobs on every push and pull request: `test` (`uv run pytest` against Postgres), `lint` (`uv run ruff check .` and `uv run pyright`), `stack` (builds the images, starts Compose and calls `/health`) and `ios` (`xcodebuild test` on Xcode 26.6, older than a local Xcode 27; see `ios/README.md`). Run the first two locally before you report a ticket done.

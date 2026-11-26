@@ -20,3 +20,9 @@ All in `app/timing.py` (ADR 0008). Every draft has a **send time** (`drafts.send
 - **Where it shows:** the card summary's `planned_send` (a `Draft`, with `send_at` and `timing_reason`), and the Pipeline: a card with a planned send is Handled by autopilot with `autopilot_activity` `planned`.
 - **Send now and Hold** act on a planned send (see "Drafts"). `POST /drafts/{id}/send-now` takes it back with `cancel_send()` and queues it again with `queue_send()` to run at once, as the user's send (not unattended), so nothing goes out at the old send time. `POST /drafts/{id}/hold` is `undo-send`: `cancel_send()` alone, so the draft is `pending`, in Review. Its calendar holds stay: it still offers the same slots.
 - **Limits:** the weights are a first guess, not fitted to outcomes. The send time is planned when the draft is written: a copilot draft read hours later shows a time that has passed. Not run against the real Claude.
+
+## On the phone
+
+- **The card's planned send** docks in the composer (see "Cards and messages", On the phone), and its Pipeline row has the same `PlannedRing`. Screenshots: `t72-card-*.png`, `t72-pipeline-*.png`.
+- **Night window:** a section of `AutopilotView` under Pause, two hour pickers (From, Until) loaded with `client.settings()` and saved together with `client.setNightWindow(start:end:)` (`UserSettings.nightWindowStart/End`, hours 0–23). Screenshots: `t71-autopilot-*.png`.
+- `Draft.sendAt` and `Draft.timingReason` are optional, so drafts from an older server decode.

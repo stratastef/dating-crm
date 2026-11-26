@@ -1,6 +1,6 @@
 # Dating CRM for iOS
 
-The SwiftUI client for the API in the repo root. It needs Xcode 27 and an iOS 26 or later simulator or device.
+The SwiftUI client for the API in the repo root. It builds with Xcode 27 locally and Xcode 26.6 in CI (pinned in `.github/workflows/ci.yml`), for an iOS 26 or later simulator or device. Code must build on both: Xcode 26.6 rejects some code Xcode 27 accepts, so a green local run is not a green `ios` job.
 
 ## Layout
 
@@ -35,6 +35,8 @@ From the repo root:
 xcodebuild build -project ios/DatingCRM.xcodeproj -scheme DatingCRM -destination 'platform=iOS Simulator,name=iPhone 18 Pro'
 xcodebuild test  -project ios/DatingCRM.xcodeproj -scheme DatingCRM -destination 'platform=iOS Simulator,name=iPhone 18 Pro'
 ```
+
+`scripts/ios-test` runs the tests on a simulator and build folder of the worktree's own and deletes both afterwards, so worktrees testing in parallel never share either. It prints the summary, or the errors and the log's path.
 
 `xcrun simctl list devices available` lists the simulator names you can use. The tests need no server.
 

@@ -10,4 +10,4 @@ Routes are in `app/preferences.py`; the table is `preferences` (append-only, one
 
 Server code reads the version in force with `current_preferences(db, user_id)` from `app.preferences`; it returns `version`, `wishes`, `must_haves` and `dealbreakers`. Swipes read it (a dealbreaker Jev finds in a bio is a pass) and so does every draft's prompt.
 
-The app edits them on `PreferencesView` under You (see "iOS app shell"); it saves as the user types and drops rows left blank.
+The app edits them on `PreferencesView` under You (see "iOS app shell and shared components", Editing screens); it saves as the user types and drops rows left blank.

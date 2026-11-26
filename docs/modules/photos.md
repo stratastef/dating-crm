@@ -22,3 +22,9 @@ Routes are in `app/photos.py`; the table is `photos` (one row per photo). A phot
 - Accepting an edit writes an audit log entry: type `profile_change`, app `all` (a photo belongs to no one dating app), target `photo:<photos.id>`, trigger `copilot: user accepted a photo edit`. Rejecting writes none.
 - **Order.** `rank` is the photo's place on the profile, set by the latest of `POST /photos/rank` (Claude's order) and `PUT /photos/order` (the user's). Ordering keeps each `reason`, which says why Claude ranked the photo where it did. The phone labels the first photo "Lead photo".
 - Deleting or ordering a photo writes no audit log entry: neither changes a dating app.
+
+## On the phone
+
+**`PhotosView`**: the photos in the server's order; the first is labeled "Lead photo", the others show Claude's reason. Edit (or a drag) reorders them and sends the whole order (`PUT /photos/order`); a failed save puts the old order back. Swipe or Edit deletes one after a confirmation (`DELETE /photos/{id}`). An edit on offer shows under AI suggests, the original and the edited preview side by side at every text size, then Accept edit and Keep original.
+
+- Not verified on screen: reorder, delete, Accept edit and Keep original on Photos; Rewrite, Accept and the Voice link on Bios. The rewrite needs Claude and a tap, so it was never shown.

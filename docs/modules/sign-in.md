@@ -69,7 +69,7 @@ uv run python -m app.sign_in you@example.com +491701234567
 
 The owner's v1 account can then sign in by SMS. `uv run python -m app.auth you@example.com` still creates an account and prints a token for the developer sign-in.
 
-## iOS
+## On the phone
 
 `SignInView` (`ios/DatingCRM/Screens/SignInView.swift`): the phone number, then, only when the server answers `403` for a number with no account, an invite code field under it, then the sign-in code, with "Send a new code" after 30 seconds and each refusal in plain words under the field. A two-second press on the title opens the developer sign-in (server URL and API token). `Session.requestCode(phone:inviteCode:)` and `Session.signIn(phone:code:)` use the server in `ServerURL` (Info.plist). After a sign-in, `Session.isNewAccount` is true when it created the account (the server's `new_account`), so setup can start; it is not kept across launches. `APIClient.signIn` returns `SignedIn` (`token`, `newAccount`). A `403` on a code request without an invite code shows the invite code field; with one, it says the invite code is not valid or already used. `DCRM_INVITE=K7QX-M2PA` shows the field for scripted simulator checks. `Session.e164(_:)` turns a typed number into E.164. `Session.signOut()` calls `POST /sign-out`, then forgets the session. If the call fails it throws and the phone stays signed in (signed out on the phone only, it would keep getting pushes); a `401` means the token is gone already, so the session is forgotten. The token stays in the shared Keychain group and the URL in the App Group's defaults, so the share extension needs no change. Screenshots: `docs/design/screenshots/redesign/t48-sign-in-*`, and the invite code field in `t49-sign-in-invite-*`.
 

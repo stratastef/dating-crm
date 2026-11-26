@@ -58,3 +58,7 @@ calendar.confirm_date(db, user_id, card_id, trigger="match agreed", start=start)
 - All four raise `NotConnected` if the user has no stored refresh token, and `httpx.HTTPError` if Google refuses or cannot be reached; nothing is stored then. The `PATCH` route answers `502` and leaves the stage unchanged.
 - Tests never reach Google: the autouse `gcal` fixture replaces `calendar.google`, the only object that calls Google. Set `gcal.busy` to `(start, end)` pairs and read `gcal.events`.
 - Calls to the real Google API have not been tried: no Google credentials were available when this was written. Check the scopes, the free/busy response and the event fields in `GoogleCalendar` on the first real connect.
+
+## On the phone
+
+`CalendarView(client:)` shows whether Google Calendar is connected (`client.calendarConnected()`, `GET /calendar`, see "Google Calendar holds") with Connect, or Reconnect once connected. Connect gets Google's consent page from `client.calendarConsentURL()` (`GET /calendar/connect`) and opens it in an ephemeral `ASWebAuthenticationSession` that waits for the `datingcrm` scheme; the server's callback sends it there. The view then asks the server again and shows a toast, or a plain line when it is still not connected: Google refused, the user closed the page, or the server answered `503` (no Google OAuth client set up). The session is UIKit's, not SwiftUI's `webAuthenticationSession`, which failed on the simulator with `presentationContextNotProvided`. The setup step can push `CalendarView` as is.

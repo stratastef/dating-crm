@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Run the iOS tests on a simulator and build folder of this worktree's own, then delete both:
+#   scripts/ios-test [extra xcodebuild arguments]
+# Worktrees testing in parallel never share a simulator or DerivedData, and nothing is left on the disk.
+# Prints the test summary, or the errors and the full log's path.
+set -euo pipefail
+
+root=$(git rev-parse --show-toplevel)
+name="DCRM-$(basename "$root")"
+derived="$HOME/Library/Developer/Xcode/DerivedData/$name"
+log="${TMPDIR:-/tmp}/$name-ios-test.log"
+
+udid=$(xcrun simctl create "$name" com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro)
+trap 'xcrun simctl delete "$udid"; rm -rf "$derived"' EXIT
+
+cd "$root"
+if xcodebuild test -project ios/DatingCRM.xcodeproj -scheme DatingCRM -destination "id=$udid" \
+    -derivedDataPath "$derived" -parallel-testing-enabled NO "$@" >"$log" 2>&1; then
+  grep -E "Test run with|TEST SUCCEEDED" "$log"
+else
+  grep -E " error:|✘|BUILD FAILED|TEST FAILED" "$log" | head -40
+  echo "full log: $log"
+  exit 1
+fi

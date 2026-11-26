@@ -20,7 +20,7 @@ The first screen (ADR 0005): what the user has to do, by time. All in `app/today
 - **Time zone.** The app sends the phone's time zone on each launch with `PATCH /settings {"time_zone": "Europe/Berlin"}`; an unknown name is `422`. It is `UTC` until the app first sends one. `user_zone(db, user_id)` in `app/settings.py` returns it as a `ZoneInfo`: use it for anything that follows the user's day or hour. The clock is `app.today.now`; tests replace it (fixture `clock` in `tests/test_today.py`).
 - **Setup summary.** `setup` is `{"steps_left": n}`: how many setup steps are not done. It is `null` once the user dismissed "Finish setup" or no step is left (see "Setup").
 
-## iOS
+## On the phone
 
 `TodayView` opens on the review count, large in the accent color, over a `MeshGradient` color field that runs under the status bar and scrolls away with the content. The field is full at 3 or more waiting items, softer at 1 or 2, and gone at 0. The count rolls (`contentTransition(.numericText())`); with Reduce Motion or Low Power Mode on (`motionReduced`), it fades and the field is hidden. Tapping the count opens Review.
 
