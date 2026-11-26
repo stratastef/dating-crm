@@ -30,7 +30,7 @@ Reason = Literal[
 ]
 
 # What autopilot is doing on a card Handled by autopilot. The time is the last message's `sent_at`, or for
-# `planned` the planned send's `send_at`. `writing_opener` comes with autopilot's openers (#73): see `place()`.
+# `planned` the planned send's `send_at`, an opener's too. `writing_opener` has no time: the job sets it.
 Activity = Literal["writing_opener", "drafting_reply", "planned", "sent_waiting"]
 
 
@@ -90,11 +90,9 @@ def place(db: Connection, user_id: int, cards: list[dict]) -> None:
                     db, user_id, card["app"], card["external_id"]
                 )
             # Autopilot acts on a chat only through a queued job: without one, the user acts next. `chat_reply`
-            # answers the match, then a planned send waits for its send time. Autopilot sends no openers yet:
-            # when #73 adds their job, a card with no messages and that job queued is Handled by autopilot with
-            # activity `writing_opener`.
-            handled = acting[key] and bool(last) and (
-                last["sender"] == "me" or card["id"] in replying or card["planned_send"] is not None
+            # answers the match, or writes the opener to a new match, then a planned send waits for its send time.
+            handled = acting[key] and (
+                card["id"] in replying or card["planned_send"] is not None or bool(last) and last["sender"] == "me"
             )
 
         reason = None if card["stage"] == "archived" else _reason(card, drafts.get(card["id"], set()), today, handled)
@@ -111,6 +109,8 @@ def place(db: Connection, user_id: int, cards: list[dict]) -> None:
             card["pipeline_group"] = "handled_by_autopilot"
             if card["planned_send"]:
                 card["autopilot_activity"] = "planned"
+            elif not last:
+                card["autopilot_activity"] = "writing_opener"
             else:
                 card["autopilot_activity"] = "drafting_reply" if last["sender"] == "them" else "sent_waiting"
         else:

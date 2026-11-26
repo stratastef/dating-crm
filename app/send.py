@@ -122,8 +122,9 @@ def cancel_send(db: Connection, user_id: int, draft_id: int) -> Row | None:
 
 
 def drop_planned_sends(db: Connection, user_id: int, card_id: int) -> None:
-    """The match wrote again: autopilot's planned sends to them answer an old message. Each is taken back and
-    dismissed, and the slots it offered are free again. Chat autopilot then plans a new reply."""
+    """A message was added to the card: autopilot's planned sends to the match answer an old message, or cross
+    the user's own. Each is taken back and dismissed, and the slots it offered are free again. If the match
+    wrote, chat autopilot then plans a new reply."""
     planned = db.execute(
         text(f"SELECT id FROM drafts WHERE card_id = :card_id AND user_id = :user_id AND {PLANNED}"),
         {"card_id": card_id, "user_id": user_id},

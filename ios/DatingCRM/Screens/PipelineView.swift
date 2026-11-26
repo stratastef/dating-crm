@@ -199,7 +199,9 @@ extension Card {
         switch autopilotActivity {
         case "writing_opener": "writing an opener"
         case "drafting_reply": "drafting a reply"
-        case "planned": plannedSend?.sendAt.map { "replies \(RelativeTime.around($0, now: now, calendar: calendar))" }
+        case "planned": plannedSend.flatMap { draft in
+            draft.sendAt.map { "\(draft.kind == .opener ? "sends an opener" : "replies") \(RelativeTime.around($0, now: now, calendar: calendar))" }
+        }
         case "sent_waiting": lastMessage.map { "sent \(RelativeTime.ago($0.sentAt, now: now, calendar: calendar)), no reply yet" }
         default: nil
         }

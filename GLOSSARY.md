@@ -51,7 +51,7 @@ A draft the user copied that does not yet appear in the chat. It stays in view u
 _Avoid_: Approved draft
 
 **Send time**:
-When a draft goes out. For autopilot it is planned from the conversation; for the user's own drafts it is suggested and can be scheduled.
+When a draft goes out. For autopilot it is planned from the conversation, or for an opener at a random time 30 minutes to 6 hours after the match; for the user's own drafts it is suggested and can be scheduled.
 _Avoid_: Delay, schedule (alone)
 
 **Planned send**:

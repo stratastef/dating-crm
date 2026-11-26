@@ -10,7 +10,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlalchemy import Connection, text
 
-from app import calendar, handover, jev, llm, review
+from app import calendar, handover, jev, llm, review, timing
 from app.auth import CurrentUser, Db
 from app.autopilot import autonomy_levels
 from app.card_lookup import unanswered
@@ -47,15 +47,19 @@ def _answer_to_offer(db: Connection, user_id: int, holds: Sequence, message: str
 
 @handler("chat_reply", autopilot="chat")
 def chat_reply(db: Connection, user_id: int, payload: dict) -> None:
-    """Answer the newest message of a card's match. Queued for each new message from a match while chat
-    autopilot may act; the worker runs it only if `autopilot_allowed()` still says yes.
+    """Answer the newest message of a card's match, or write the opener to a match with no messages. Queued for
+    each new message from a match, and for each new match sync finds without one, while chat autopilot may act;
+    the worker runs it only if `autopilot_allowed()` still says yes.
 
     The reply is sent alone only if `queue_send(unattended=True)` lets it through. Otherwise it stays a
     pending draft in the review queue. Safe to run twice: a card with a draft under way is left alone.
     """
     card_id = payload["card_id"]
     card = db.execute(
-        text("SELECT app, name, stage, ai_disclosed FROM cards WHERE id = :id AND user_id = :user_id FOR UPDATE"),
+        text(
+            "SELECT app, name, stage, ai_disclosed, created_at FROM cards"
+            " WHERE id = :id AND user_id = :user_id FOR UPDATE"
+        ),
         {"id": card_id, "user_id": user_id},
     ).one_or_none()
     if not card or card.stage not in CHAT_STAGES or handover.is_paused(db, user_id, card_id):
@@ -67,8 +71,8 @@ def chat_reply(db: Connection, user_id: int, payload: dict) -> None:
         ),
         {"card_id": card_id, "user_id": user_id},
     ).one_or_none()
-    # An old message is not answered alone: a first sync reads whole chats.
-    if not newest or newest.sender != "them" or not newest.recent:
+    # An old message is not answered alone: a first sync reads whole chats. No message at all: the opener.
+    if newest and (newest.sender != "them" or not newest.recent):
         return
     under_way = db.execute(
         text(
@@ -149,20 +153,28 @@ def chat_reply(db: Connection, user_id: int, payload: dict) -> None:
 
     # The guardrail judges the whole text that would go out, the added sentences included.
     message = " ".join(body)
+    guardrail = jev.guardrail_hits(db, user_id, message) + for_user
+    # `draft_for()` timed a reply from the chat. An opener is timed from when the match synced (ADR 0008).
+    send_at, reason = draft.send_at, draft.timing_reason
+    if not newest:
+        send_at, reason = timing.opener_time(db, user_id, card.created_at), ""
     db.execute(
         text(
-            "UPDATE drafts SET original = :original, guardrail = :guardrail WHERE id = :id AND user_id = :user_id"
+            "UPDATE drafts SET original = :original, guardrail = :guardrail, send_at = :send_at,"
+            " timing_reason = :reason WHERE id = :id AND user_id = :user_id"
         ),
         {
             "id": draft.id,
             "user_id": user_id,
             "original": message,
-            "guardrail": jev.guardrail_hits(db, user_id, message) + for_user,
+            "guardrail": guardrail,
+            "send_at": send_at,
+            "reason": reason,
         },
     )
-    trigger = f"{TRIGGER} ({level}): reply to message {newest.id}"
+    trigger = f"{TRIGGER} ({level}): " + (f"reply to message {newest.id}" if newest else "opener")
     # A planned send: it goes out at its send time, when `send_draft` asks the same gate again.
-    if not queue_send(db, user_id, draft.id, trigger, unattended=True, run_at=draft.send_at):
+    if not queue_send(db, user_id, draft.id, trigger, unattended=True, run_at=send_at):
         review.notify_if_hot(db, user_id, card_id, card.name)  # the draft joined the review queue
 
 
