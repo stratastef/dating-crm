@@ -46,6 +46,51 @@ jobs:
       - if: failure()
         run: docker compose logs
 
+  # A push to main that passes test, lint and stack ships to the VPS. Setup and secrets: docs/deploy.md.
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [test, lint, stack]
+    runs-on: ubuntu-latest
+    concurrency: deploy
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/stratastef/dating-crm:${{ github.sha }}
+      VPS: deploy@74.208.250.12
+      PUBLIC_URL: https://crm.mithrandir.one
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and publish the image
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker build --label org.opencontainers.image.source=https://github.com/stratastef/dating-crm -t "$IMAGE" .
+          docker push "$IMAGE"
+      - name: Load the deploy key and pin the VPS host key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          echo "74.208.250.12 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDQwVVaKS+7LJLDpBh5RzUVBF5cUrVWJokpkGcfifVkW" > ~/.ssh/known_hosts
+      - name: Start the new image on the VPS
+        env:
+          PRODUCTION_ENV: ${{ secrets.PRODUCTION_ENV }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          scp compose.yaml compose.prod.yaml "$VPS:/opt/dating-crm/"
+          { printf '%s\n' "$PRODUCTION_ENV"; echo "COMPOSE_FILE=compose.yaml:compose.prod.yaml"; echo "IMAGE_TAG=$GITHUB_SHA"; } \
+            | ssh "$VPS" 'umask 077 && cat > /opt/dating-crm/.env'
+          # The job token is valid only while this job runs; log out so it is not left on the VPS.
+          echo "$GHCR_TOKEN" | ssh "$VPS" "docker login ghcr.io -u $GITHUB_ACTOR --password-stdin >/dev/null && cd /opt/dating-crm && docker compose pull --quiet; status=\$?; docker logout ghcr.io >/dev/null; exit \$status"
+          ssh "$VPS" 'cd /opt/dating-crm && docker compose up -d --wait --wait-timeout 180 --remove-orphans || { docker compose logs --tail 200; exit 1; }'
+          # Only this repo's images, so other projects on the host keep theirs.
+          ssh "$VPS" 'docker image prune -af --filter label=org.opencontainers.image.source=https://github.com/stratastef/dating-crm >/dev/null'
+      - name: Check the public health endpoint
+        run: curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors "$PUBLIC_URL/health"
+
   ios:
     runs-on: macos-latest
     steps:
