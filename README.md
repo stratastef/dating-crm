@@ -14,7 +14,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/auth.py` | `CurrentUser` and `Db` route dependencies, `create_user()`, `issue_token()` |
 | `app/sign_in.py` | Sign-in by phone number and sign-in code: `POST /sign-in/code`, `POST /sign-in`, `POST /sign-out` |
 | `app/invite_codes.py` | Invite codes: `python -m app.invite_codes [count]` prints new ones; `code_hash()` |
-| `app/sms.py` | `send()`, the only way to text a phone |
+| `app/sms.py` | `send()`, the only way to text a phone, through Twilio when `SMS_PROVIDER=twilio`, else to the server log |
 | `app/cards.py` | Match cards and their messages: routes under `/cards` |
 | `app/card_lookup.py` | Shared reads of one card: `own_card()`, `find_card()`, `conversation()`, `chat_lines()`, `unanswered()` |
 | `app/llm.py` | `call()`, the only way to call Claude; records each call's cost |
