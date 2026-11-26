@@ -184,8 +184,9 @@ struct APIClient {
         try await send("PUT", "voice/questionnaire", body: Self.encoder.encode(["answers": answers]))
     }
 
-    /// Good dates per hour for every week with recorded time or a good date, oldest first.
-    func dashboard() async throws -> [DashboardWeek] {
+    /// Good dates per hour for every week with recorded time or a good date, oldest first, with the headline,
+    /// this month's funnel and AI spend.
+    func dashboard() async throws -> Dashboard {
         try await send("GET", "dashboard")
     }
 
