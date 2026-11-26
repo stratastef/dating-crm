@@ -244,6 +244,32 @@ struct APIClient {
         try await send("PUT", "photos/\(photoID)/edit", body: Self.encoder.encode(["accept": accept]))
     }
 
+    /// Deletes the photo and its file on the server. It cannot be undone.
+    func deletePhoto(id: Int) async throws {
+        try await data("DELETE", "photos/\(id)")
+    }
+
+    /// Sets the photos' order, lead photo first. `ids` names every photo once. Returns the photos in that order.
+    func orderPhotos(ids: [Int]) async throws -> [ProfilePhoto] {
+        try await send("PUT", "photos/order", body: Self.encoder.encode(["ids": ids]))
+    }
+
+    /// The bio and prompt answers the user accepted for a dating app (`tinder`); empty until they accept one.
+    func bio(app: String) async throws -> Bio {
+        try await send("GET", "bios/\(app)")
+    }
+
+    /// Has Claude rewrite the bio and prompt answers for the app in the user's voice. Stores nothing. `409`: the
+    /// style profile is not written yet, so the voice questionnaire comes first.
+    func rewriteBio(app: String, _ current: Bio) async throws -> Bio {
+        try await send("POST", "bios/\(app)/rewrite", body: Self.encoder.encode(current))
+    }
+
+    /// Stores the version the user accepted for the app, replacing the previous one.
+    func acceptBio(app: String, _ accepted: Bio) async throws -> Bio {
+        try await send("PUT", "bios/\(app)", body: Self.encoder.encode(accepted))
+    }
+
     /// What stops autopilot now, for the status strip: pauses, the AI budget, broken connectors. Empty when nothing does.
     func status() async throws -> [StatusMessage] {
         try await send("GET", "status")

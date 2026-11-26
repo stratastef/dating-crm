@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The user's own things: dashboard, autopilot controls, preferences, connected apps, calendar, profile (photos, voice),
-/// settings, and Sign out.
+/// The user's own things: dashboard, autopilot controls, preferences, connected apps, calendar, profile (photos, bios
+/// and prompts, voice), settings, and Sign out.
 struct YouView: View {
     let client: APIClient
     let signOut: () async -> Void
@@ -21,6 +21,7 @@ struct YouView: View {
             NavigationLink("Calendar") { CalendarView(client: client) }
             Section {
                 NavigationLink("Photos") { PhotosView(client: client) }
+                NavigationLink("Bios and prompts") { BiosView(client: client) }
                 NavigationLink("Voice") { VoiceView(client: client) }
             } header: {
                 Text("Profile").foregroundStyle(Color.primary)
@@ -45,6 +46,8 @@ struct YouView: View {
             case "connected-apps": ConnectedAppsView(client: client)
             case "calendar": CalendarView(client: client)
             case "swipe-layout": swipeLayout
+            case "photos": PhotosView(client: client)
+            case "bios": BiosView(client: client)
             default: EmptyView()
             }
         }
