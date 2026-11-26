@@ -28,7 +28,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/bios.py` | Bio and prompt rewrites per dating app: routes under `/bios` |
 | `app/photos.py` | The user's own photos, their ranking and light edits: routes under `/photos` |
 | `app/preferences.py` | What the user wants, versioned: routes under `/preferences`, `current_preferences()` |
-| `app/dashboard.py` | Good dates per hour, weekly: `POST /time` and `GET /dashboard` |
+| `app/dashboard.py` | Good dates per hour, weekly, with this month's funnel and AI spend: `POST /time` and `GET /dashboard` |
 | `app/feedback.py` | Feedback loop: `swipe_lines()` for the swipe pre-screen prompt, and `GET /feedback/export` |
 | `app/settings.py` | User settings: `GET` and `PATCH /settings`, `user_zone()` |
 | `app/today.py` | Today: `GET /today`, the review summary and what the user has to do by time |

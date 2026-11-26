@@ -1,14 +1,14 @@
 """push name previews and Blur photos, both off by default
 
 Revision ID: t69_privacy_settings
-Revises: t70_setup_dismissed
+Revises: t67_stages_reached
 """
 
 import sqlalchemy as sa
 from alembic import op
 
 revision = "t69_privacy_settings"
-down_revision = "t70_setup_dismissed"
+down_revision = "t67_stages_reached"
 branch_labels = None
 depends_on = None
 

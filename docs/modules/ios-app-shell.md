@@ -8,7 +8,7 @@ The signed-in app is `MainTabView` (`ios/DatingCRM/Screens/MainTabView.swift`): 
 | Review | `QueueView`: the review queue as faces in glass (see "Review"). The tab's badge is the review count from Today's last load. |
 | Pipeline | `PipelineView`: `GET /pipeline` grouped by who acts next (see "Pipeline" below). A tapped push switches to this tab and opens the card. Search (minimized to a toolbar button) filters the loaded cards by name and opens every group; the plus button opens `NewCardSheet` to add a card by hand. |
 | Swipe | `SwipeView`: the Off state, one at a time or the list, as the Swipe layout says (see "Swipe copilot", On the phone) |
-| You | `YouView`: Dashboard, Autopilot (`AutopilotView`), Preferences, Swipe layout (`SwipeLayoutSection`), Connected apps (`ConnectedAppsView`), Calendar (`CalendarView`), Profile (Photos, Voice), Settings (Notifications `NotificationsView`, Privacy `PrivacyView`, Activity log `ActivityLogView`, Find and purge `PurgeView`), Sign out, which asks first |
+| You | `YouView`: the Dashboard headline (`DashboardHeadline`, links to `DashboardView`), Autopilot (`AutopilotView`), Preferences, Swipe layout (`SwipeLayoutSection`), Connected apps (`ConnectedAppsView`), Calendar (`CalendarView`), Profile (Photos, Bios and prompts, Voice), Settings (Notifications `NotificationsView`, Privacy `PrivacyView`, Activity log `ActivityLogView`, Find and purge `PurgeView`), Sign out, which asks first |
 
 ## Look (ADR 0009, `docs/design/mockups/a3-combined.html`)
 
@@ -44,6 +44,13 @@ Type: SF Pro text styles. New York (`.fontDesign(.serif)`) only for explanations
 ## Editing screens
 
 `VoiceView` (the voice questionnaire, rendered from the server's `questions`) and `PreferencesView` follow one pattern: load once, keep the server's copy as `saved`, `.autosave` the edited copy, and show `ErrorRow` under each field whose value differs from `saved` after a failed save. Lists dismiss the keyboard on scroll (`.scrollDismissesKeyboard(.immediately)`). Push either one; they set their own title and toolbar.
+
+## Profile
+
+Under You, Profile holds what optimizes the user's own profiles: `PhotosView`, `BiosView` and `VoiceView`.
+
+- **`PhotosView`**: the photos in the server's order; the first is labeled "Lead photo", the others show Claude's reason. Edit (or a drag) reorders them and sends the whole order (`PUT /photos/order`); a failed save puts the old order back. Swipe or Edit deletes one after a confirmation (`DELETE /photos/{id}`). An edit on offer shows under AI suggests, the original and the edited preview side by side at every text size, then Accept edit and Keep original.
+- **`BiosView`**: a segmented picker per dating app (`tinder`, `hinge`, `bumble`, the server's `DATING_APPS`), the accepted bio and prompts from `GET /bios/{app}` as fields, and "Rewrite in my voice". The rewrite shows under AI suggests, selectable for copying, with Accept (`PUT /bios/{app}`) and Rewrite again. A `409` (no style profile yet) shows a link to `VoiceView`. Nothing autosaves: what the user types is only sent to be rewritten, so leaving or switching app drops it. Prompts show in the order typed, or by their text after a load (`Bio.prompts` is a dictionary).
 
 ## Card rows
 
@@ -85,11 +92,12 @@ Every `Card` carries its card summary (see "Cards and messages"): `stageChangedA
 
 ## Simulator checks
 
-Besides the Debug sign-in (`DCRM_SERVER`, `DCRM_TOKEN`) and `DCRM_TAB`, `DCRM_OPEN=voice`, `preferences`, `connected-apps`, `calendar`, `swipe-layout`, `notifications`, `privacy`, `activity-log` or `purge` pushes that screen under You on launch: `SIMCTL_CHILD_DCRM_TAB=you SIMCTL_CHILD_DCRM_OPEN=voice xcrun simctl launch …`. `DCRM_SETUP=1` opens setup instead of the tabs, or on one step with its name (`DCRM_SETUP=voice`; see "Setup").
+Besides the Debug sign-in (`DCRM_SERVER`, `DCRM_TOKEN`) and `DCRM_TAB`, `DCRM_OPEN=voice`, `dashboard`, `preferences`, `connected-apps`, `calendar`, `swipe-layout`, `photos`, `bios`, `notifications`, `privacy`, `activity-log` or `purge` pushes that screen under You on launch: `SIMCTL_CHILD_DCRM_TAB=you SIMCTL_CHILD_DCRM_OPEN=voice xcrun simctl launch …`. `DCRM_SETUP=1` opens setup instead of the tabs, or on one step with its name (`DCRM_SETUP=voice`; see "Setup").
 
 ## Limits
 
 - The Review badge is the system red, not the accent: `UITabBarItem.appearance().badgeColor` has no effect on the SwiftUI `TabView`. It updates when Today loads, not when Review clears an item.
 - Not verified on screen: typing, autosave, the save error under a field and Edit on Voice and Preferences (screenshots only, no taps).
+- Not verified on screen: reorder, delete, Accept edit and Keep original on Photos; Rewrite, Accept and the Voice link on Bios. The rewrite needs Claude and a tap, so it was never shown.
 - Not verified on screen: the toast (Review's Dismiss and Swipe's Pass and Like show one, but nothing was tapped) and VoiceOver reading the AI marker and badges. Review's buttons, the card link and the profile sheet were not tapped either: screenshots only.
 - Error text is still system red, under 4.5:1 on white, outside `ErrorRow`. 

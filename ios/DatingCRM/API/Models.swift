@@ -182,6 +182,30 @@ struct DashboardWeek: Codable, Identifiable, Equatable {
     var id: Date { week }
 }
 
+/// The Dashboard: the weeks, the headline (good dates per hour this week against the four-week average), this
+/// month's funnel and this month's AI spend.
+struct Dashboard: Codable, Equatable {
+    var weeks: [DashboardWeek]
+    /// Good dates per hour this week; nil with no time recorded this week.
+    var thisWeek: Double?
+    /// Good dates per hour over the four weeks before this one; nil with no time recorded in them.
+    var fourWeekAverage: Double?
+    var funnel: Funnel
+    /// This month's AI spend over this month's good dates; nil with no good date this month.
+    var spendPerGoodDateUsd: Double?
+    /// This month's AI spend against the cap.
+    var budget: Budget
+
+    /// Cards that reached each stage this month. `good` counts good dates rated this month.
+    struct Funnel: Codable, Equatable {
+        var matched: Int
+        var chatting: Int
+        var dateSet: Int
+        var dated: Int
+        var good: Int
+    }
+}
+
 /// A message Claude wrote for a card. `original` is Claude's text; `edited` is the user's version of it.
 struct Draft: Codable, Identifiable, Hashable {
     enum Kind: String, Codable { case opener, reply }
@@ -371,7 +395,7 @@ struct Budget: Codable, Equatable {
     /// "$8.20 of $30": cents only when there are any.
     var spentOfCap: String { "\(Self.dollars(spendUsd)) of \(Self.dollars(capUsd))" }
 
-    private static func dollars(_ usd: Double) -> String {
+    static func dollars(_ usd: Double) -> String {
         // en_US: "$30", not "US$30" outside the US. The app is not localized.
         usd.formatted(
             .currency(code: "USD").locale(Locale(identifier: "en_US"))
@@ -500,8 +524,10 @@ struct Voice: Decodable, Equatable {
 /// One of the user's own photos on the server.
 struct ProfilePhoto: Codable, Identifiable, Equatable {
     let id: Int
-    /// 1 is the best photo. nil, like `reason`, until the photos are ranked.
+    /// The photo's place on the profile, 1 the lead photo: Claude's ranking or the user's order, whichever came
+    /// last. nil until either.
     var rank: Int?
+    /// Why Claude ranked the photo where it did. nil until ranked.
     var reason: String?
     /// The light edit on offer, to accept or reject. nil when there is none.
     var suggestedEdit: PhotoEdit?
@@ -526,4 +552,11 @@ struct PhotoEdit: Codable, Equatable {
         if colour != 1 { parts.append(colour > 1 ? "more colour" : "less colour") }
         return parts.joined(separator: ", ")
     }
+}
+
+/// A bio and prompt answers for one dating app: what the user accepted, or a rewrite on offer.
+struct Bio: Codable, Equatable {
+    var bio = ""
+    /// Prompt -> answer, keyed by the prompt's exact text.
+    var prompts: [String: String] = [:]
 }
