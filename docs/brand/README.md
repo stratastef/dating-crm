@@ -29,6 +29,10 @@ An hour ring with one dot at one o'clock. The ring is an hour of your time; the 
 - Smallest size: 20 px. Below that (a 16 px favicon), close the gap and draw a full ring with the dot on top.
 - One-color use (engraving, a tinted icon, a fax): the dot takes the ring's color.
 - Don't rotate the mark, move or add dots, outline it, fill it with a gradient, or put it straight on a photo. Over a photo it sits on a glass plate, like the text plates in ADR 0009.
+- Considered and dropped (2026-11-26):
+  - **Closed orbit:** a full ring with the dot sitting on it. Kept only as the 16 px favicon.
+  - **Hour hand:** too literal, and the hand and dot merge at 20 px.
+  - **Draining ring:** reads as a progress indicator. It stays the planned-send animation, not the logo.
 
 ## Wordmark and lockup
 
