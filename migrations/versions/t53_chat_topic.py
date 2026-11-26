@@ -1,14 +1,14 @@
 """a card keeps the topic of its chat, written with its latest draft
 
 Revision ID: t53_chat_topic
-Revises: t66_swipe_layout
+Revises: t49_invite_codes
 """
 
 import sqlalchemy as sa
 from alembic import op
 
 revision = "t53_chat_topic"
-down_revision = "t66_swipe_layout"
+down_revision = "t49_invite_codes"
 branch_labels = None
 depends_on = None
 
