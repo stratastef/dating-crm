@@ -58,13 +58,18 @@ struct SendTimingTests {
         calendar.date(from: DateComponents(year: 2026, month: 11, day: day, hour: hour, minute: minute))!
     }
 
-    private func planned(at sendAt: Date, reason: String) -> Card {
+    private func planned(at sendAt: Date, reason: String, kind: Draft.Kind = .reply) -> Card {
         var card = Card(id: 1, app: "tinder", name: "Ada", stage: .chatting, notes: "")
         card.pipelineGroup = "handled_by_autopilot"
         card.autopilotActivity = "planned"
         card.topic = "museums"
-        card.plannedSend = Draft(id: 5, kind: .reply, original: "both. badly.", sendAt: sendAt, timingReason: reason)
+        card.plannedSend = Draft(id: 5, kind: kind, original: "both. badly.", sendAt: sendAt, timingReason: reason)
         return card
+    }
+
+    @Test func aPlannedOpenerRowSaysWhenTheOpenerGoesOut() {
+        #expect(planned(at: at(day: 25, 17, 40), reason: "", kind: .opener).pipelineStatus(now: at(day: 25, 15), calendar: calendar)
+            == "sends an opener around 17:40 · talking museums")
     }
 
     @Test func aPlannedSendRowSaysWhenItGoesOutAndWhy() {
@@ -85,6 +90,46 @@ struct SendTimingTests {
         card.scheduledSend = Draft(id: 5, kind: .reply, original: "both. badly.", sendAt: at(day: 26, 7, 5))
 
         #expect(card.pipelineStatus(now: at(day: 25, 22), calendar: calendar) == "Your reply goes out tomorrow at 07:05")
+    }
+
+    // Send now and Hold.
+
+    @Test func asksTheServerToSendAPlannedSendNow() async throws {
+        server.respond(
+            #"{"id": 5, "card_id": 1, "kind": "reply", "status": "approved", "original": "both. badly.", "edited": null}"#,
+            status: 202
+        )
+
+        try await server.client().sendNow(draftID: 5)
+
+        #expect(server.requests[0].httpMethod == "POST")
+        #expect(server.requests[0].url?.absoluteString == "https://crm.test/drafts/5/send-now")
+        #expect(server.requests[0].httpBody == nil)
+    }
+
+    @Test func holdsAPlannedSendAndDecodesTheDraftPendingAgainWithWhenItWasWritten() async throws {
+        server.respond(#"""
+        {"id": 5, "card_id": 1, "kind": "reply", "status": "pending", "original": "both. badly.", "edited": null,
+         "guardrail": [], "hot_lead": false, "sendable": true, "send_at": "2026-11-25T19:15:30Z",
+         "timing_reason": "they take their time", "created_at": "2026-11-25T18:15:30.5Z"}
+        """#)
+
+        let draft = try await server.client().hold(draftID: 5)
+
+        #expect(draft.status == "pending")
+        #expect(draft.createdAt == Date(timeIntervalSince1970: 1_795_630_530.5))
+        #expect(server.requests[0].httpMethod == "POST")
+        #expect(server.requests[0].url?.absoluteString == "https://crm.test/drafts/5/hold")
+        #expect(server.requests[0].httpBody == nil)
+    }
+
+    @Test func aPlannedSendsRingIsFullWhenWrittenAndEmptyWhenItGoesOut() {
+        let written = at(day: 25, 15), sendAt = at(day: 25, 16)
+
+        #expect(PlannedRing.left(from: written, to: sendAt, now: written) == 1)
+        #expect(PlannedRing.left(from: written, to: sendAt, now: at(day: 25, 15, 45)) == 0.25)
+        #expect(PlannedRing.left(from: written, to: sendAt, now: at(day: 25, 17)) == 0)  // late: empty, not below
+        #expect(PlannedRing.left(from: nil, to: sendAt, now: written) == 1)  // from an older server: full
     }
 
     // The night window.

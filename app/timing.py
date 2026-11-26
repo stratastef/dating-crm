@@ -1,8 +1,8 @@
 """Send timing (ADR 0008): when a draft goes out.
 
 `formula()` plans the wait from the conversation. The model that writes the draft may move it by up to half
-either way, and `send_time()` then holds it to hard bounds no model output can cross. `outside_night()` is the
-night-window rule alone.
+either way, and `send_time()` then holds it to hard bounds no model output can cross. An opener has no
+conversation to time it: `opener_time()` picks it. `outside_night()` is the night-window rule alone.
 """
 
 import random
@@ -19,6 +19,8 @@ LIVE_FLOOR = timedelta(minutes=2)  # the shortest wait for a live match
 FLOOR = timedelta(minutes=10)  # the shortest wait otherwise
 CEILING = timedelta(hours=12)  # the longest wait, before the night window moves it
 MAX_ADJUSTMENT = 0.5  # the model may move the formula's wait by up to half either way
+OPENER_WINDOW = (timedelta(minutes=30), timedelta(hours=6))  # an opener goes out this long after the match synced
+OPENER_GAP = timedelta(minutes=10)  # the least time between two of a user's openers
 
 # The formula's weights.
 _FIRST_PACE = timedelta(minutes=45)  # no reply gap of theirs is known yet
@@ -76,6 +78,26 @@ def send_time(db: Connection, user_id: int, card_id: int, wait: timedelta, adjus
     ).scalar_one()
     floor = LIVE_FLOOR if last and now - last <= LIVE else FLOOR
     return outside_night(db, user_id, now + min(max(wait * (1 + adjustment), floor), CEILING))
+
+
+def opener_time(db: Connection, user_id: int, synced: datetime) -> datetime:
+    """When an opener goes out: a random time 30 minutes to 6 hours after the match `synced`, moved out of the
+    night window, then on past each of the user's planned openers closer than 10 minutes. The night window and
+    that gap win over the 6 hours."""
+    from app.drafts import PLANNED  # imported here: app.drafts imports this module
+
+    # Two workers planning openers for one user take turns, so each sees the other's time.
+    db.execute(text("SELECT 1 FROM users WHERE id = :id FOR UPDATE"), {"id": user_id})
+    taken = db.execute(
+        text(f"SELECT send_at FROM drafts WHERE user_id = :user_id AND kind = 'opener' AND {PLANNED}"),
+        {"user_id": user_id},
+    ).scalars().all()
+    soonest, latest = OPENER_WINDOW
+    at = outside_night(db, user_id, synced + soonest + (latest - soonest) * random.random())
+    # Each step moves later, so this ends.
+    while clash := [other for other in taken if abs(other - at) < OPENER_GAP]:
+        at = outside_night(db, user_id, max(clash) + OPENER_GAP)
+    return at
 
 
 def outside_night(db: Connection, user_id: int, at: datetime) -> datetime:

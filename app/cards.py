@@ -219,25 +219,32 @@ def create_card(card: NewCard, user: CurrentUser, db: Db):
     return summarize(db, user.id, [row])[0]
 
 
-def upsert_card(db: Connection, user_id: int, app: str, external_id: str, name: str) -> int | None:
+def upsert_card(
+    db: Connection, user_id: int, app: str, external_id: str, name: str, has_messages: bool = True
+) -> int | None:
     """Create the card for a synced match in Matched, or refresh its name. Returns the card id.
 
     An existing card keeps its stage, notes, next action and due date. A match the user purged is not stored
-    again: None is returned and the caller must store nothing about them.
+    again: None is returned and the caller must store nothing about them. A new match without `has_messages`
+    gets chat autopilot's opener, if it may act.
     """
     if tombstones.is_buried(db, user_id, "match", app, external_id):
         return None
-    return db.execute(
+    card = db.execute(
         text(
             """
             INSERT INTO cards (user_id, app, external_id, name, stage)
             VALUES (:user_id, :app, :external_id, :name, 'matched')
             ON CONFLICT (user_id, app, external_id) DO UPDATE SET name = EXCLUDED.name
-            RETURNING id
+            RETURNING id, created_at = now() AS created
             """
         ),
         {"user_id": user_id, "app": app, "external_id": external_id, "name": name},
-    ).scalar_one()
+    ).one()
+    # `now()` is when this transaction began, so only a card it inserted was created then.
+    if card.created and not has_messages:
+        _queue_reply(db, user_id, card.id)
+    return card.id
 
 
 def has_message(db: Connection, user_id: int, card_id: int, external_id: str) -> bool:
@@ -251,7 +258,8 @@ def has_message(db: Connection, user_id: int, card_id: int, external_id: str) ->
 
 
 def _queue_reply(db: Connection, user_id: int, card_id: int) -> None:
-    """Call after each new message from the match: chat autopilot answers it, if it may act (`app/chat_autopilot.py`)."""
+    """Call after each new message from the match, and for a new match with none: chat autopilot answers it or
+    writes the opener, if it may act (`app/chat_autopilot.py`)."""
     app = own_card(db, user_id, card_id).app
     if autopilot_allowed(db, user_id, app, "chat"):
         enqueue(db, user_id, "chat_reply", {"app": app, "card_id": card_id})
@@ -400,10 +408,10 @@ def insert_message(
     """Store one message on the user's card and run everything a new message sets off. Every message is
     stored through this function, so those effects are in one place:
 
+    - from either side: autopilot's planned send to the match is dropped;
     - from `me`: the style profile is rewritten from the user's own messages, a pending handover ends, and the
       card's copied drafts older than the message are `sent`;
-    - from `them`: Stalled is cleared, autopilot's planned send to them is dropped, the handover trigger runs,
-      and chat autopilot is asked to reply.
+    - from `them`: Stalled is cleared, the handover trigger runs, and chat autopilot is asked to reply.
 
     Returns the stored message, or None when the user has no such card. `sent_at` defaults to now. A message
     whose `external_id` the card already has raises `IntegrityError`; with `skip_duplicate` it is left alone
@@ -433,6 +441,10 @@ def insert_message(
     ).one_or_none()
     if not row:
         return None
+    from app.send import drop_planned_sends  # imported here: app.send imports this module
+
+    # Autopilot's planned send now answers an old message, or crosses the user's own: the reply job plans anew.
+    drop_planned_sends(db, user_id, card_id)
     if sender == "me":
         queue_profile(db, user_id)
         handover.answered(db, user_id, card_id)
@@ -450,9 +462,6 @@ def insert_message(
         text("UPDATE cards SET stalled_at = NULL WHERE id = :id AND user_id = :user_id"),
         {"id": card_id, "user_id": user_id},
     )
-    from app.send import drop_planned_sends  # imported here: app.send imports this module
-
-    drop_planned_sends(db, user_id, card_id)  # it answers an older message: the reply job plans a new one
     # shortcut: Jev is called here, inside the request or the sync job, once per sentence and check. Move
     # it to its own job if a sync gets slow.
     hits = handover.incoming(db, user_id, card_id, row.id, body)

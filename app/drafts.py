@@ -17,7 +17,7 @@ from app.voice import queue_profile, similar_chats
 
 router = APIRouter()
 
-_COLUMNS = "id, card_id, kind, status, original, edited, guardrail, hot_lead, send_at, timing_reason"
+_COLUMNS = "id, card_id, kind, status, original, edited, guardrail, hot_lead, send_at, timing_reason, created_at"
 
 
 def _queued_send(flag: str) -> str:
@@ -54,6 +54,7 @@ class Draft(BaseModel):
     # written before send timing.
     send_at: datetime | None
     timing_reason: str  # why that time, in a few words ("they take their time"); may be empty
+    created_at: datetime  # when it was written: a planned send's ring drains from here to `send_at`
 
 
 def present(db: Connection, user_id: int, rows: Sequence[Row]) -> list[Draft]:

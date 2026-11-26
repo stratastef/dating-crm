@@ -182,7 +182,7 @@ def test_a_planned_send_shows_on_the_card_with_its_time_and_reason_and_autopilot
     card = client.get(f"/cards/{card_id}").json()
     planned = card["planned_send"]
     assert (planned["original"], planned["status"], planned["timing_reason"]) == (REPLY, "approved", "they take their time")
-    assert send_at(planned) > datetime.now(UTC)
+    assert send_at(planned) > datetime.now(UTC) > datetime.fromisoformat(planned["created_at"])  # the ring's span
     assert (card["pipeline_group"], card["reason"], card["autopilot_activity"]) == ("handled_by_autopilot", None, "planned")
     assert card["drafts"] == []  # the card's draft list holds what waits for the user
 
@@ -200,3 +200,29 @@ def test_a_copilot_draft_carries_a_suggested_send_time_inside_the_bounds_with_a_
 
     assert timedelta(hours=12) <= send_at(draft) - started < timedelta(hours=12, seconds=5)
     assert draft["timing_reason"] == "they take their time"
+
+
+def test_send_now_sends_a_planned_send_at_once_and_not_again_at_its_send_time(app, client, card_id, tinder):  # noqa: F811
+    chat(client, card_id, ("them", 0, "do you climb indoors or outdoors"))
+    work_now(app)
+    planned = planned_send(client, card_id)
+
+    assert client.post(f"/drafts/{planned['id']}/send-now").status_code == 202
+    work_now(app)
+
+    assert [body["message"] for _, body in tinder.sent] == [REPLY]
+    work_after_send_time(app)
+    assert len(tinder.sent) == 1
+
+
+def test_hold_takes_back_a_planned_send_and_puts_the_draft_in_the_review_queue(app, client, card_id, tinder):  # noqa: F811
+    chat(client, card_id, ("them", 0, "do you climb indoors or outdoors"))
+    work_now(app)
+    planned = planned_send(client, card_id)
+
+    held = client.post(f"/drafts/{planned['id']}/hold")
+
+    assert (held.status_code, held.json()["status"]) == (200, "pending")
+    work_after_send_time(app)
+    assert tinder.sent == []
+    assert [item["draft"]["id"] for item in client.get("/queue").json()] == [planned["id"]]
