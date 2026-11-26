@@ -1,6 +1,8 @@
 from datetime import UTC, datetime, timedelta
 
 from tests.test_drafts import write_profile
+from tests.test_swipe_autopilot import signed_in  # noqa: F401  (fixture)
+from tests.test_swipes import tinder  # noqa: F401  (fixture)
 
 
 def card_with_reply(client, name: str, minutes_ago: int) -> int:
@@ -63,9 +65,9 @@ def test_the_queue_lists_pending_drafts_with_hot_leads_first(app, client_for, ll
     queue = alice.get("/queue")
 
     assert queue.status_code == 200
-    assert queue.json() == [
-        {"kind": "draft", "hot": True, "card_id": hot, "card_name": "Ada", "draft": hot_draft, "suggestions": None, "paid_item": None},
-        {"kind": "draft", "hot": False, "card_id": cold, "card_name": "Kim", "draft": cold_draft, "suggestions": None, "paid_item": None},
+    assert [(item["kind"], item["hot"], item["card_id"], item["card_name"], item["draft"]) for item in queue.json()] == [
+        ("draft", True, hot, "Ada", hot_draft),
+        ("draft", False, cold, "Kim", cold_draft),
     ]
     assert bob.get("/queue").json() == []
 
@@ -105,3 +107,60 @@ def test_a_dismissed_draft_leaves_the_queue_and_is_not_handed_on(app, client_for
     assert dismissed.json()["status"] == "dismissed"
     assert alice.get("/queue").json() == []
     assert handed_on == []
+
+
+def test_the_review_queue_lists_hot_leads_first_then_the_oldest_first_whatever_their_kind(app, signed_in, llm, jev):
+    write_profile(app, signed_in, llm, "Short, lowercase, teasing.")
+    signed_in.post(f"/cards/{card_with_reply(signed_in, 'Ada', minutes_ago=5)}/drafts")  # hot
+    signed_in.post(f"/cards/{card_with_reply(signed_in, 'Kim', minutes_ago=90)}/drafts")
+    llm.replies = ["pass\nNothing in common.", "super like\nShe climbs and wants kids."]  # Dana, then Eve
+    signed_in.post("/swipes/tinder/suggestions")  # a paid item for Eve: never hot
+    jev.yes["asks_if_ai"] = ["a bot"]
+    sam = signed_in.post("/cards", json={"app": "hinge", "name": "Sam"}).json()["id"]
+    signed_in.post(f"/cards/{sam}/messages", json={"sender": "them", "body": "are you a bot?"})  # a handover: hot
+
+    queue = signed_in.get("/queue").json()
+
+    assert [(item["kind"], item["card_name"], item["hot"]) for item in queue] == [
+        ("draft", "Ada", True),
+        ("handover", "Sam", True),
+        ("draft", "Kim", False),
+        ("paid_item", "Eve", False),
+    ]
+
+
+def test_a_reply_draft_carries_the_message_it_answers_and_an_opener_carries_none(app, client, llm):
+    write_profile(app, client, llm, "Short, lowercase, teasing.")
+    kim = client.post("/cards", json={"app": "hinge", "name": "Kim"}).json()["id"]
+    client.post(f"/cards/{kim}/photos", json={"url": "https://photos.test/kim-1.jpg"})
+    for body, sent_at in [("do you climb?", "2026-11-20T10:00:00Z"), ("saturday works", "2026-11-20T10:05:00Z")]:
+        client.post(f"/cards/{kim}/messages", json={"sender": "them", "body": body, "sent_at": sent_at})
+    client.post(f"/cards/{kim}/messages", json={"sender": "me", "body": "great", "sent_at": "2026-11-20T10:06:00Z"})
+    sam = client.post("/cards", json={"app": "tinder", "name": "Sam"}).json()["id"]
+    client.post(f"/cards/{kim}/drafts")
+    client.post(f"/cards/{sam}/drafts")
+    # Written after the draft, so the draft does not answer it.
+    client.post(f"/cards/{kim}/messages", json={"sender": "them", "body": "hello?"})
+
+    items = {item["card_name"]: item for item in client.get("/queue").json()}
+
+    assert items["Kim"]["draft"]["kind"] == "reply"
+    assert items["Kim"]["message"] == {"body": "saturday works", "sent_at": "2026-11-20T10:05:00Z"}
+    assert (items["Kim"]["card"]["app"], items["Kim"]["card"]["lead_photo_url"]) == ("hinge", "https://photos.test/kim-1.jpg")
+    assert items["Sam"]["draft"]["kind"] == "opener"
+    assert items["Sam"]["message"] is None
+    assert (items["Sam"]["card"]["app"], items["Sam"]["card"]["lead_photo_url"]) == ("tinder", None)
+
+
+def test_a_handover_item_carries_the_trigger_that_fired_and_the_quoted_message(client, jev):
+    jev.yes["asks_if_ai"] = ["a bot"]
+    sam = client.post("/cards", json={"app": "hinge", "name": "Sam"}).json()["id"]
+    asked = datetime.now(UTC).replace(microsecond=0) - timedelta(minutes=2)
+    for body, sent_at in [("haha", asked - timedelta(minutes=1)), ("are you a bot?", asked), ("??", asked + timedelta(minutes=1))]:
+        client.post(f"/cards/{sam}/messages", json={"sender": "them", "body": body, "sent_at": sent_at.isoformat()})
+
+    [item] = client.get("/queue").json()
+
+    assert (item["kind"], item["card_name"], item["card"]["name"]) == ("handover", "Sam", "Sam")
+    assert item["triggers"] == ["asks_if_ai"]
+    assert item["message"] == {"body": "are you a bot?", "sent_at": asked.strftime("%Y-%m-%dT%H:%M:%SZ")}

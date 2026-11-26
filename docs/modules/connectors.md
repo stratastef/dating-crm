@@ -1,6 +1,6 @@
 # Connectors
 
-The contract is in `app/connectors.py`. The capabilities are `read_matches`, `read_messages`, `read_candidates`, `send`, `like` and `pass`, and the paid items `super_like`, `rose` and `boost`. `call()` refuses a paid item; only an approved proposal spends one (see "Paid items").
+The contract is in `app/connectors.py`. The capabilities are `read_matches`, `read_messages`, `read_candidates`, `send`, `like` and `pass`, and the paid items `super_like`, `rose` and `boost`. A profile from `read_candidates` may carry `cost`, what a paid item on it costs as the app shows it; a proposal for the profile keeps it. `call()` refuses a paid item; only an approved proposal spends one (see "Paid items").
 
 Add a connector: subclass `Connector`, set `app`, declare the `capabilities` it supports and implement the method for each one (`pass` is the method `pass_`). Leave a capability out of `capabilities` to leave it out of the build. Each method receives the session token as its first argument. A method raises any exception when the app refuses or breaks.
 

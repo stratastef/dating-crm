@@ -38,6 +38,8 @@ class Connector:
         raise NotImplementedError
 
     def read_candidates(self, token: str) -> list[dict]:
+        """Each profile: `id`, `name`, `bio`, `photos` (URLs), and `cost` when the app shows what a paid item
+        on this profile costs ("$1.99"). A proposal for the profile carries it (`app/paid_items.py`)."""
         raise NotImplementedError
 
     def send(self, token: str, match_id: str, text: str) -> dict:

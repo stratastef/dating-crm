@@ -1,5 +1,7 @@
 """The review queue: items that wait for the user, and the live push for the hot ones."""
 
+from datetime import UTC, datetime
+
 import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -13,13 +15,29 @@ from app.push import send_push
 
 router = APIRouter()
 
+_LONG_AGO = datetime.min.replace(tzinfo=UTC)
+
+
+class QuotedMessage(BaseModel):
+    body: str
+    sent_at: datetime
+
 
 class QueueItem(BaseModel):
     kind: str  # `draft`, `handover` or `paid_item`
     hot: bool
     card_id: int | None  # null when `kind` is `paid_item`: a swipe candidate is not a card
     card_name: str
+    # The card summary, `Card` in `app/cards.py` (a dict here: that module imports this one). Null when
+    # `card_id` is.
+    card: dict | None = None
     draft: Draft | None  # set when `kind` is `draft`
+    # The match's message the item is about: the one a reply draft answers, or the one that fired a handover.
+    # Null for an opener and a paid item.
+    message: QuotedMessage | None = None
+    # Set when `kind` is `handover`: the handover checks `message` hit (`HANDOVER` in `app/jev.py`, or
+    # `unavailable` when Jev could not be asked). Null when no hit is stored.
+    triggers: list[str] | None = None
     suggestions: list[str] | None = None  # set when `kind` is `handover`: the suggested replies
     paid_item: paid_items.Proposal | None = None  # set when `kind` is `paid_item`
 
@@ -68,53 +86,97 @@ def hand_on_approved_draft(db: Connection, user_id: int, draft: Draft) -> None:
 @router.get("/queue", response_model=list[QueueItem])
 def queue(user: CurrentUser, db: Db):
     """Everything that waits for the user: hot leads first, then oldest first."""
-    rows = db.execute(
+    # Each item with the time it began to wait. A new kind of item adds its own loop.
+    waiting: list[tuple[datetime, QueueItem]] = []
+    # A reply answers the newest message the match had sent when it was written.
+    drafts = db.execute(
         text(
             f"""
-            SELECT {", ".join(f"drafts.{column}" for column in _DRAFT_COLUMNS.split(", "))}, cards.name AS card_name
+            SELECT {", ".join(f"drafts.{column}" for column in _DRAFT_COLUMNS.split(", "))}, drafts.created_at,
+                   cards.name AS card_name, answered.body AS message_body, answered.sent_at AS message_sent_at
             FROM drafts JOIN cards ON cards.id = drafts.card_id
+            LEFT JOIN LATERAL (
+                SELECT body, sent_at FROM messages
+                WHERE messages.card_id = drafts.card_id AND messages.user_id = :user_id AND sender = 'them'
+                  AND drafts.kind = 'reply' AND sent_at <= drafts.created_at
+                ORDER BY sent_at DESC, id DESC LIMIT 1
+            ) answered ON true
             WHERE drafts.user_id = :user_id AND drafts.status = 'pending'
             ORDER BY drafts.created_at, drafts.id
             """
         ),
         {"user_id": user.id},
     ).all()
-    # shortcut: one hot-lead query per item, fold into the query above if queues get long.
-    items = [
-        QueueItem(
-            kind="draft",
-            hot=is_hot_lead(db, user.id, row.card_id),
-            card_id=row.card_id,
-            card_name=row.card_name,
-            draft=Draft.model_validate(row, from_attributes=True),
-        )
-        for row in rows
-    ]
+    # The trigger is the newest message from the match that hit a handover check.
     handovers = db.execute(
         text(
-            "SELECT id, name, handover_suggestions FROM cards"
-            " WHERE user_id = :user_id AND handover = 'pending' ORDER BY id"
+            """
+            SELECT cards.id, cards.name, cards.handover_suggestions, hit.handover AS triggers,
+                   hit.body AS message_body, hit.sent_at AS message_sent_at
+            FROM cards LEFT JOIN LATERAL (
+                SELECT handover, body, sent_at FROM messages
+                WHERE messages.card_id = cards.id AND messages.user_id = :user_id AND sender = 'them'
+                  AND cardinality(handover) > 0
+                ORDER BY sent_at DESC, id DESC LIMIT 1
+            ) hit ON true
+            WHERE cards.user_id = :user_id AND cards.handover = 'pending' ORDER BY cards.id
+            """
         ),
         {"user_id": user.id},
     ).all()
-    # shortcut: handovers come before drafts, not by age. Store when the handover began if that order matters.
-    items = [
-        QueueItem(
+    cards = _summaries(db, user.id, [row.card_id for row in drafts] + [row.id for row in handovers])
+    for row in drafts:
+        item = QueueItem(
+            kind="draft",
+            hot=cards[row.card_id]["hot"],
+            card_id=row.card_id,
+            card_name=row.card_name,
+            card=cards[row.card_id],
+            draft=Draft.model_validate(row, from_attributes=True),
+            message=_quoted(row),
+        )
+        waiting.append((row.created_at, item))
+    for row in handovers:
+        item = QueueItem(
             kind="handover",
-            hot=is_hot_lead(db, user.id, row.id),
+            hot=cards[row.id]["hot"],
             card_id=row.id,
             card_name=row.name,
+            card=cards[row.id],
             draft=None,
+            message=_quoted(row),
+            triggers=row.triggers,
             suggestions=row.handover_suggestions,
         )
-        for row in handovers
-    ] + items
-    # Paid items are never hot, so they come after the hot leads.
-    items = [
-        QueueItem(kind="paid_item", hot=False, card_id=None, card_name=row.name, draft=None, paid_item=paid_items.Proposal(**row._mapping))
-        for row in paid_items.waiting(db, user.id)
-    ] + items
-    return sorted(items, key=lambda item: not item.hot)  # stable, so each group stays oldest first
+        # shortcut: the trigger message's time stands in for when the handover began (a card paused before
+        # the trigger was stored counts as oldest). Store the start on the card if the two drift apart.
+        waiting.append((row.message_sent_at or _LONG_AGO, item))
+    for row in paid_items.waiting(db, user.id):
+        item = QueueItem(
+            kind="paid_item",
+            hot=False,  # a paid item is never hot
+            card_id=None,
+            card_name=row.name,
+            draft=None,
+            paid_item=paid_items.Proposal(**row._mapping),
+        )
+        waiting.append((row.created_at, item))
+    return [item for _, item in sorted(waiting, key=lambda pair: (not pair[1].hot, pair[0]))]
+
+
+def _summaries(db: Connection, user_id: int, card_ids: list[int]) -> dict[int, dict]:
+    """The card summaries of the user's cards, by card id."""
+    from app.cards import _COLUMNS, summarize  # imported here: app.cards imports this module for `is_hot_lead`
+
+    rows = db.execute(
+        text(f"SELECT {_COLUMNS} FROM cards WHERE user_id = :user_id AND id = ANY(:ids)"),
+        {"user_id": user_id, "ids": card_ids},
+    ).all()
+    return {card.id: card.model_dump() for card in summarize(db, user_id, rows)}
+
+
+def _quoted(row) -> QuotedMessage | None:
+    return QuotedMessage(body=row.message_body, sent_at=row.message_sent_at) if row.message_body is not None else None
 
 
 def _decide(db: Connection, user_id: int, draft_id: int, status: str) -> Draft:
