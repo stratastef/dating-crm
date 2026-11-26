@@ -42,6 +42,7 @@ uv run python -m app.invite_codes 3
 
 - **`SMS_PROVIDER=log`** (local development; `compose.yaml` sets it unless the environment gives another value): the text, code included, goes to the server log at `WARNING`. Never use it on a server testers use.
 - **`SMS_PROVIDER=twilio`**: the text goes through Twilio. The request fails closed: if a setting below is missing, or Twilio refuses the text or cannot be reached, `POST /sign-in/code` answers `503 sms_not_sent` and every code for that number stops working. The request still counts towards the rate limits. The API log gets one `WARNING` line with Twilio's error, without the text.
+- **Fixed code for listed numbers** (until Twilio sends codes, #50): with `SIGN_IN_FIXED_CODE=222222` (six digits) and `SIGN_IN_FIXED_CODE_PHONES=+4917…,+1555…` (comma-separated E.164), a listed number's sign-in code is that fixed code and nothing is texted. Every other number gets a random code through `SMS_PROVIDER` as above. Anyone who knows a listed number and the code can sign in as that account, so list only your own numbers, and remove both settings once SMS works.
 - **`SMS_PROVIDER` not set, or any other value**: fails closed the same way, so a server set up without a provider never writes codes to its log. Tests stub `send()` (fixture `sms`).
 - A text Twilio accepts but the carrier fails to deliver is not noticed. The user taps "Send a new code". The Twilio Console shows it under Monitor, Logs, Messages.
 
