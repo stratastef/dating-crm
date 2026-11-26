@@ -4,8 +4,8 @@ The signed-in app is `MainTabView` (`ios/DatingCRM/Screens/MainTabView.swift`): 
 
 | Tab | Shows now |
 | --- | --- |
-| Today | A placeholder until the Today screen lands |
-| Review | `QueueView` |
+| Today | `TodayView` (see "Today"). Tapping the review count switches to Review. |
+| Review | `QueueView`. The tab's badge is the review count from Today's last load. |
 | Pipeline | `BoardView`, still under the seven stages. A tapped push switches to this tab and opens the card. Search (minimized to a toolbar button) filters the loaded cards by name; the plus button opens `NewCardSheet` to add a card by hand. |
 | Swipe | `SwipeView` |
 | You | `YouView`: Dashboard, Autopilot (`AutopilotView`), Preferences, Connected apps (`ConnectedAppsView`), Profile (Photos, Voice), Account (Settings, Sign out, which asks first) |
@@ -56,7 +56,7 @@ Besides the Debug sign-in (`DCRM_SERVER`, `DCRM_TOKEN`) and `DCRM_TAB`, `DCRM_OP
 
 ## Limits
 
-- No Review count badge on the tab yet: it waits for the server's review summary.
+- The Review badge is the system red, not the accent: `UITabBarItem.appearance().badgeColor` has no effect on the SwiftUI `TabView`. It updates when Today loads, not when Review clears an item.
 - Not verified on screen: typing, autosave, the save error under a field and Edit on Voice and Preferences (screenshots only, no taps).
 - Not verified on screen: the toast (no screen shows one yet) and VoiceOver reading the AI marker and badges.
 - Error text is still system red, under 4.5:1 on white, outside `ErrorRow`. Settings is still a grey grouped form until its ticket.
