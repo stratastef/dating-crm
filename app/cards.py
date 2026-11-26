@@ -96,6 +96,7 @@ class Card(BaseModel):
     last_message: LastMessage | None
     hot: bool  # a hot lead: `is_hot_lead()` in `app/review.py`, as on the review queue
     pending_draft: Draft | None  # the newest pending draft, the one the review queue shows; null when none
+    drafts: list[Draft]  # the card's draft list: its pending, copied and failed drafts, newest first
     lead_photo_url: str | None  # the first photo attached to the card; null when unknown
     # Where the Pipeline lists the card, and why: see `app/pipeline.py`.
     pipeline_group: str  # a `Group`: `waiting_for_you`, `handled_by_autopilot`, ...
@@ -133,17 +134,19 @@ def summarize(db: Connection, user_id: int, cards: Sequence[Row]) -> list[Card]:
             params,
         )
     }
-    pending = db.execute(
+    waiting = db.execute(
         text(
             f"""
-            SELECT DISTINCT ON (card_id) {_DRAFT_COLUMNS} FROM drafts
-            WHERE user_id = :user_id AND card_id = ANY(:ids) AND status = 'pending'
-            ORDER BY card_id, created_at DESC, id DESC
+            SELECT {_DRAFT_COLUMNS} FROM drafts
+            WHERE user_id = :user_id AND card_id = ANY(:ids) AND status IN ('pending', 'copied', 'failed')
+            ORDER BY created_at DESC, id DESC
             """
         ),
         params,
     ).all()
-    pending_drafts = {draft.card_id: draft for draft in present(db, user_id, pending)}
+    drafts: dict[int, list[Draft]] = {}
+    for draft in present(db, user_id, waiting):
+        drafts.setdefault(draft.card_id, []).append(draft)
     lead_photos = dict(
         db.execute(
             text(
@@ -160,7 +163,8 @@ def summarize(db: Connection, user_id: int, cards: Sequence[Row]) -> list[Card]:
             **card._mapping,
             "last_message": last_messages.get(card.id),
             "hot": is_hot_lead(db, user_id, card.id),
-            "pending_draft": pending_drafts.get(card.id),
+            "pending_draft": next((draft for draft in drafts.get(card.id, []) if draft.status == "pending"), None),
+            "drafts": drafts.get(card.id, []),
             "lead_photo_url": lead_photos.get(card.id),
         }
         for card in cards

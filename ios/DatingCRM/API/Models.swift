@@ -182,6 +182,30 @@ struct DashboardWeek: Codable, Identifiable, Equatable {
     var id: Date { week }
 }
 
+/// The Dashboard: the weeks, the headline (good dates per hour this week against the four-week average), this
+/// month's funnel and this month's AI spend.
+struct Dashboard: Codable, Equatable {
+    var weeks: [DashboardWeek]
+    /// Good dates per hour this week; nil with no time recorded this week.
+    var thisWeek: Double?
+    /// Good dates per hour over the four weeks before this one; nil with no time recorded in them.
+    var fourWeekAverage: Double?
+    var funnel: Funnel
+    /// This month's AI spend over this month's good dates; nil with no good date this month.
+    var spendPerGoodDateUsd: Double?
+    /// This month's AI spend against the cap.
+    var budget: Budget
+
+    /// Cards that reached each stage this month. `good` counts good dates rated this month.
+    struct Funnel: Codable, Equatable {
+        var matched: Int
+        var chatting: Int
+        var dateSet: Int
+        var dated: Int
+        var good: Int
+    }
+}
+
 /// A message Claude wrote for a card. `original` is Claude's text; `edited` is the user's version of it.
 struct Draft: Codable, Identifiable, Hashable {
     enum Kind: String, Codable { case opener, reply }
@@ -223,7 +247,8 @@ struct Inference: Codable, Identifiable, Hashable {
     }
 }
 
-/// One thing that waits for the user's review: `draft`, `copied_draft`, `handover` or `paid_item`. The server adds more kinds later.
+/// One thing that waits for the user's review: `draft`, `copied_draft`, `failed_send`, `handover` or `paid_item`.
+/// The server adds more kinds later.
 struct QueueItem: Codable, Identifiable, Hashable {
     var kind: String
     /// A hot lead: the server pushed it at once.
@@ -233,7 +258,7 @@ struct QueueItem: Codable, Identifiable, Hashable {
     var cardName: String
     /// The card summary, for the face, the dating app and opening the card. Nil when `cardID` is.
     var card: Card?
-    /// Set when `kind` is `draft` or `copied_draft`.
+    /// Set when `kind` is `draft`, `copied_draft` or `failed_send`.
     var draft: Draft?
     /// The match's message the item is about: the one a reply answers, or the one that fired a handover.
     var message: QuotedMessage?
@@ -371,7 +396,7 @@ struct Budget: Codable, Equatable {
     /// "$8.20 of $30": cents only when there are any.
     var spentOfCap: String { "\(Self.dollars(spendUsd)) of \(Self.dollars(capUsd))" }
 
-    private static func dollars(_ usd: Double) -> String {
+    static func dollars(_ usd: Double) -> String {
         // en_US: "$30", not "US$30" outside the US. The app is not localized.
         usd.formatted(
             .currency(code: "USD").locale(Locale(identifier: "en_US"))
@@ -430,6 +455,57 @@ enum PurgeConfirmation {
 
     static func allows(typed: String, chosen: Int) -> Bool {
         chosen > 0 && typed.trimmingCharacters(in: .whitespaces).lowercased() == word
+    }
+
+    /// The purge button names who it deletes: "Delete everything about Ada and Bea".
+    static func button(names: [String]) -> String {
+        // en_US: the app is not localized.
+        "Delete everything about \(names.formatted(.list(type: .and).locale(Locale(identifier: "en_US"))))"
+    }
+}
+
+/// The settings the app reads from `GET /settings`; the server sends more, which the app ignores here.
+struct UserSettings: Decodable, Equatable {
+    /// Hot-lead and handover pushes name the match. Off: "Someone replied. A draft is ready."
+    var pushNamePreviews: Bool
+    /// Faces stay blurred until tapped (ADR 0009). See `BlurredFace`.
+    var blurPhotos: Bool
+}
+
+/// One action the app took toward a dating app or the calendar, and what triggered it (`GET /audit-log`).
+struct ActivityEntry: Decodable, Identifiable, Equatable {
+    var id: Int
+    var type: String
+    var app: String
+    /// Who or what was acted on: `card:7`, `candidate:3`, `bio`, `photo:4`, `account`.
+    var target: String
+    var trigger: String
+    var createdAt: Date
+    /// The person the entry is about, as named now. Nil for the user's own things and for a purged person.
+    var name: String?
+
+    /// What the app did, in words: "Sent Ada a message".
+    var summary: String {
+        let who = name ?? "someone"
+        switch type {
+        case "message": return "Sent \(who) a message"
+        case "like": return "Liked \(who)"
+        case "pass": return "Passed on \(who)"
+        case "super_like": return "Sent \(who) a Super Like"
+        case "rose": return "Sent \(who) a Rose"
+        case "boost": return "Boosted your profile"
+        case "profile_change": return target == "bio" ? "Changed your bio" : "Changed a photo"
+        case "calendar_hold":
+            // `card:7 hold 2026-12-01T19:00:00+00:00`
+            switch target.split(separator: " ").dropFirst().first {
+            case "hold": return "Held a time for \(who)"
+            case "release": return "Released a time held for \(who)"
+            case "confirm": return "Confirmed the date with \(who)"
+            default: return "Changed your calendar for \(who)"
+            }
+        case "purge": return "Deleted someone's data, as they asked"
+        default: return type
+        }
     }
 }
 

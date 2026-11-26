@@ -1,4 +1,7 @@
-"""Sending a draft through a connector: `queue_send()` approves a draft and the `send_draft` job sends it once."""
+"""Sending a draft through a connector: `queue_send()` approves a draft and the `send_draft` job sends it once.
+`cancel_send()` takes a queued send back until the job starts."""
+
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import Connection, Row, text
@@ -22,6 +25,9 @@ DISCLOSURE = "Heads up: an AI assistant helps me write my messages here."
 
 # The stages in which autopilot chats. From Number swapped on the user texts off the app.
 CHAT_STAGES = ("matched", "chatting")
+
+# How long a user's Send waits before the worker sends it, so the user can take it back (`undo_send`).
+UNDO_WINDOW = timedelta(seconds=5)
 
 
 def unattended_block(db: Connection, user_id: int, draft_id: int) -> str | None:
@@ -49,11 +55,21 @@ def unattended_block(db: Connection, user_id: int, draft_id: int) -> str | None:
     return None
 
 
-def queue_send(db: Connection, user_id: int, draft_id: int, trigger: str, unattended: bool = False) -> Row | None:
-    """Approve a pending draft and queue the job that sends it, in the caller's transaction.
+def queue_send(
+    db: Connection,
+    user_id: int,
+    draft_id: int,
+    trigger: str,
+    unattended: bool = False,
+    run_at: datetime | None = None,
+) -> Row | None:
+    """Approve a pending draft, or a failed one again (Retry), and queue the job that sends it, in the caller's
+    transaction.
 
-    Returns the draft, now `approved`, or None if the user has no such draft or it is not `pending`, so a
-    draft is queued at most once. `trigger` is what caused the send; it goes to the audit log.
+    Returns the draft, now `approved`, or None if the user has no such draft or it is not `pending` or `failed`,
+    so a draft is queued at most once. `trigger` is what caused the send; it goes to the audit log.
+
+    The job runs at `run_at`, or at once. Until it starts, `cancel_send()` takes the send back.
 
     `unattended=True` is for a send no user asked for. It returns None and leaves the draft `pending`, so in
     the review queue, when `unattended_block()` gives a reason; the job asks again before it sends.
@@ -64,13 +80,44 @@ def queue_send(db: Connection, user_id: int, draft_id: int, trigger: str, unatte
         text(
             f"""
             UPDATE drafts SET status = 'approved', updated_at = now()
-            WHERE id = :id AND user_id = :user_id AND status = 'pending' RETURNING {_COLUMNS}
+            WHERE id = :id AND user_id = :user_id AND status IN ('pending', 'failed') RETURNING {_COLUMNS}
             """
         ),
         {"id": draft_id, "user_id": user_id},
     ).one_or_none()
     if draft:
-        enqueue(db, user_id, "send_draft", {"draft_id": draft_id, "trigger": trigger, "unattended": unattended})
+        payload = {"draft_id": draft_id, "trigger": trigger, "unattended": unattended}
+        enqueue(db, user_id, "send_draft", payload, run_at=run_at)
+    return draft
+
+
+def cancel_send(db: Connection, user_id: int, draft_id: int) -> Row | None:
+    """Take back a queued send before its job starts, in the caller's transaction: the draft is `pending` again
+    and its job does not run. Returns the draft, or None if it is not `approved`: the job has claimed it, or it
+    was never queued."""
+    draft = db.execute(
+        text(
+            f"""
+            UPDATE drafts SET status = 'pending', updated_at = now()
+            WHERE id = :id AND user_id = :user_id AND status = 'approved' RETURNING {_COLUMNS}
+            """
+        ),
+        {"id": draft_id, "user_id": user_id},
+    ).one_or_none()
+    if draft:
+        # Cancelled, not left to find the draft `pending`: a send queued again must not go out at the old time.
+        # A job a worker holds is skipped, not waited for; it finds the draft `pending` and sends nothing.
+        db.execute(
+            text(
+                """
+                UPDATE jobs SET status = 'skipped', last_error = 'the send was taken back' WHERE id IN (
+                    SELECT id FROM jobs WHERE user_id = :user_id AND kind = 'send_draft' AND status = 'queued'
+                      AND (payload->>'draft_id')::int = :id
+                    FOR UPDATE SKIP LOCKED)
+                """
+            ),
+            {"id": draft_id, "user_id": user_id},
+        )
     return draft
 
 
@@ -105,16 +152,31 @@ def refusal(
 
 @router.post("/drafts/{draft_id}/send", response_model=Draft, status_code=202)
 def tap_send(draft_id: int, user: CurrentUser, db: Db):
-    """The user's Send: queue the draft for the worker to send. `409` says why when it cannot be sent."""
+    """The user's Send: queue the draft for the worker to send once `UNDO_WINDOW` has passed. `409` says why
+    when it cannot be sent."""
     card = _card(db, user.id, draft_id)
     if not card:
         raise HTTPException(status_code=404, detail="draft not found")
     why = refusal(db, user.id, card.app, card.external_id, card.guardrail)
     if why:
         raise HTTPException(status_code=409, detail=why)
-    draft = queue_send(db, user.id, draft_id, trigger=f"copilot: user tapped send on draft {draft_id}")
+    trigger = f"copilot: user tapped send on draft {draft_id}"
+    draft = queue_send(db, user.id, draft_id, trigger, run_at=datetime.now(UTC) + UNDO_WINDOW)
     if not draft:
         raise HTTPException(status_code=409, detail=f"the draft is already {card.status}")
+    return present(db, user.id, [draft])[0]
+
+
+@router.post("/drafts/{draft_id}/undo-send", response_model=Draft)
+def undo_send(draft_id: int, user: CurrentUser, db: Db):
+    """Take back the user's Send while its job has not started: the draft is `pending` again, its edit kept.
+    `409` once the worker has started sending it."""
+    card = _card(db, user.id, draft_id)
+    if not card:
+        raise HTTPException(status_code=404, detail="draft not found")
+    draft = cancel_send(db, user.id, draft_id)
+    if not draft:
+        raise HTTPException(status_code=409, detail=f"the draft is {card.status}")
     return present(db, user.id, [draft])[0]
 
 

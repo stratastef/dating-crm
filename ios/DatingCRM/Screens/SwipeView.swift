@@ -289,7 +289,7 @@ private struct CandidateCard: View {
                         enlarge(Photo(url: url, name: candidate.name))
                     } label: {
                         AsyncImage(url: url) { image in
-                            image.resizable().scaledToFill()
+                            image.resizable().scaledToFill().blurredFace()
                         } placeholder: {
                             Color(uiColor: .secondarySystemBackground)
                         }

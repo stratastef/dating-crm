@@ -34,6 +34,7 @@ def test_a_handover_hit_pauses_autopilot_for_that_card_only(app, client, jev):
 
 def test_a_hit_sends_a_push_with_the_suggested_replies(client, jev, llm, apns):
     jev.yes["logistics"] = ["saturday"]
+    client.patch("/settings", json={"push_name_previews": True})  # without them the push quotes nothing
     client.post("/devices", json={"token": "abc123"})
     card_id = card(client, "Ada")
     llm.reply = "saturday works\n\nhow about sunday instead\n"
@@ -52,6 +53,7 @@ def test_a_hit_sends_a_push_with_the_suggested_replies(client, jev, llm, apns):
 
 def test_no_suggestion_for_a_bot_or_ai_question_denies_being_ai(client, jev, llm, apns):
     jev.yes = {"asks_if_ai": ["are you a bot"], "denies_ai": ["not a bot", "100% human"]}
+    client.patch("/settings", json={"push_name_previews": True})  # without them the push quotes nothing
     client.post("/devices", json={"token": "abc123"})
     card_id = card(client)
     llm.reply = "lol no, i am not a bot\nwould a bot be this bad at replying\ni'm 100% human, promise"

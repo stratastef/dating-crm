@@ -112,11 +112,17 @@ struct APIClient {
         try await send("PATCH", "inferences/\(inferenceID)", body: Self.encoder.encode(["corrected": text]))
     }
 
-    /// Send: the server queues the draft and its worker sends it through the dating app. `409` means the
-    /// server refused: sending is off for the app, the draft denies being AI, or it was already sent. A pause
-    /// does not stop it.
+    /// Send, or Retry a failed send: the server holds the draft 5 seconds for Undo, then its worker sends it
+    /// through the dating app. `409` means the server refused: sending is off for the app, the draft denies being
+    /// AI, or it was already sent. A pause does not stop it.
     func sendDraft(draftID: Int) async throws {
         try await data("POST", "drafts/\(draftID)/send")
+    }
+
+    /// Undo of a Send the server still holds: the draft is pending again, with its edit. `409` means the worker
+    /// already started sending it.
+    func undoSend(draftID: Int) async throws -> Draft {
+        try await send("POST", "drafts/\(draftID)/undo-send")
     }
 
     /// Everything that waits for the user's review, hot leads first.
@@ -184,8 +190,9 @@ struct APIClient {
         try await send("PUT", "voice/questionnaire", body: Self.encoder.encode(["answers": answers]))
     }
 
-    /// Good dates per hour for every week with recorded time or a good date, oldest first.
-    func dashboard() async throws -> [DashboardWeek] {
+    /// Good dates per hour for every week with recorded time or a good date, oldest first, with the headline,
+    /// this month's funnel and AI spend.
+    func dashboard() async throws -> Dashboard {
         try await send("GET", "dashboard")
     }
 
@@ -375,6 +382,26 @@ struct APIClient {
 
     func setAIDisclosure(_ on: Bool) async throws {
         _ = try await enabled("PUT", "settings/ai-disclosure", on)
+    }
+
+    /// Push name previews and Blur photos.
+    func settings() async throws -> UserSettings {
+        try await send("GET", "settings")
+    }
+
+    /// Lets hot-lead and handover pushes name the match. Off by default.
+    func setPushNamePreviews(_ on: Bool) async throws -> UserSettings {
+        try await send("PATCH", "settings", body: Self.encoder.encode(["push_name_previews": on]))
+    }
+
+    /// Blurs faces until tapped. Off by default.
+    func setBlurPhotos(_ on: Bool) async throws -> UserSettings {
+        try await send("PATCH", "settings", body: Self.encoder.encode(["blur_photos": on]))
+    }
+
+    /// What the app did toward dating apps and the calendar, newest first.
+    func activityLog() async throws -> [ActivityEntry] {
+        try await send("GET", "audit-log")
     }
 
     /// The user's cards, on every app, whose name or handle contains `query`.

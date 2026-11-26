@@ -54,6 +54,21 @@ import Foundation
         return commit
     }
 
+    /// Undo of a Send (`Toast.sending`): the server takes the draft back while it still holds it, and the draft
+    /// returns as the server has it again, pending and editable.
+    func undoSend(_ item: QueueItem) async {
+        guard let draft = item.draft else { return }
+        do {
+            _ = try await client.undoSend(draftID: draft.id)
+            await load()
+        } catch let late as APIError where late.status == 409 {
+            await load()  // a send that failed meanwhile comes back as a failed send
+            error = "Too late to undo the message to \(item.cardName)."
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
     func undo(_ item: QueueItem) {
         guard let dismissed = dismissing.removeValue(forKey: item.id) else { return }
         dismissed.commit.cancel()

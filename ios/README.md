@@ -13,7 +13,7 @@ The SwiftUI client for the API in the repo root. It needs Xcode 27 and an iOS 26
 | `DatingCRM/Push.swift` | `Push` (device token, tapped card) and `AppDelegate`, which receives both from UIKit. |
 | `DatingCRM.entitlements` | The push notification entitlement. |
 | `DatingCRM/API/APIClient.swift` | Every call to the server. |
-| `DatingCRM/API/Models.swift` | `Stage`, `Card`, `Message`, `Inference`, `Preferences`, `DashboardWeek`, `ProfilePhoto`, `PhotoEdit`, `Bio`, `SwipeCandidate`, `Pauses`, `AutonomyLevel`, `Budget`: the JSON the server sends. |
+| `DatingCRM/API/Models.swift` | `Stage`, `Card`, `Message`, `Inference`, `Preferences`, `Dashboard`, `DashboardWeek`, `ProfilePhoto`, `PhotoEdit`, `Bio`, `SwipeCandidate`, `Pauses`, `AutonomyLevel`, `Budget`: the JSON the server sends. |
 | `DatingCRM/Components/` | The shared A3 look: colors, button styles, AI marker, badges, toast, relative times, avatar. See `docs/modules/ios-app-shell.md`. |
 | `DatingCRM/Screens/` | One file per screen. `PhotosView` uploads photos from the photo library as JPEG, ranks, reorders and deletes them, labels the first "Lead photo", and shows each offered edit next to the original to accept or reject. The server makes every preview from the uploaded pixels. |
 | `DatingCRM/ScreenshotImport.swift` | Uploads a shared screenshot and holds the draft or error the share extension shows. |
@@ -95,17 +95,16 @@ A card that is paused for handover shows the same section on top of `CardDetailV
 
 ## Settings
 
-You > Settings opens `SettingsView` (`Screens/SettingsView.swift`). Every switch calls the server at once and shows the state the server answers with; a failed call shows its error and leaves the switch as it was.
+Under You, the Autopilot screen holds Pause, autonomy, the AI budget and swipe limits (`AutopilotView`). The Settings section holds one screen each for the rest. Every switch calls the server at once and shows the state the server answers with; a failed call shows its error and leaves the switch as it was.
 
-| Section | Does | Routes |
+| Screen | Does | Routes |
 | --- | --- | --- |
-| Pause | "Pause all autopilot", and one switch per dating app the user has a card on or that is paused. A pause stops only what the server does alone. | `GET /autopilot/pause`, `POST /autopilot/pause`, `POST /autopilot/resume`, each with `?app=` for one app |
-| Autonomy | One picker per job (chat, profile, swipe): Off, Copilot, Autopilot, Full autopilot. | `GET /autonomy`, `PUT /autonomy/{job}` |
-| AI budget | This month's spend, a note when the cap is reached, and the cap to set. | `GET /budget`, `PUT /budget` |
-| Privacy | The protected-trait opt-in and the AI disclosure. | `GET` and `PUT /settings/protected-trait-guesses`, `/settings/ai-disclosure` |
-| Find and purge | Search by name or handle, tick the cards and swiped profiles of the person, type `purge`, then delete. The button works only once someone is ticked and the word is typed (`PurgeConfirmation`). | `GET /people`, `GET /people/candidates`, `POST /people/purge` |
+| Notifications (`NotificationsView`) | "Show names in pushes": push name previews, off by default. Off, a hot-lead or handover push says only "Someone replied. A draft is ready." Tapping any push opens its card. | `GET` and `PATCH /settings` (`push_name_previews`) |
+| Privacy (`PrivacyView`) | Blur photos, the protected-trait opt-in and the AI disclosure. | `GET` and `PATCH /settings` (`blur_photos`), `GET` and `PUT /settings/protected-trait-guesses`, `/settings/ai-disclosure` |
+| Activity log (`ActivityLogView`) | What the app did toward dating apps and the calendar, newest first: the action in words with the person's name (`ActivityEntry.summary`), the app, the time and what triggered it. | `GET /audit-log` |
+| Find and purge (`PurgeView`) | Search by name or handle, tick the cards and swiped profiles of the person, type `purge`, then delete. The button names who it deletes ("Delete everything about Ada") and works only once someone is ticked and the word is typed (`PurgeConfirmation`). | `GET /people`, `GET /people/candidates`, `POST /people/purge` |
 
-Not built: the swipe limits (`/swipes/limits`), connector alerts and the audit log have no screen.
+Not built: connector alerts have no screen.
 
 ## Swipe copilot
 

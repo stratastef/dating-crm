@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from test_drafts import drafted
-from test_send import CLEO, tinder, user_id, work  # noqa: F401  (fixtures)
+from test_send import CLEO, tinder, user_id, work, work_now  # noqa: F401  (fixtures)
 
 from app.jev import GUARDRAIL, JevUnavailable
 from app.jobs import run_once
@@ -60,6 +60,17 @@ def test_autopilot_replies_to_a_match_on_its_own_and_logs_the_send_with_its_trig
     (action,) = client.get("/audit-log").json()
     assert (action["type"], action["app"], action["target"]) == ("message", "tinder", f"card:{card_id}")
     assert action["trigger"].startswith(f"chat autopilot ({level})")
+
+
+def test_an_autopilot_send_is_not_delayed(app, client, card_id, tinder):  # noqa: F811
+    """Only the user's own Send waits for Undo."""
+    client.put("/settings/ai-disclosure", json={"enabled": False})
+    autonomy(client, "autopilot")
+    incoming(client, card_id)
+
+    work_now(app)
+
+    assert sent(tinder) == [REPLY]
 
 
 # (a) Nothing is sent unattended unless chat autonomy is Autopilot or Full autopilot and nothing is paused.
