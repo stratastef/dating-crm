@@ -7,7 +7,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from app import review
+from app import review, setup
 from app.auth import CurrentUser, Db
 from app.cards import _COLUMNS, Card, summarize
 from app.settings import user_zone
@@ -39,6 +39,7 @@ class TodayItem(BaseModel):
 
 class Today(BaseModel):
     review: ReviewSummary
+    setup: setup.SetupSummary | None  # "Finish setup": null once dismissed or done
     overdue: list[TodayItem]
     today: list[TodayItem]
     coming_up: list[TodayItem]
@@ -93,6 +94,7 @@ def today(user: CurrentUser, db: Db):
     queue = review.queue(user, db)
     return Today(
         review=ReviewSummary(count=len(queue), hot=sum(item.hot for item in queue)),
+        setup=setup.summary(user, db),
         overdue=[item.model_copy(update={"days_late": (day - when).days}) for when, item in timed if when < day],
         today=[item for when, item in timed if when == day]
         + [TodayItem(kind="stalled", card=card) for card in cards if card.stalled]

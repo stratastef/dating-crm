@@ -41,6 +41,8 @@ enum SignInError: LocalizedError {
         // SIMCTL_CHILD_DCRM_TOKEN=… xcrun simctl launch <udid> com.datingcrm.app`. Nothing is stored.
         // `DCRM_SERVER` alone points the phone number sign-in at that server.
         let environment = ProcessInfo.processInfo.environment
+        // `DCRM_SETUP` (any value, or a step such as `voice`) opens setup as if this sign-in created the account.
+        isNewAccount = environment["DCRM_SETUP"] != nil
         if let url = environment["DCRM_SERVER"].flatMap(URL.init(string:)) {
             self.serverURL = url
             if let token = environment["DCRM_TOKEN"] {
