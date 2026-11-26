@@ -14,6 +14,8 @@ struct TodayView: View {
     @State private var rating: Card?
     @State private var timeZoneSent = false
     @State private var scrolled: CGFloat = 0
+    @State private var settingUp = false
+    @State private var toast: Toast?
     @Environment(\.motionReduced) private var motionReduced
 
     var body: some View {
@@ -22,7 +24,11 @@ struct TodayView: View {
                 Counter(review: today?.review ?? ReviewSummary(), action: openReview)
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
-                // The setup summary ("Finish setup") goes here, under the count.
+                if let setup = today?.setup {
+                    FinishSetupRow(stepsLeft: setup.stepsLeft) { settingUp = true } dismiss: {
+                        Task { await dismissSetup() }
+                    }
+                }
                 if let error {
                     ErrorRow(text: error) { await load() }
                 }
@@ -53,8 +59,27 @@ struct TodayView: View {
                     Task { await rate(card, stars, note) }
                 }
             }
+            .fullScreenCover(isPresented: $settingUp, onDismiss: { Task { await load() } }) {
+                SetupView(client: client) { settingUp = false }
+            }
+            .toast($toast)
             .refreshable { await load() }
             .task { await load() }
+        }
+    }
+
+    private func dismissSetup() async {
+        do {
+            try await client.setSetupDismissed(true)
+            await load()
+            toast = Toast(text: "Finish setup hidden. Every step stays under You.") {
+                Task {
+                    try? await client.setSetupDismissed(false)
+                    await load()
+                }
+            }
+        } catch {
+            self.error = error.localizedDescription
         }
     }
 
@@ -167,6 +192,34 @@ private struct Counter: View {
         case 1: "1 is a hot lead."
         default: "\(review.hot) are hot leads."
         }
+    }
+}
+
+/// "Finish setup" under the count: how many steps are left, opening setup on them, and a button to hide it.
+private struct FinishSetupRow: View {
+    let stepsLeft: Int
+    let open: () -> Void
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: open) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Finish setup").font(.headline)
+                    Text(stepsLeft == 1 ? "1 step left" : "\(stepsLeft) steps left")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondaryText)
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(.rect)
+            }
+            Button(action: dismiss) {
+                Image(systemName: "xmark").frame(width: 44, height: 44).contentShape(.rect)
+            }
+            .accessibilityLabel("Hide Finish setup")
+        }
+        // Two buttons in one row: plain, so each takes only its own taps.
+        .buttonStyle(.plain)
     }
 }
 
