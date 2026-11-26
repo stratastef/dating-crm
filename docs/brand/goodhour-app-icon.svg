@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>Goodhour app icon, default (light) appearance</title>
+  <style>.ring{stroke:#000}.dot{fill:#4F46E5}</style>
+  <rect width="1024" height="1024" fill="#fff"/>
+  <g transform="translate(512 512) scale(1.5) translate(-256 -256)"><path class="ring" d="M396.7 164.2A168 168 0 1 1 265.2 88.3" fill="none" stroke-width="56" stroke-linecap="round"/><circle class="dot" cx="340" cy="110.5" r="40"/></g>
+</svg>

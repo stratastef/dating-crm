@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>Goodhour mark: an hour ring with one dot at one o'clock</title>
+  <style>.ring{stroke:#000}.dot{fill:#4F46E5}@media (prefers-color-scheme:dark){.ring{stroke:#fff}.dot{fill:#A5B4FC}}</style>
+  <path class="ring" d="M396.7 164.2A168 168 0 1 1 265.2 88.3" fill="none" stroke-width="56" stroke-linecap="round"/><circle class="dot" cx="340" cy="110.5" r="40"/>
+</svg>

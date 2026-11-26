@@ -1,6 +1,6 @@
 # Dating CRM
 
-Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.md`, `docs/agents/`.
+Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.md`, `docs/agents/`. Brand kit: [docs/brand](docs/brand/README.md).
 
 ## Layout
 
