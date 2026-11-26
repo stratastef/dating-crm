@@ -5,6 +5,16 @@ struct Toast: Identifiable {
     let id = UUID()
     var text: String
     var undo: (() -> Void)?
+    /// Set for a Send: a ring counts down the 5 seconds Undo is on offer, then the toast reads this.
+    var afterwards: String?
+}
+
+extension Toast {
+    /// The user's Send, which the server holds 5 seconds for Undo (`UNDO_WINDOW` in `app/send.py`): "Sending…"
+    /// with Undo and a draining ring, then "Sent to <name>". `undo` should call `APIClient.undoSend(draftID:)`.
+    static func sending(to name: String, undo: @escaping () -> Void) -> Toast {
+        Toast(text: "Sending to \(name)…", undo: undo, afterwards: "Sent to \(name)")
+    }
 }
 
 extension View {
@@ -23,6 +33,9 @@ private struct ToastPresenter: ViewModifier {
             .overlay(alignment: .bottom) {
                 if let current = toast {
                     HStack(spacing: 12) {
+                        if current.afterwards != nil {
+                            Countdown().id(current.id)  // a new Send restarts the ring
+                        }
                         Text(current.text).font(.subheadline)
                         Spacer(minLength: 0)
                         if let undo = current.undo {
@@ -45,10 +58,29 @@ private struct ToastPresenter: ViewModifier {
                         AccessibilityNotification.Announcement(current.text).post()
                         // Cancelled when another toast replaces this one, which then hides itself.
                         guard (try? await Task.sleep(for: .seconds(5))) != nil else { return }
-                        toast = nil
+                        toast = current.afterwards.map { Toast(text: $0) }
                     }
                 }
             }
             .animation(motionReduced ? .easeInOut(duration: 0.2) : .spring(duration: 0.45, bounce: 0.2), value: toast?.id)
+    }
+}
+
+/// The 5 seconds Undo is on offer: a ring that drains, or with motion reduced a ring that fades.
+private struct Countdown: View {
+    @Environment(\.motionReduced) private var motionReduced
+    @State private var left = 1.0
+
+    var body: some View {
+        Circle()
+            .trim(from: 0, to: motionReduced ? 1 : left)
+            .stroke(.accent, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+            .rotationEffect(.degrees(-90))
+            .opacity(motionReduced ? left : 1)
+            .frame(width: 22, height: 22)
+            .accessibilityHidden(true)  // the toast's text says it is sending
+            .onAppear {
+                withAnimation(.linear(duration: 5)) { left = 0 }
+            }
     }
 }

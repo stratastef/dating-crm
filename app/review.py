@@ -17,6 +17,9 @@ router = APIRouter()
 
 _LONG_AGO = datetime.min.replace(tzinfo=UTC)
 
+# The item kind of a draft that waits for the user, by the draft's status.
+_DRAFT_KINDS = {"pending": "draft", "copied": "copied_draft", "failed": "failed_send"}
+
 
 class QuotedMessage(BaseModel):
     body: str
@@ -24,14 +27,14 @@ class QuotedMessage(BaseModel):
 
 
 class QueueItem(BaseModel):
-    kind: str  # `draft`, `copied_draft`, `handover` or `paid_item`
+    kind: str  # `draft`, `copied_draft`, `failed_send`, `handover` or `paid_item`
     hot: bool
     card_id: int | None  # null when `kind` is `paid_item`: a swipe candidate is not a card
     card_name: str
     # The card summary, `Card` in `app/cards.py` (a dict here: that module imports this one). Null when
     # `card_id` is.
     card: dict | None = None
-    draft: Draft | None  # set when `kind` is `draft` or `copied_draft`
+    draft: Draft | None  # set when `kind` is `draft`, `copied_draft` or `failed_send`
     # The match's message the item is about: the one a reply draft answers, or the one that fired a handover.
     # Null for an opener and a paid item.
     message: QuotedMessage | None = None
@@ -86,7 +89,7 @@ def queue(user: CurrentUser, db: Db):
         text(
             f"""
             SELECT {", ".join(f"drafts.{column}" for column in _DRAFT_COLUMNS.split(", "))}, drafts.created_at,
-                   drafts.copied_at,
+                   drafts.copied_at, drafts.updated_at,
                    cards.name AS card_name, answered.body AS message_body, answered.sent_at AS message_sent_at
             FROM drafts JOIN cards ON cards.id = drafts.card_id
             LEFT JOIN LATERAL (
@@ -95,7 +98,7 @@ def queue(user: CurrentUser, db: Db):
                   AND drafts.kind = 'reply' AND sent_at <= drafts.created_at
                 ORDER BY sent_at DESC, id DESC LIMIT 1
             ) answered ON true
-            WHERE drafts.user_id = :user_id AND drafts.status IN ('pending', 'copied')
+            WHERE drafts.user_id = :user_id AND drafts.status IN ('pending', 'copied', 'failed')
             ORDER BY drafts.created_at, drafts.id
             """
         ),
@@ -121,7 +124,7 @@ def queue(user: CurrentUser, db: Db):
     cards = _summaries(db, user.id, [row.card_id for row in drafts] + [row.id for row in handovers])
     for row, draft in zip(drafts, present(db, user.id, drafts), strict=True):
         item = QueueItem(
-            kind="draft" if row.status == "pending" else "copied_draft",
+            kind=_DRAFT_KINDS[row.status],
             hot=cards[row.card_id]["hot"],
             card_id=row.card_id,
             card_name=row.card_name,
@@ -129,8 +132,8 @@ def queue(user: CurrentUser, db: Db):
             draft=draft,
             message=_quoted(row),
         )
-        # A copied draft waits from when it was copied.
-        waiting.append((row.copied_at or row.created_at, item))
+        # A copied draft waits from when it was copied, a failed send from when it failed.
+        waiting.append((row.updated_at if row.status == "failed" else row.copied_at or row.created_at, item))
     for row in handovers:
         item = QueueItem(
             kind="handover",

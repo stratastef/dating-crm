@@ -26,12 +26,15 @@ struct QueueView: View {
                 }
                 ForEach(review.items) { item in
                     // Kinds this version does not know are not shown.
-                    if item.kind == "draft", let draft = item.draft {
+                    if item.kind == "draft" || item.kind == "failed_send", let draft = item.draft {
                         DraftItem(client: client, review: review, item: item, draft: draft) {
                             review.dismiss(item)
                             toast = Toast(text: "Dismissed the draft for \(item.cardName)") { review.undo(item) }
                         } copied: {
                             toast = Toast(text: "Copied. Paste it in \(item.datingApp).")
+                        } sent: {
+                            review.remove(item)
+                            toast = .sending(to: item.cardName) { Task { await review.undoSend(item) } }
                         }
                     } else if item.kind == "copied_draft", let draft = item.draft {
                         CopiedDraftItem(item: item, draft: draft) {
@@ -145,13 +148,14 @@ private struct Inset<Content: View>: View {
 }
 
 /// A pending draft, with the action named for its effect (ADR 0003): Send where the app can send it, Copy where
-/// it cannot.
+/// it cannot. A failed send shows the same way, with Retry and Copy.
 private struct DraftItem: View {
     let client: APIClient
     let review: ReviewQueue
     let item: QueueItem
     let dismiss: () -> Void
     let copied: () -> Void
+    let sent: () -> Void
 
     @State private var draft: Draft
     @State private var text: String
@@ -159,19 +163,22 @@ private struct DraftItem: View {
 
     init(
         client: APIClient, review: ReviewQueue, item: QueueItem, draft: Draft,
-        dismiss: @escaping () -> Void, copied: @escaping () -> Void
+        dismiss: @escaping () -> Void, copied: @escaping () -> Void, sent: @escaping () -> Void
     ) {
         self.client = client
         self.review = review
         self.item = item
         self.dismiss = dismiss
         self.copied = copied
+        self.sent = sent
         _draft = State(initialValue: draft)
         _text = State(initialValue: draft.text)
     }
 
     /// It denies being AI and the user has not changed it: neither sent nor copied until they do.
     private var waitsForEdit: Bool { draft.deniesAI && text == draft.text }
+
+    private var failed: Bool { item.kind == "failed_send" }
 
     var body: some View {
         PhotoCard(name: item.cardName, photo: item.card?.leadPhotoUrl) {
@@ -194,11 +201,21 @@ private struct DraftItem: View {
             if waitsForEdit {
                 Text("\(Image(systemName: "exclamationmark.triangle")) It says you're not an AI. Edit it before you send it.")
             }
+            if failed {
+                // The app's error may have come after the message reached the match.
+                Text("\(Image(systemName: "exclamationmark.triangle")) Sending failed. It may still have reached \(item.datingApp), so check the chat before you send it again.")
+            }
             AdaptiveStack(spacing: 8) {
-                Button("Dismiss", action: dismiss)
-                    .buttonStyle(.secondaryCapsule)
-                if !waitsForEdit {
-                    Button(draft.sendable ? "Send" : "Copy") { act() }
+                if failed {
+                    Button("Copy") { act(send: false) }
+                        .buttonStyle(.secondaryCapsule)
+                } else {
+                    Button("Dismiss", action: dismiss)
+                        .buttonStyle(.secondaryCapsule)
+                }
+                // A failed send the app cannot retry now offers Copy only.
+                if !waitsForEdit, draft.sendable || !failed {
+                    Button(failed ? "Retry" : draft.sendable ? "Send" : "Copy") { act(send: draft.sendable) }
                         .buttonStyle(.primaryCapsule)
                         .disabled(text.isEmpty)
                 }
@@ -207,7 +224,7 @@ private struct DraftItem: View {
         }
     }
 
-    private func act() {
+    private func act(send: Bool) {
         busy = true
         Task {
             defer { busy = false }
@@ -216,9 +233,9 @@ private struct DraftItem: View {
                     draft = try await client.saveEdit(draftID: draft.id, text: text)
                     if draft.deniesAI { return }  // the edit still denies it: the reason shows again
                 }
-                if draft.sendable {
+                if send {
                     try await client.sendDraft(draftID: draft.id)
-                    review.remove(item)
+                    sent()
                 } else {
                     UIPasteboard.general.string = draft.text
                     _ = try await client.copy(draftID: draft.id)

@@ -16,6 +16,7 @@ A card is one match. Routes are in `app/cards.py`; tables are `cards` and `messa
   - `last_message`: the newest message by `sent_at`, whoever sent it, as `{"sender", "body", "sent_at"}` with the first 100 characters of the body; null when the card has no messages;
   - `hot`: `is_hot_lead()` (see "Review queue"), the same answer the review queue gives;
   - `pending_draft`: the newest pending draft, as the review queue shows it, with `sendable`; null when there is none;
+  - `drafts`: the card's draft list, its `pending`, `copied` and `failed` drafts, newest first, so the card can dock them (ADR 0003). Sent, queued and dismissed drafts are not in it;
   - `lead_photo_url`: the first photo attached with `POST /cards/{id}/photos`; null when unknown;
   - `pipeline_group`, `reason`, `handover_trigger` and `autopilot_activity`: where the Pipeline lists the card and why (see "Pipeline");
   - `topic`: what the chat is about in a few words, such as `museums`. The call that writes a draft gives it (see "Drafts") and it is stored on the card (`cards.topic`); a later draft replaces it. Empty until the card's first draft.

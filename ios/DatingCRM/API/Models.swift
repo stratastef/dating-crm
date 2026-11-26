@@ -247,7 +247,8 @@ struct Inference: Codable, Identifiable, Hashable {
     }
 }
 
-/// One thing that waits for the user's review: `draft`, `copied_draft`, `handover` or `paid_item`. The server adds more kinds later.
+/// One thing that waits for the user's review: `draft`, `copied_draft`, `failed_send`, `handover` or `paid_item`.
+/// The server adds more kinds later.
 struct QueueItem: Codable, Identifiable, Hashable {
     var kind: String
     /// A hot lead: the server pushed it at once.
@@ -257,7 +258,7 @@ struct QueueItem: Codable, Identifiable, Hashable {
     var cardName: String
     /// The card summary, for the face, the dating app and opening the card. Nil when `cardID` is.
     var card: Card?
-    /// Set when `kind` is `draft` or `copied_draft`.
+    /// Set when `kind` is `draft`, `copied_draft` or `failed_send`.
     var draft: Draft?
     /// The match's message the item is about: the one a reply answers, or the one that fired a handover.
     var message: QuotedMessage?
