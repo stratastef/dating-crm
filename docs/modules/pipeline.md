@@ -20,7 +20,7 @@ An Archived card is `archived`, whatever else is true of it: archiving is how th
    5. `stalled`: the card is Stalled.
    6. `overdue`: the card has a next action and its due day is before today. Due today is not overdue. Today is the user's day in their time zone (`user_zone()`), as on Today.
    7. `rate_date`: a Dated card has no rating.
-   8. `your_turn`: a Matched or Chatting card autopilot is not handling, whose last message is from the match.
+   8. `your_turn`: a Matched or Chatting card autopilot is not handling, whose last message is from the match, and that has no scheduled send (a reply the user timed answers it: the card is Waiting for them).
    9. `opener_due`: a Matched card autopilot is not handling, with no messages.
 2. **`handled_by_autopilot`**: a Matched or Chatting card autopilot is handling (below). `autopilot_activity` is `drafting_reply` (the match wrote last and a `chat_reply` job is queued or running), `planned` (the card has a planned send: its `planned_send` gives the send time and reason, see "Send timing") or `sent_waiting` (the user or autopilot wrote last). The time to show is `last_message.sent_at`, or `planned_send.send_at` for `planned`, and the row ends with the card's `topic` (see "Cards and messages").
 3. **`waiting_for_them`**: every other Matched or Chatting card.

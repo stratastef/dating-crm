@@ -136,7 +136,7 @@ def _reason(card: dict, drafts: set[str], today: date, handled: bool) -> Reason 
     if card["stage"] == "dated" and card["date_rating"] is None:
         return "rate_date"
     if card["stage"] in CHAT_STAGES and not handled:
-        if last and last["sender"] == "them":
+        if last and last["sender"] == "them" and not card["scheduled_send"]:  # a scheduled reply answers it
             return "your_turn"
         if card["stage"] == "matched" and not last:
             return "opener_due"

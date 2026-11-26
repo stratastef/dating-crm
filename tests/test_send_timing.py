@@ -185,3 +185,18 @@ def test_a_planned_send_shows_on_the_card_with_its_time_and_reason_and_autopilot
     assert send_at(planned) > datetime.now(UTC)
     assert (card["pipeline_group"], card["reason"], card["autopilot_activity"]) == ("handled_by_autopilot", None, "planned")
     assert card["drafts"] == []  # the card's draft list holds what waits for the user
+
+
+def test_a_copilot_draft_carries_a_suggested_send_time_inside_the_bounds_with_a_reason(app, client, llm, user_id):  # noqa: F811
+    """The user asks for a draft on a slow chat, and Claude wants it much later still: the ceiling holds."""
+    write_profile(app, client, llm, "Short, lowercase, teasing.")
+    card_id = client.post("/cards", json={"app": "tinder", "name": "Cleo", "external_id": CLEO}).json()["id"]
+    at_local_hour(client, 11)  # 12 hours on is 23:00, outside the night window
+    chat(client, card_id, ("me", 20 * 60, "how was the trip"), ("them", 1, "ok"))
+    llm.reply = drafted(REPLY, adjustment=3, timing_reason="they take their time")
+    started = datetime.now(UTC)
+
+    draft = client.post(f"/cards/{card_id}/drafts").json()
+
+    assert timedelta(hours=12) <= send_at(draft) - started < timedelta(hours=12, seconds=5)
+    assert draft["timing_reason"] == "they take their time"

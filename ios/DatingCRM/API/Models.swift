@@ -68,6 +68,8 @@ struct Card: Codable, Identifiable, Hashable {
     var drafts: [Draft]?
     /// Autopilot's planned send: the draft it sends alone at its `sendAt`, with its `timingReason`.
     var plannedSend: Draft?
+    /// The user's scheduled send: their draft that goes out at the `sendAt` they chose (Send at). Cancel unschedules it.
+    var scheduledSend: Draft?
     /// nil when unknown: the row shows the monogram.
     var leadPhotoUrl: URL?
 
@@ -232,7 +234,8 @@ struct Draft: Codable, Identifiable, Hashable {
     var guardrail: [String]? = nil
     /// The app can send it now (ADR 0003): Send. Otherwise the user copies it into the dating app: Copy.
     var sendable = false
-    /// Its send time: when autopilot sends it alone, or when it is best sent. Nil from an older server.
+    /// Its send time: when autopilot sends it alone, when it is best sent, or when the user scheduled it. Nil from
+    /// an older server.
     var sendAt: Date?
     /// Why that time, in a few words ("they take their time"); may be empty.
     var timingReason: String?
@@ -244,6 +247,9 @@ struct Draft: Codable, Identifiable, Hashable {
 
     /// The server never sends it until the user edits it.
     var deniesAI: Bool { guardrail?.contains("denies_ai") == true }
+
+    /// When it is best sent, while that is still ahead; it was suggested when the draft was written.
+    var suggestedSendAt: Date? { sendAt.flatMap { $0 > .now ? $0 : nil } }
 }
 
 /// One thing Claude inferred about a match. `value` is Claude's; `corrected` is the user's correction of it.
