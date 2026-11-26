@@ -28,7 +28,7 @@ The shared components are in `ios/DatingCRM/Components/`, one file each:
 | `Toast.sending(to: name) { undo }` | `Toast.swift` | The user's Send: "Sending to Ada…" with Undo and an accent ring that drains over the 5 seconds the server holds the send, then "Sent to Ada". With motion reduced the ring fades instead. `undo` calls `client.undoSend(draftID:)` (`409`: too late). Review uses it; so does the card's composer. |
 | `Held(after:) { action }` | `Held.swift` | Runs the action after 5 seconds unless `undo()` comes first; `undo()` is false once it started. Pair it with a toast's Undo for what the server cannot take back (a swipe). |
 | `SwipeLayoutSection(client:)` | `SwipeLayoutSection.swift` | The Swipe layout choice as one list section that loads and saves itself. Under You and in the setup step. |
-| `RelativeTime.since/day/due`, `TimeAgoText` | `RelativeTime.swift` | "10m", "4d", "Today", "Sat", "2 days late"; the year only when it is not this year. |
+| `RelativeTime.since/day/due/around`, `TimeAgoText` | `RelativeTime.swift` | "10m", "4d", "Today", "Sat", "2 days late"; the year only when it is not this year. `around` is a send time: "around 20:15", "tomorrow around 07:05". |
 | `Avatar(name:photo:)` | `Avatar.swift` | The photo at 48 pt, or the monogram in New York on the soft accent. Puts the row's separator 14 pt past itself. |
 | `FacePhoto(name:photo:)` | `FacePhoto.swift` | A face that fills its frame: the photo, or a 96 pt monogram at the top of the soft accent. For Review items and the card header. |
 | `.blurredFace()` (`BlurredFace`) | `BlurredFace.swift` | Blur photos (ADR 0009): put it on a loaded face image, inside its clip. With the setting on, the face is blurred until tapped, and that tap reveals instead of reaching the row. `Avatar`, `FacePhoto` and Swipe's photos use it; a new face (the card header) uses one of those or this. The setting is the server's (`blur_photos`); the app keeps a copy in `@AppStorage(BlurredFace.key)`, which `MainTabView` refreshes on launch and `PrivacyView` on each change. |
@@ -63,9 +63,15 @@ Every `Card` carries its card summary (see "Cards and messages"): `stageChangedA
 `PipelineView` renders the groups `GET /pipeline` sends (`client.pipeline()`, `[PipelineGroup]`), in the server's order. Each card also carries `pipelineGroup`, `reason`, `handoverTrigger` and `autopilotActivity`, the server's codes, kept as strings so a newer server's code does not break decoding.
 
 - **Headers** are rows: the group's title, its count and a chevron, 44 pt, a tap collapses the group. Waiting for you is in the accent. Archived starts collapsed. A search opens every group.
-- **Status line**: `Card.pipelineStatus(now:calendar:)` (in `PipelineView.swift`) words the codes, one source per group: the reason for Waiting for you, the activity for Handled by autopilot, then the card's `topic` when it has one ("sent 4d ago, no reply yet · talking museums"), "You wrote 3h ago" for Waiting for them, the next action and its day for Texting off-app, else "Date rated 5/5" or "No next action". An unknown code shows no line. `AIMarker(.draft)` goes with "Reply ready in Review", `AIMarker(.autopilot)` with every Handled by autopilot row. "Rate the date" is a 44 pt button that opens `DateRatingSheet`.
+- **Status line**: `Card.pipelineStatus(now:calendar:)` (in `PipelineView.swift`) words the codes, one source per group: the reason for Waiting for you, the activity for Handled by autopilot, then the card's `topic` when it has one ("sent 4d ago, no reply yet · talking museums"), "You wrote 3h ago" for Waiting for them, the next action and its day for Texting off-app, else "Date rated 5/5" or "No next action". A planned send (`planned`) says when and why instead of the topic: "replies around 20:15 · they take their time", from `card.plannedSend` (`sendAt`, `timingReason`); with no reason it ends with the topic. An unknown code shows no line. `AIMarker(.draft)` goes with "Reply ready in Review", `AIMarker(.autopilot)` with every Handled by autopilot row. "Rate the date" is a 44 pt button that opens `DateRatingSheet`.
 - **Motion**: headers and cards are one `ForEach`, so a card whose group changed is the same row and moves there with a spring on reload. With `motionReduced` the card's row id includes its group, so it fades out and in instead.
-- Returning from a card, adding one and rating reload the Pipeline. Screenshots: `docs/design/screenshots/redesign/t52-pipeline-*.png`.
+- Returning from a card, adding one and rating reload the Pipeline. Screenshots: `docs/design/screenshots/redesign/t52-pipeline-*.png`, and with planned sends `t71-pipeline-*.png`.
+
+## Send timing
+
+- **The card's planned send:** `PlannedSendSection(draft:)` (`Screens/PlannedSendSection.swift`) shows `card.plannedSend` under the Autopilot marker: "Goes out around 20:15 · they take their time", then the text. Send now and Hold come with #72.
+- **Night window:** a section of `AutopilotView` under Pause, two hour pickers (From, Until) loaded with `client.settings()` and saved together with `client.setNightWindow(start:end:)` (`UserSettings.nightWindowStart/End`, hours 0–23). Screenshots: `t71-autopilot-*.png`.
+- `Draft.sendAt` and `Draft.timingReason` are optional, so drafts from an older server decode.
 
 ## Review
 
@@ -94,7 +100,7 @@ Every `Card` carries its card summary (see "Cards and messages"): `stageChangedA
 
 ## Simulator checks
 
-Besides the Debug sign-in (`DCRM_SERVER`, `DCRM_TOKEN`) and `DCRM_TAB`, `DCRM_OPEN=voice`, `dashboard`, `preferences`, `connected-apps`, `calendar`, `swipe-layout`, `photos`, `bios`, `notifications`, `privacy`, `activity-log` or `purge` pushes that screen under You on launch: `SIMCTL_CHILD_DCRM_TAB=you SIMCTL_CHILD_DCRM_OPEN=voice xcrun simctl launch …`. `DCRM_SETUP=1` opens setup instead of the tabs, or on one step with its name (`DCRM_SETUP=voice`; see "Setup").
+Besides the Debug sign-in (`DCRM_SERVER`, `DCRM_TOKEN`) and `DCRM_TAB`, `DCRM_OPEN=voice`, `dashboard`, `autopilot`, `preferences`, `connected-apps`, `calendar`, `swipe-layout`, `photos`, `bios`, `notifications`, `privacy`, `activity-log` or `purge` pushes that screen under You on launch: `SIMCTL_CHILD_DCRM_TAB=you SIMCTL_CHILD_DCRM_OPEN=voice xcrun simctl launch …`. `DCRM_SETUP=1` opens setup instead of the tabs, or on one step with its name (`DCRM_SETUP=voice`; see "Setup").
 
 ## Limits
 

@@ -37,6 +37,16 @@ enum RelativeTime {
         }
     }
 
+    /// When a planned send goes out: "around 20:15" today, "tomorrow around 07:05", else its day too.
+    static func around(_ date: Date, now: Date = .now, calendar: Calendar = .current) -> String {
+        let time = date.formatted(style(calendar).hour().minute())
+        return switch daysFrom(now, to: date, calendar: calendar) {
+        case 0: "around \(time)"
+        case 1: "tomorrow around \(time)"
+        default: "\(day(date, now: now, calendar: calendar)) around \(time)"
+        }
+    }
+
     /// Calendar days from `now`'s day to `day`'s day: negative in the past.
     static func daysFrom(_ now: Date, to day: Date, calendar: Calendar = .current) -> Int {
         calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: day)).day ?? 0

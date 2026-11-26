@@ -384,9 +384,14 @@ struct APIClient {
         _ = try await enabled("PUT", "settings/ai-disclosure", on)
     }
 
-    /// Push name previews and Blur photos.
+    /// Push name previews, Blur photos and the night window.
     func settings() async throws -> UserSettings {
         try await send("GET", "settings")
+    }
+
+    /// The hours autopilot sends nothing, 0 to 23 in the user's time zone. 1 to 7 by default.
+    func setNightWindow(start: Int, end: Int) async throws -> UserSettings {
+        try await send("PATCH", "settings", body: Self.encoder.encode(["night_window_start": start, "night_window_end": end]))
     }
 
     /// Lets hot-lead and handover pushes name the match. Off by default.

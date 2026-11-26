@@ -60,6 +60,10 @@ struct CardDetailView: View {
 
             ReadSection(client: client, cardID: card.id)
 
+            if let planned = card.plannedSend {
+                PlannedSendSection(draft: planned)
+            }
+
             DraftSection(client: client, cardID: card.id)
         }
         .navigationTitle(card.name)

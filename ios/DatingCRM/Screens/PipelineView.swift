@@ -172,7 +172,10 @@ extension Card {
             }
         case "handled_by_autopilot":
             autopilotStatus(now: now, calendar: calendar).map { activity in
-                [activity, topic.flatMap { $0.isEmpty ? nil : "talking \($0)" }].compactMap { $0 }.joined(separator: " · ")
+                // A planned send ends with why its time; without a reason, like the rest, with the topic.
+                let why = autopilotActivity == "planned" ? plannedSend?.timingReason.flatMap { $0.isEmpty ? nil : $0 } : nil
+                return [activity, why ?? topic.flatMap { $0.isEmpty ? nil : "talking \($0)" }]
+                    .compactMap { $0 }.joined(separator: " · ")
             }
         case "waiting_for_them":
             lastMessage.map { "You wrote \(RelativeTime.ago($0.sentAt, now: now, calendar: calendar))" }
@@ -189,6 +192,7 @@ extension Card {
         switch autopilotActivity {
         case "writing_opener": "writing an opener"
         case "drafting_reply": "drafting a reply"
+        case "planned": plannedSend?.sendAt.map { "replies \(RelativeTime.around($0, now: now, calendar: calendar))" }
         case "sent_waiting": lastMessage.map { "sent \(RelativeTime.ago($0.sentAt, now: now, calendar: calendar)), no reply yet" }
         default: nil
         }
