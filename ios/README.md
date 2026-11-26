@@ -46,7 +46,7 @@ To run on your own iPhone, open the project in Xcode, pick your team under Signi
 
 `SignInView` asks for the phone number, then for the sign-in code the server texts to it ("your Dating CRM code"). A new code can be asked for 30 seconds after the last. A refusal (wrong or expired code, too many tries, no account for the number) shows in plain words under the field. See `docs/modules/sign-in.md` for the routes.
 
-- The server is `ServerURL` in `Info.plist`, `http://localhost:8000` for now. Set it to the production server before a TestFlight build.
+- The server is `ServerURL` in `Info.plist`: production, `https://crm.mithrandir.one` (see `docs/deploy.md`). For a local stack, launch with `DCRM_SERVER` (below) or use developer sign-in.
 - In local development (`SMS_PROVIDER=log`, the `compose.yaml` default) the server writes the code to its log (`SMS to +1…: 123456 is your Dating CRM code`). Running the API with `uv run uvicorn`, set `SMS_PROVIDER=log` yourself: unset, code requests fail with `503`. Give your account a phone number first: `uv run python -m app.sign_in you@example.com +491701234567`.
 - Developer sign-in: a two-second press on the "Dating CRM" title opens a sheet for a server URL and an API token from `uv run python -m app.auth you@example.com`. The app checks them with one `GET /cards` before it keeps them.
 - Sign out sits under You and asks first. It revokes this device's token on the server (`POST /sign-out`), which also stops this phone's pushes, then forgets the session. If the server cannot be reached, the phone stays signed in and says so next to Sign out.
