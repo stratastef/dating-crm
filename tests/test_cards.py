@@ -148,6 +148,20 @@ def test_a_dated_card_keeps_its_rating_and_note(client):
     assert client.patch(f"/cards/{card_id}", json={"date_rating": 6}).status_code == 422
 
 
+def test_a_rating_saved_without_a_stage_change_is_stored_and_counts_toward_good_dates(client):
+    # A date synced into Dated: the rating sheet saves the rating and note, the stage stays as it was.
+    card_id = client.post("/cards", json={"app": "tinder", "name": "Sam", "stage": "dated"}).json()["id"]
+
+    rated = client.patch(f"/cards/{card_id}", json={"stage": "dated", "date_rating": 5, "date_note": "talked for hours"})
+
+    assert rated.status_code == 200
+    card = client.get(f"/cards/{card_id}").json()
+    assert (card["stage"], card["date_rating"], card["date_note"], card["good_date"]) == (
+        "dated", 5, "talked for hours", True,
+    )  # fmt: skip
+    assert [week["good_dates"] for week in client.get("/dashboard").json()["weeks"]] == [1]
+
+
 def test_a_good_date_is_a_rating_of_4_or_5(client):
     card_id = client.post("/cards", json={"app": "tinder", "name": "Sam", "stage": "dated"}).json()["id"]
 

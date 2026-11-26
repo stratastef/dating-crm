@@ -56,6 +56,7 @@ def test_a_read_stores_each_inference_with_its_evidence_and_confidence(client, l
             "evidence": "'come climb with us'",
             "confidence": 0.9,
             "corrected": None,
+            "confidence_word": "Sure",
         },
         {
             "id": stored[1]["id"],
@@ -65,11 +66,35 @@ def test_a_read_stores_each_inference_with_its_evidence_and_confidence(client, l
             "evidence": "double exclamation marks",
             "confidence": 0.6,
             "corrected": None,
+            "confidence_word": "Likely",
         },
     ]
     prompt = llm.prompts[-1]
     assert "Has a dog called Biscuit" in prompt and "them: biscuit says hi!! come climb with us" in prompt
     assert llm.images[-1] == []  # no photos on the card: the read is from text only
+
+
+def test_an_inference_is_sure_from_0_8_likely_from_0_5_and_otherwise_a_guess(client, llm):
+    card_id = new_card(client)
+    read(
+        client,
+        llm,
+        card_id,
+        [
+            inference("texting_style", "short", confidence=0.8),
+            inference("interests", "climbing", confidence=0.79),
+            inference("values", "family", confidence=0.5),
+            inference("tone", "playful", confidence=0.49),
+        ],
+    )
+
+    stored = client.get(f"/cards/{card_id}/read").json()
+    assert [(row["confidence"], row["confidence_word"]) for row in stored] == [
+        (0.8, "Sure"),
+        (0.79, "Likely"),
+        (0.5, "Likely"),
+        (0.49, "Guess"),
+    ]
 
 
 def test_a_correction_overrides_the_inference_and_survives_the_next_read(client_for, llm):
