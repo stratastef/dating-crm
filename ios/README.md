@@ -1,19 +1,20 @@
 # Dating CRM for iOS
 
-The SwiftUI client for the API in the repo root. It needs Xcode 27 and an iOS 18 or later simulator or device.
+The SwiftUI client for the API in the repo root. It needs Xcode 27 and an iOS 26 or later simulator or device.
 
 ## Layout
 
 | Path | Purpose |
 | --- | --- |
 | `DatingCRM.xcodeproj` | The app target, the share extension target `DatingCRMShare` and one unit test target. |
-| `DatingCRM/DatingCRMApp.swift` | App entry: shows `SignInView` or `BoardView`, depending on `Session`. |
+| `DatingCRM/DatingCRMApp.swift` | App entry: shows `SignInView` or `MainTabView` (the five tabs), depending on `Session`. |
 | `DatingCRM/Session.swift` | Sign-in state. Keeps the server URL in `UserDefaults` and the API token in the Keychain. |
 | `DatingCRM/ForegroundTimer.swift` | Measures each foreground stretch; the app entry reports it with `POST /time` when the app leaves the foreground. |
 | `DatingCRM/Push.swift` | `Push` (device token, tapped card) and `AppDelegate`, which receives both from UIKit. |
 | `DatingCRM.entitlements` | The push notification entitlement. |
 | `DatingCRM/API/APIClient.swift` | Every call to the server. |
 | `DatingCRM/API/Models.swift` | `Stage`, `Card`, `Message`, `Inference`, `Preferences`, `DashboardWeek`, `ProfilePhoto`, `PhotoEdit`, `SwipeCandidate`, `Pauses`, `AutonomyLevel`, `Budget`: the JSON the server sends. |
+| `DatingCRM/Components/` | The shared A3 look: colors, button styles, AI marker, badges, toast, relative times, avatar. See `docs/modules/ios-app-shell.md`. |
 | `DatingCRM/Screens/` | One file per screen. `PhotosView` uploads photos from the photo library as JPEG, ranks them and shows each offered edit as a preview to accept or reject. The server makes every preview from the uploaded pixels. |
 | `DatingCRM/ScreenshotImport.swift` | Uploads a shared screenshot and holds the draft or error the share extension shows. |
 | `DatingCRMShare/` | The share extension: `ShareViewController` takes the picture from the share sheet, `ScreenshotImportView` shows the result. |
@@ -44,6 +45,15 @@ Start the server (see the root `README.md`) and create a user with `uv run pytho
 
 A server on `localhost` or your local network may use plain `http`. Any other server needs `https`.
 
+### Scripted simulator checks
+
+Debug builds sign in from the launch environment, store nothing and skip the push permission alert. `DCRM_TAB` opens a tab other than Today (`review`, `pipeline`, `swipe`, `you`):
+
+```sh
+SIMCTL_CHILD_DCRM_SERVER=http://localhost:8047 SIMCTL_CHILD_DCRM_TOKEN=<token> SIMCTL_CHILD_DCRM_TAB=review \
+  xcrun simctl launch <udid> com.datingcrm.app
+```
+
 ## Share a screenshot
 
 In any dating app, take a screenshot of a chat or profile, tap Share and pick Dating CRM. The extension sends the picture to `POST /screenshots` as JPEG, the server reads it into the match's card, and the extension shows the draft with a Copy button. See "Screenshot import" in the root `README.md`.
@@ -64,7 +74,7 @@ The extension uses the session of the app: the server URL from the defaults of a
 
 ## Push notifications
 
-After sign-in the app asks for permission to notify, gets a device token from Apple and sends it to the server with `POST /devices`. It does this on every launch. Tapping a push that carries a `card_id` opens that card on top of the board.
+After sign-in the app asks for permission to notify, gets a device token from Apple and sends it to the server with `POST /devices`. It does this on every launch. Tapping a push that carries a `card_id` switches to the Pipeline tab and opens that card.
 
 - Push needs a real iPhone, a paid Apple developer account and the server's `APNS_*` settings (see `docs/modules/push-notifications.md`). Run from Xcode, the app gets a sandbox token, so the server also needs `APNS_SANDBOX=1`.
 - The simulator gets no device token without an Apple account, so the tests cover only `Push`: the registration request and which card a tap opens. Not verified on a device: the permission prompt, the token arriving in `AppDelegate`, delivery of a push, and the tap opening the card on screen.
@@ -72,13 +82,13 @@ After sign-in the app asks for permission to notify, gets a device token from Ap
 
 ## Review queue
 
-"Review" on the board opens `QueueView`: the pending drafts from `GET /queue`, hot leads first. Each can be edited in place, then approved or dismissed; approve saves the edit first. A handover item shows its suggested replies (tap one to copy it) and a "Take over" button. A proposed paid item (Super Like, Rose, Boost; `Screens/PaidItemSection.swift`) shows the item, the reason and "Approve" and "Decline"; the server spends it only on approve, and the row says so when the dating app did not spend it. Items of a kind the app does not know are skipped.
+The Review tab shows `QueueView`: the pending drafts from `GET /queue`, hot leads first. Each can be edited in place, then approved or dismissed; approve saves the edit first. A handover item shows its suggested replies (tap one to copy it) and a "Take over" button. A proposed paid item (Super Like, Rose, Boost; `Screens/PaidItemSection.swift`) shows the item, the reason and "Approve" and "Decline"; the server spends it only on approve, and the row says so when the dating app did not spend it. Items of a kind the app does not know are skipped.
 
 A card that is paused for handover shows the same section on top of `CardDetailView` (`Screens/HandoverSection.swift`): "Take over" while the handover is pending, "Hand back to autopilot" once the user took over.
 
 ## Settings
 
-"Settings" on the board opens `SettingsView` (`Screens/SettingsView.swift`). Every switch calls the server at once and shows the state the server answers with; a failed call shows its error and leaves the switch as it was.
+You > Settings opens `SettingsView` (`Screens/SettingsView.swift`). Every switch calls the server at once and shows the state the server answers with; a failed call shows its error and leaves the switch as it was.
 
 | Section | Does | Routes |
 | --- | --- | --- |
@@ -92,7 +102,7 @@ Not built: the swipe limits (`/swipes/limits`), connector alerts and the audit l
 
 ## Swipe copilot
 
-"Swipe" on the board opens `SwipeView`: the profiles from `GET /swipes`, each with the server's suggestion and its reason. "Find profiles" asks the server for new ones from Tinder. The user taps Like or Pass on every profile; the suggested one is bold. When the server could not reach the dating app, the swipe is saved and a line asks the user to swipe there by hand. Photos load straight from the dating app's image server.
+The Swipe tab shows `SwipeView`: the profiles from `GET /swipes`, each with the server's suggestion and its reason. "Find profiles" asks the server for new ones from Tinder. The user taps Like or Pass on every profile; the suggested one is bold. When the server could not reach the dating app, the swipe is saved and a line asks the user to swipe there by hand. Photos load straight from the dating app's image server.
 
 ## Call the API
 
@@ -104,7 +114,7 @@ func drafts() async throws -> [Draft] {
 }
 ```
 
-JSON keys are converted between `snake_case` and `camelCase`. The coders read and write dates as plain days (`2026-12-01`), which is all the app uses so far. Change the date strategy in `APIClient` when a screen needs a timestamp.
+JSON keys are converted between `snake_case` and `camelCase`. A `Date` field decodes from a plain day (`2026-12-01`, local midnight) or a full timestamp (`2026-11-20T10:00:00.123456Z`); dates are encoded as plain days.
 
 A non-2xx answer throws `APIError(status:)`.
 
@@ -119,8 +129,8 @@ let drafts = try await server.client().drafts()
 
 ## Add a screen
 
-1. Add `DatingCRM/Screens/<Name>View.swift`. Give the view a `let client: APIClient` and load data in `.task`.
-2. Link to it from an existing screen, for example with a `NavigationLink` in `BoardView`.
+1. Add `DatingCRM/Screens/<Name>View.swift`. Give the view a `let client: APIClient` and load data in `.task`. Build it from `DatingCRM/Components/`.
+2. Put it in a tab in `MainTabView`, or link to it from a screen, for example with a `NavigationLink` in `YouView`.
 3. Add the routes it needs to `APIClient`, each with a test in `DatingCRMTests/`.
 
 Code is on the main actor by default (`SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`), so views and `Session` need no `@MainActor` annotations.

@@ -83,6 +83,7 @@ Read the doc for a module before you change it or call it. Review rules live in 
 - [Swipe autopilot](docs/modules/swipe-autopilot.md)
 - [Paid items](docs/modules/paid-items.md)
 - [Tinder connector](docs/modules/tinder-connector.md)
+- [iOS app shell and shared components](docs/modules/ios-app-shell.md)
 
 ## Run the stack
 

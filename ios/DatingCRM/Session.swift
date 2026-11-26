@@ -26,6 +26,15 @@ enum SignInError: LocalizedError {
         self.keychainService = keychainService
         self.defaults = defaults
         self.transport = transport
+        #if DEBUG
+        // Simulator checks sign in without typing: `SIMCTL_CHILD_DCRM_SERVER=http://localhost:8047
+        // SIMCTL_CHILD_DCRM_TOKEN=… xcrun simctl launch <udid> com.datingcrm.app`. Nothing is stored.
+        let environment = ProcessInfo.processInfo.environment
+        if let url = environment["DCRM_SERVER"].flatMap(URL.init(string:)), let token = environment["DCRM_TOKEN"] {
+            client = makeClient(url, token)
+            return
+        }
+        #endif
         if let url = defaults.url(forKey: serverURLKey), let token = storedToken() {
             client = makeClient(url, token)
         }

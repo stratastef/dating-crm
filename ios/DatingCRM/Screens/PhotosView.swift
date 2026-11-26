@@ -17,7 +17,7 @@ struct PhotosView: View {
                 Text(error).foregroundStyle(.red)
             }
             if photos.isEmpty && !busy {
-                Text("Add your photos, then rank them.").foregroundStyle(.secondary)
+                Text("Add your photos, then rank them.").foregroundStyle(.secondaryText)
             }
             ForEach(photos) { photo in
                 PhotoRow(client: client, photo: photo) { decided in
@@ -94,7 +94,7 @@ private struct PhotoRow: View {
                 }
             }
             if let edit = photo.suggestedEdit {
-                Text("Suggested edit: \(edit.summary)").font(.caption).foregroundStyle(.secondary)
+                Text("Suggested edit: \(edit.summary)").font(.caption).foregroundStyle(.secondaryText)
                 picture(preview, label: "Preview of the suggested edit")
                 HStack {
                     Button("Accept") { decide(accept: true) }

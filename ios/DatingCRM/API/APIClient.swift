@@ -283,8 +283,9 @@ struct APIClient {
         return data
     }
 
-    // The only dates the app reads or writes are plain days such as `due_date`.
-    private static let dayFormat: DateFormatter = {
+    // Plain days such as `due_date`. The app writes only these; it reads timestamps too.
+    // `nonisolated`: the decoder's date closure is Sendable.
+    nonisolated private static let dayFormat: DateFormatter = {
         let format = DateFormatter()
         format.locale = Locale(identifier: "en_US_POSIX")
         format.dateFormat = "yyyy-MM-dd"
@@ -294,7 +295,16 @@ struct APIClient {
     private static let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
-        decoder.dateDecodingStrategy = .formatted(dayFormat)
+        // A plain day (`2026-12-01`) or a full timestamp, with or without fractional seconds.
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let text = try decoder.singleValueContainer().decode(String.self)
+            if let date = dayFormat.date(from: text)
+                ?? (try? Date(text, strategy: .iso8601.time(includingFractionalSeconds: true)))
+                ?? (try? Date(text, strategy: .iso8601)) {
+                return date
+            }
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Not a date: \(text)"))
+        }
         return decoder
     }()
 

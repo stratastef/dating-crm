@@ -4,7 +4,6 @@ import SwiftUI
 struct BoardView: View {
     let client: APIClient
     let push: Push
-    let signOut: () -> Void
 
     @State private var cards: [Card] = []
     @State private var error: String?
@@ -18,12 +17,15 @@ struct BoardView: View {
                 }
                 ForEach(Stage.allCases) { stage in
                     let cards = cards.filter { $0.stage == stage }
-                    Section("\(stage.title) (\(cards.count))") {
+                    Section {
                         ForEach(cards) { card in
                             NavigationLink(value: card) {
                                 CardRow(card: card)
                             }
                         }
+                    } header: {
+                        // The system's grey header is under 4.5:1 contrast.
+                        Text("\(stage.title) (\(cards.count))").foregroundStyle(Color.primary)
                     }
                 }
             }
@@ -34,15 +36,6 @@ struct BoardView: View {
                         cards[index] = saved
                     }
                 }
-            }
-            .toolbar {
-                NavigationLink("Review") { QueueView(client: client) }
-                NavigationLink("Swipe") { SwipeView(client: client) }
-                NavigationLink("Dashboard") { DashboardView(client: client) }
-                NavigationLink("Preferences") { PreferencesView(client: client) }
-                NavigationLink("Photos") { PhotosView(client: client) }
-                NavigationLink("Settings") { SettingsView(client: client, apps: Set(cards.map(\.app)).sorted()) }
-                Button("Sign out", action: signOut)
             }
             .refreshable { await load() }
             .task { await load() }
@@ -69,19 +62,26 @@ private struct CardRow: View {
     let card: Card
 
     var body: some View {
-        VStack(alignment: .leading) {
-            Text(card.name).font(.headline)
-            if let nextAction = card.nextAction {
-                Text(nextAction).font(.subheadline)
-            }
-            HStack {
-                Text(card.app)
-                if let dueDate = card.dueDate {
-                    Text("Due \(dueDate.formatted(date: .abbreviated, time: .omitted))")
+        HStack(spacing: 14) {
+            Avatar(name: card.name, photo: nil)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(card.name).font(.headline)
+                if let nextAction = card.nextAction {
+                    Text(nextAction).font(.subheadline)
                 }
+                AdaptiveStack {
+                    Text(card.app.capitalized).foregroundStyle(.secondaryText)
+                    if let dueDate = card.dueDate {
+                        let days = RelativeTime.daysFrom(.now, to: dueDate)
+                        if days < 0 {
+                            Badge(.overdue(days: -days))
+                        } else {
+                            Text("Due \(RelativeTime.day(dueDate))").foregroundStyle(.secondaryText)
+                        }
+                    }
+                }
+                .font(.footnote)
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
         }
     }
 }

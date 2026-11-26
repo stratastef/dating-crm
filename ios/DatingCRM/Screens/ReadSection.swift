@@ -23,14 +23,14 @@ struct ReadSection: View {
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack {
-                            Text(inference.title).font(.caption).foregroundStyle(.secondary)
+                            Text(inference.title).font(.caption).foregroundStyle(.secondaryText)
                             Spacer()
                             Text(inference.corrected == nil ? "\(Int((inference.confidence * 100).rounded()))% sure" : "Corrected by you")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.secondaryText)
                         }
                         Text(inference.text).foregroundStyle(.primary)
-                        Text("Evidence: \(inference.evidence)").font(.caption).foregroundStyle(.secondary)
+                        Text("Evidence: \(inference.evidence)").font(.caption).foregroundStyle(.secondaryText)
                     }
                 }
                 .accessibilityHint("Corrects this inference")

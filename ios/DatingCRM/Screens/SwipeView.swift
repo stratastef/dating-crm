@@ -19,11 +19,12 @@ struct SwipeView: View {
                 Text(error).foregroundStyle(.red)
             }
             if let notice {
-                Text(notice).foregroundStyle(.secondary)
+                Text(notice).foregroundStyle(.secondaryText)
             }
             if loaded && candidates.isEmpty {
                 ContentUnavailableView("No profiles waiting", systemImage: "person.2",
-                                       description: Text("Tap Find profiles to get suggestions."))
+                                       description: Text("Tap Find profiles to get suggestions.").foregroundStyle(.secondaryText))
+                    .fontDesign(.serif)
             }
             ForEach(candidates) { candidate in
                 CandidateRow(candidate: candidate) { swipe in
@@ -94,8 +95,9 @@ private struct CandidateRow: View {
                 Text(candidate.bio)
             }
             VStack(alignment: .leading) {
-                Text("Suggested: \(candidate.suggestion.title)").font(.headline)
-                Text(candidate.reason).font(.subheadline).foregroundStyle(.secondary)
+                AIMarker(.suggests)
+                Text(candidate.suggestion.title).font(.headline)
+                Text(candidate.reason).font(.subheadline).foregroundStyle(.secondaryText)
             }
             HStack {
                 swipeButton(.pass, systemImage: "xmark")

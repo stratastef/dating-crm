@@ -14,7 +14,7 @@ struct DashboardView: View {
                 Text(error).foregroundStyle(.red)
             }
             if weeks.isEmpty, error == nil {
-                Text("No time or rated dates recorded yet.").foregroundStyle(.secondary)
+                Text("No time or rated dates recorded yet.").foregroundStyle(.secondaryText)
             } else {
                 Section("Good dates per hour") {
                     // A week with no recorded time has no rate and leaves a gap.
@@ -29,7 +29,7 @@ struct DashboardView: View {
                     ForEach(weeks.reversed()) { week in
                         VStack(alignment: .leading) {
                             Text("Week of \(week.week.formatted(date: .abbreviated, time: .omitted))").font(.headline)
-                            Text(summary(week)).font(.subheadline).foregroundStyle(.secondary)
+                            Text(summary(week)).font(.subheadline).foregroundStyle(.secondaryText)
                         }
                     }
                 }

@@ -46,13 +46,13 @@ struct CardDetailView: View {
 
             Section("Messages") {
                 if messages.isEmpty {
-                    Text("No messages yet").foregroundStyle(.secondary)
+                    Text("No messages yet").foregroundStyle(.secondaryText)
                 }
                 ForEach(messages) { message in
                     VStack(alignment: .leading) {
                         Text(message.sender == .me ? "You" : card.name)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.secondaryText)
                         Text(message.body)
                     }
                 }

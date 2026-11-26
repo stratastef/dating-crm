@@ -17,7 +17,7 @@ struct PaidItemSection: View {
             }
             Label(item.title, systemImage: "star.circle")
             if !item.reason.isEmpty {
-                Text(item.reason).foregroundStyle(.secondary)
+                Text(item.reason).foregroundStyle(.secondaryText)
             }
             HStack {
                 Button("Approve", systemImage: "checkmark") { answer(approve: true) }
