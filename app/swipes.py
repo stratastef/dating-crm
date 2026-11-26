@@ -104,7 +104,8 @@ def suggest(db: Connection, user_id: int, wants: PreferencesVersion, candidate: 
             + "\n\n"
             f"<profile>\nName: {candidate['name']}\nBio: {candidate['bio']}\n</profile>"
         ),
-        max_tokens=200,
+        # Room for a reasoning model's hidden thinking (free OpenRouter demos); the answer itself is two lines.
+        max_tokens=2000,
         # Compose passes an unset variable as an empty string, so empty counts as unset.
         model=os.environ.get("SWIPE_PRESCREEN_MODEL") or DEFAULT_PRESCREEN_MODEL,
     )
@@ -165,6 +166,9 @@ def screen(db: Connection, user_id: int, app: str) -> None:
             suggested = suggest(db, user_id, wants, candidate)
         except llm.BudgetReached:
             break  # keep what is screened so far; the user was pushed when the cap was reached
+        except llm.Failed as error:  # a rate limit or an API error: this profile waits, the others go on
+            log.warning("pre-screen failed for a %s profile (%r); it is offered again next time", app, error)
+            continue
         if not suggested:
             log.warning("pre-screen gave no like or pass for a %s profile; it is offered again next time", app)
             continue
