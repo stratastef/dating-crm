@@ -1,0 +1,54 @@
+# Pipeline
+
+All in `app/pipeline.py`. The Pipeline groups every card by who acts next, not by stage (ADR 0007). The server decides the group and the reason; the app renders them and keeps the copy, keyed on these codes.
+
+| Route | Does |
+| --- | --- |
+| `GET /pipeline` | Every card of the user as `[{"group", "cards"}]`: the groups in order, empty ones left out. Each card is a card summary (see "Cards and messages"). Inside a group, hot leads first, then the most recent activity: the last message, or the last stage change when there are no messages. |
+
+## Grouping
+
+`place(db, user_id, summaries)` sets each card summary's `pipeline_group`, `reason`, `handover_trigger` and `autopilot_activity`. `summarize()` in `app/cards.py` calls it, so every card response carries them, not only `GET /pipeline`.
+
+Every card gets the first group that matches. Waiting for you comes before Archived, as the spec's group order says: an Archived card for which a reason applies (an overdue next action, a failed send, a handover, and so on) is `waiting_for_you` with that reason, and the app's row says "Archived" in its stage caption. The owner confirmed this on 2026-11-25.
+
+1. **`waiting_for_you`**, when a reason applies. The first that applies, in this order, is `reason`:
+   1. `handover`: the handover is pending. `handover_trigger` is the first check the newest flagged message from the match hit (`logistics`, `asks_if_ai`, `place_or_exclusivity`, `personal_info`, `sensitive`, or `unavailable` when Jev could not be asked); null for every other reason.
+   2. `draft_in_review`: a draft is pending.
+   3. `copied_draft`: a draft of the card is `copied` and its message has not appeared in the chat yet (see "Drafts").
+   4. `failed_send`: a draft of the card is `failed`.
+   5. `stalled`: the card is Stalled.
+   6. `overdue`: the card has a next action and its due day is before today. Due today is not overdue. Today is the user's day in their time zone (`user_zone()`), as on Today.
+   7. `rate_date`: a Dated card has no rating.
+   8. `your_turn`: a Matched or Chatting card autopilot is not handling, whose last message is from the match, and that has no scheduled send (a reply the user timed answers it: the card is Waiting for them).
+   9. `opener_due`: a Matched card autopilot is not handling, with no messages.
+2. **`handled_by_autopilot`**: a Matched or Chatting card autopilot is handling (below). `autopilot_activity` is `writing_opener` (no messages, and the `chat_reply` job that writes the opener is queued or running), `drafting_reply` (the match wrote last and a `chat_reply` job is queued or running), `planned` (the card has a planned send, a reply or an opener: its `planned_send` gives the send time, reason and `kind`, see "Send timing") or `sent_waiting` (the user or autopilot wrote last). The time to show is `last_message.sent_at`, or `planned_send.send_at` for `planned`, and the row ends with the card's `topic` (see "Cards and messages").
+3. **`waiting_for_them`**: every other Matched or Chatting card.
+4. **`texting_off_app`**: Number swapped, Date set, Dated and Seeing them.
+5. **`archived`**: an Archived card no reason applies to.
+
+**Handled by autopilot** needs all of these:
+
+- chat autopilot may act for the card's app: nothing is paused for it or for all apps, the AI budget is not reached, and chat autonomy is Autopilot or Full autopilot (`autopilot_block()`);
+- the app can send to the card: it has a working connector (not copilot-only, a session token stored, `send` not switched off) and the card is linked to a match (`refusal()` in `app/send.py`, the rules an unattended send is held to);
+- the card has no handover, pending or taken over;
+- autopilot is doing something: a `chat_reply` job is queued, a planned send waits for its send time, or the user or autopilot wrote last. A reply job that wrote nothing (no style profile, an old message) leaves the card `your_turn`.
+
+This is stricter than "autopilot may act" alone: a card autopilot could act on but is doing nothing for is Waiting for them or Waiting for you. The owner confirmed this rule on 2026-11-25.
+
+A new match sync finds is Handled by autopilot while autopilot writes and plans its opener (see "Chat autopilot"). A match added by hand, one synced while autopilot could not act, or one already there at the first sync after a connect or reconnect, is `opener_due`.
+
+## Adding a reason or an activity
+
+- A reason: add it to `Reason` in its precedence slot and add its check to `_reason()` at the same place. Fetch what it needs in `place()` with one query over all the cards (`card_id = ANY(:ids)`), like `failed`.
+- An activity: add it to `Activity` and set it in the `handled_by_autopilot` branch of `place()`.
+- The app words each code in `Card.pipelineStatus` (`ios/DatingCRM/Screens/PipelineView.swift`); a code it does not know shows no status line.
+
+## On the phone
+
+`PipelineView` renders the groups `GET /pipeline` sends (`client.pipeline()`, `[PipelineGroup]`), in the server's order. Each card also carries `pipelineGroup`, `reason`, `handoverTrigger` and `autopilotActivity`, the server's codes, kept as strings so a newer server's code does not break decoding.
+
+- **Headers** are rows: the group's title, its count and a chevron, 44 pt, a tap collapses the group. Waiting for you is in the accent. Archived starts collapsed. A search opens every group. An Archived card a reason applies to is in Waiting for you; its row's stage caption says "Archived", as for any stage.
+- **Status line**: `Card.pipelineStatus(now:calendar:)` (in `PipelineView.swift`) words the codes, one source per group: the reason for Waiting for you, the activity for Handled by autopilot, then the card's `topic` when it has one ("sent 4d ago, no reply yet · talking museums"), "You wrote 3h ago" for Waiting for them ("Your reply goes out at 20:15" with a scheduled send, `card.scheduledSend`), the next action and its day for Texting off-app, else "Date rated 5/5" or "No next action". A planned send (`planned`) says when and why instead of the topic: "replies around 20:15 · they take their time", from `card.plannedSend` (`sendAt`, `timingReason`); with no reason it ends with the topic. A planned opener (`plannedSend.kind` `opener`) says "sends an opener around 17:40 · a while after you matched"; before it is written, "writing an opener". An unknown code shows no line. `AIMarker(.draft)` goes with "Reply ready in Review", `AIMarker(.autopilot)` with every Handled by autopilot row; a planned send's row puts its `PlannedRing` before the marker. "Rate the date" is a 44 pt button that opens `DateRatingSheet`.
+- **Motion**: headers and cards are one `ForEach`, so a card whose group changed is the same row and moves there with a spring on reload. With `motionReduced` the card's row id includes its group, so it fades out and in instead.
+- Returning from a card, adding one and rating reload the Pipeline. Screenshots: `docs/design/screenshots/redesign/t52-pipeline-*.png`, with planned sends `t71-pipeline-*.png`, with openers `t73-pipeline-*.png`.

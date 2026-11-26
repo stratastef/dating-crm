@@ -10,14 +10,17 @@ from pathlib import Path
 APP = Path(__file__).parent.parent / "app"
 SQL = re.compile(r"^\s*(SELECT\s|INSERT INTO\s|UPDATE \w+ SET\s|DELETE FROM\s|WITH \w+ AS)")
 
-# The users table is the tenant itself, keyed by its own id; the last two read no table.
-EXEMPT = re.compile(r"\b(FROM users|UPDATE users|INTO users)\b|^SELECT (1|now\(\))$")
+# The users table is the tenant itself, keyed by its own id. Invite codes belong to no user: one creates a user.
+# The last two read no table.
+EXEMPT = re.compile(r"\b(FROM|UPDATE|INTO) (users|invite_codes)\b|^SELECT (1|now\(\))$")
 
 # (file, how the statement starts) -> why it needs no user_id
 ALLOWED: dict[tuple[str, str], str] = {
     ("jobs.py", "UPDATE jobs SET"): "the worker runs every user's jobs and marks the one it claimed, by id",
     ("paid_items.py", "SELECT p.id, p.app, p.item"): "a shared column list; each query that uses it adds p.user_id",
     ("push.py", "DELETE FROM devices WHERE token"): "Apple rejected this device token; a token is unique to one phone",
+    ("sign_in.py", "SELECT count(*) FILTER"): "rate limits count code requests per phone number and IP, before sign-in",
+    ("sign_in.py", "UPDATE sign_in_codes SET code_hash = NULL"): "a sign-in code belongs to a phone number, before sign-in",
 }
 
 

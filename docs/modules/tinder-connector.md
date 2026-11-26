@@ -1,13 +1,13 @@
 # Tinder connector
 
-`app/tinder.py` reads your own Tinder account with your own web session token. It supports `read_matches`, `read_messages`, `send`, `read_candidates`, `like` and `pass`, and the paid items `super_like` and `boost`, which are spent only on the user's approval (see "Paid items"). A message goes out when the user taps send on a draft (see "Drafts"), or on its own only with chat autonomy at `guardrails` or `full` (see "Chat autopilot"). A like or pass goes out when the user swipes on a candidate (see "Swipe copilot"), or on its own only once the user turns swipe autopilot on (see "Swipe autopilot"). Set `CONNECTOR_DISABLED_CAPABILITIES=tinder:send` to keep it read-only. Tinder's terms do not allow this API use; see Risks in the spec.
+`app/tinder.py` reads your own Tinder account with your own web session token. It supports `read_matches`, `read_messages`, `send`, `read_candidates`, `like` and `pass`, and the paid items `super_like` and `boost`, which are spent only on the user's approval (see "Paid items"). A message goes out when the user taps send on a draft (see "Drafts"), or on its own only with chat autonomy at `autopilot` or `full_autopilot` (see "Chat autopilot"). A like or pass goes out when the user swipes on a candidate (see "Swipe copilot"), or on its own only once the user turns swipe autopilot on (see "Swipe autopilot"). Set `CONNECTOR_DISABLED_CAPABILITIES=tinder:send` to keep it read-only. Tinder's terms do not allow this API use; see Risks in the spec.
 
 ## Capture and submit your token
 
 1. On your computer, log in at <https://tinder.com> in a desktop browser.
 2. Open the developer tools (F12), then the Network tab, and reload the page.
 3. Click any request to `api.gotinder.com` and copy the value of the `X-Auth-Token` request header. The same value is in Application > Local Storage > `https://tinder.com` under the key `TinderWeb/APIToken`.
-4. Send it to your server. `$API_TOKEN` is your Dating CRM token from `python -m app.auth`:
+4. On the phone, paste it under You > Connected apps > Tinder > Connect, which shows these steps. Or send it to your server from the computer. `$API_TOKEN` is your Dating CRM token from `python -m app.auth`:
 
 ```sh
 curl -X PUT http://localhost:8000/connectors/tinder/token \
@@ -38,6 +38,7 @@ The connector was built from public write-ups of the web API and was never run a
 | Any answer other than `2xx` means the message may or may not have been sent | A failed send is never retried |
 | An expired token gives HTTP `401` | Fallback to copilot |
 | `GET /v2/recs/core` returns `{"data": {"results": [{"user": {...}}]}}`, and `results` is absent or empty when nobody is left | `read_candidates` |
+| Each result holds `distance_mi` next to `user`, and `user.birth_date` as an ISO 8601 timestamp; the age is the whole years since it | `read_candidates` |
 | A candidate's `user` has `_id`, `name`, optional `bio` and `photos`, a list of objects with `url` | Candidate `profile_id`, name, bio, photo URLs |
 | `GET /like/{user _id}` likes and `GET /pass/{user _id}` passes, with no body, query or `s_number` needed, and both give HTTP `200` | `like`, `pass` |
 | The like is the free one: Super Like is a different endpoint (`/like/{id}/super`), which `like` never calls | A like spends no paid item |

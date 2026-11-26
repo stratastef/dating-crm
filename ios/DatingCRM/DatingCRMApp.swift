@@ -10,10 +10,15 @@ struct DatingCRMApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if let client = session.client {
+                if let client = session.client, session.isNewAccount {
+                    SetupView(client: client) { session.isNewAccount = false }
+                } else if let client = session.client {
                     let push = appDelegate.push
-                    BoardView(client: client, push: push, signOut: session.signOut)
-                        .task { await push.requestPermission() }
+                    MainTabView(client: client, push: push, signOut: session.signOut)
+                        .task {
+                            // A scripted simulator check (see `Session.init`) cannot answer the permission alert.
+                            if ProcessInfo.processInfo.environment["DCRM_TOKEN"] == nil { await push.requestPermission() }
+                        }
                         // Runs again when Apple delivers the device token.
                         .task(id: push.deviceToken) { await push.register(with: client) }
                 } else {

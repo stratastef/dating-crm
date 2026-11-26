@@ -55,7 +55,7 @@ CHECKS: dict[str, str] = {
     # Handover trigger, on incoming messages.
     "asks_if_ai": "The sentence asks or suspects that the reader is a bot or an AI.",
     "logistics": "The sentence is about a commitment or logistics: a time, a place to meet, or exclusivity.",
-    # Full mode coordinates a time alone and nothing else: with this hit, `logistics` hands over there too.
+    # Full autopilot coordinates a time alone and nothing else: with this hit, `logistics` hands over there too.
     "place_or_exclusivity": "The sentence is about where to meet, or about being exclusive or a couple.",
     "personal_info": (
         "The sentence gives or asks for personal info: a phone number, a social media handle, an address or a"

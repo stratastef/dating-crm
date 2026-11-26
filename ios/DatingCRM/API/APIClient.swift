@@ -18,8 +18,59 @@ struct APIClient {
     var token: String
     var transport: Transport = { try await URLSession.shared.data(for: $0) }
 
+    // Sign-in. The first two need no token: call them on a client whose token is "".
+
+    /// Texts a sign-in code to the phone number (E.164). `403` means no account has the number, and the invite code
+    /// was missing, unknown or used. `429` means too many codes were asked for.
+    func requestSignInCode(phone: String, inviteCode: String? = nil) async throws {
+        var body = ["phone": phone]
+        body["invite_code"] = inviteCode
+        try await data("POST", "sign-in/code", body: Self.encoder.encode(body))
+    }
+
+    /// Trades the phone number and sign-in code for an API token for this device. `401` means a wrong code,
+    /// `410` an expired one, `429` too many tries, `403` an invite code that created another account meanwhile.
+    func signIn(phone: String, code: String) async throws -> SignedIn {
+        try await send("POST", "sign-in", body: Self.encoder.encode(["phone": phone, "code": code]))
+    }
+
+    /// Revokes this device's token. The server stops sending this phone the user's pushes.
+    func signOut() async throws {
+        try await data("POST", "sign-out")
+    }
+
+    /// The review summary and what the user has to do: Overdue, Today and Coming up.
+    func today() async throws -> Today {
+        try await send("GET", "today")
+    }
+
+    /// Stores the phone's time zone (an IANA name), which "today" and "overdue" follow. Sent on each launch.
+    func setTimeZone(_ identifier: String) async throws {
+        try await data("PATCH", "settings", body: Self.encoder.encode(["time_zone": identifier]))
+    }
+
+    /// Each setup step, in order, and whether it is done.
+    func setup() async throws -> [SetupStep] {
+        try await send("GET", "setup")
+    }
+
+    /// Hides "Finish setup" on Today, or shows it again. The steps stay under You either way.
+    func setSetupDismissed(_ dismissed: Bool) async throws {
+        try await data("PATCH", "settings", body: Self.encoder.encode(["setup_dismissed": dismissed]))
+    }
+
     func cards() async throws -> [Card] {
         try await send("GET", "cards")
+    }
+
+    /// Every card, grouped by who acts next. Empty groups are left out.
+    func pipeline() async throws -> [PipelineGroup] {
+        try await send("GET", "pipeline")
+    }
+
+    /// Adds a card by hand, for a match on an app without a connector.
+    func addCard(name: String, app: String, stage: Stage) async throws -> Card {
+        try await send("POST", "cards", body: Self.encoder.encode(["name": name, "app": app, "stage": stage.rawValue]))
     }
 
     func messages(cardID: Int) async throws -> [Message] {
@@ -61,11 +112,36 @@ struct APIClient {
         try await send("PATCH", "inferences/\(inferenceID)", body: Self.encoder.encode(["corrected": text]))
     }
 
-    /// Approves a draft: the server queues it and its worker sends it through the dating app. `409` means the
-    /// server refused: sending is off for the app, or the draft was already sent. The kill switch does not
-    /// stop it.
-    func sendDraft(draftID: Int) async throws {
-        try await data("POST", "drafts/\(draftID)/send")
+    /// Send, or Retry a failed send: the server holds the draft 5 seconds for Undo, then its worker sends it
+    /// through the dating app. `409` means the server refused: sending is off for the app, the draft denies being
+    /// AI, or it was already sent. A pause does not stop it.
+    /// Send at: with `at`, the worker sends it then, as given and with no Undo wait; `unschedule` takes it back.
+    func sendDraft(draftID: Int, at: Date? = nil) async throws {
+        let body = try at.map { try Self.encoder.encode(["send_at": $0.ISO8601Format()]) }
+        try await data("POST", "drafts/\(draftID)/send", body: body)
+    }
+
+    /// Undo of a Send the server still holds: the draft is pending again, with its edit. `409` means the worker
+    /// already started sending it.
+    func undoSend(draftID: Int) async throws -> Draft {
+        try await send("POST", "drafts/\(draftID)/undo-send")
+    }
+
+    /// Cancel of a scheduled send (Send at): the draft is pending again, with its edit. `409` means it is going out.
+    func unschedule(draftID: Int) async throws -> Draft {
+        try await send("POST", "drafts/\(draftID)/unschedule")
+    }
+
+    /// Send now on autopilot's planned send: it goes out at once instead of at its send time. `409` means the
+    /// worker already started sending it, or the app cannot send it now.
+    func sendNow(draftID: Int) async throws {
+        try await data("POST", "drafts/\(draftID)/send-now")
+    }
+
+    /// Hold on autopilot's planned send: it does not go out, and the draft waits in Review, pending. `409` means
+    /// the worker already started sending it.
+    func hold(draftID: Int) async throws -> Draft {
+        try await send("POST", "drafts/\(draftID)/hold")
     }
 
     /// Everything that waits for the user's review, hot leads first.
@@ -73,12 +149,13 @@ struct APIClient {
         try await send("GET", "queue")
     }
 
-    /// Approves a pending draft as the server holds it. Save an edit first.
-    func approve(draftID: Int) async throws {
-        try await data("POST", "drafts/\(draftID)/approve")
+    /// Copy: the user took a pending or failed draft's text to send by hand. It waits in Review as
+    /// `copied_draft` until the user's message shows up in the chat. Save an edit first.
+    func copy(draftID: Int) async throws -> Draft {
+        try await send("POST", "drafts/\(draftID)/copy")
     }
 
-    /// Drops a pending draft from the queue. Nothing is sent.
+    /// Drops a pending draft from the queue, or clears a copied or failed one. Nothing is sent.
     func dismiss(draftID: Int) async throws {
         try await data("POST", "drafts/\(draftID)/dismiss")
     }
@@ -122,8 +199,19 @@ struct APIClient {
         try await send("PUT", "preferences", body: Self.encoder.encode(preferences))
     }
 
-    /// Good dates per hour for every week with recorded time or a good date, oldest first.
-    func dashboard() async throws -> [DashboardWeek] {
+    /// The voice questionnaire's questions, as the server words them, and the user's answers.
+    func voice() async throws -> Voice {
+        try await send("GET", "voice")
+    }
+
+    /// Replaces all the questionnaire answers. The server then rewrites the style profile.
+    func saveAnswers(_ answers: [String: String]) async throws -> Voice {
+        try await send("PUT", "voice/questionnaire", body: Self.encoder.encode(["answers": answers]))
+    }
+
+    /// Good dates per hour for every week with recorded time or a good date, oldest first, with the headline,
+    /// this month's funnel and AI spend.
+    func dashboard() async throws -> Dashboard {
         try await send("GET", "dashboard")
     }
 
@@ -148,6 +236,18 @@ struct APIClient {
         let decided: SwipeDecided = try await send(
             "POST", "swipes/\(candidateID)/decision", body: Self.encoder.encode(["decision": swipe]))
         return decided.applied
+    }
+
+    /// The Swipe layout the user chose. Nil until they choose: Swipe shows one at a time meanwhile.
+    func swipeLayout() async throws -> SwipeLayout? {
+        let setting: LayoutSetting = try await send("GET", "swipes/layout")
+        return setting.layout
+    }
+
+    func setSwipeLayout(_ layout: SwipeLayout) async throws -> SwipeLayout? {
+        let setting: LayoutSetting = try await send(
+            "PUT", "swipes/layout", body: Self.encoder.encode(LayoutSetting(layout: layout)))
+        return setting.layout
     }
 
     /// The user's own photos, best first once ranked.
@@ -180,9 +280,40 @@ struct APIClient {
         try await send("PUT", "photos/\(photoID)/edit", body: Self.encoder.encode(["accept": accept]))
     }
 
+    /// Deletes the photo and its file on the server. It cannot be undone.
+    func deletePhoto(id: Int) async throws {
+        try await data("DELETE", "photos/\(id)")
+    }
+
+    /// Sets the photos' order, lead photo first. `ids` names every photo once. Returns the photos in that order.
+    func orderPhotos(ids: [Int]) async throws -> [ProfilePhoto] {
+        try await send("PUT", "photos/order", body: Self.encoder.encode(["ids": ids]))
+    }
+
+    /// The bio and prompt answers the user accepted for a dating app (`tinder`); empty until they accept one.
+    func bio(app: String) async throws -> Bio {
+        try await send("GET", "bios/\(app)")
+    }
+
+    /// Has Claude rewrite the bio and prompt answers for the app in the user's voice. Stores nothing. `409`: the
+    /// style profile is not written yet, so the voice questionnaire comes first.
+    func rewriteBio(app: String, _ current: Bio) async throws -> Bio {
+        try await send("POST", "bios/\(app)/rewrite", body: Self.encoder.encode(current))
+    }
+
+    /// Stores the version the user accepted for the app, replacing the previous one.
+    func acceptBio(app: String, _ accepted: Bio) async throws -> Bio {
+        try await send("PUT", "bios/\(app)", body: Self.encoder.encode(accepted))
+    }
+
+    /// What stops autopilot now, for the status strip: pauses, the AI budget, broken connectors. Empty when nothing does.
+    func status() async throws -> [StatusMessage] {
+        try await send("GET", "status")
+    }
+
     // Settings. Each call returns the state the server now holds.
 
-    /// What the kill switch pauses.
+    /// What is paused.
     func pauses() async throws -> Pauses {
         try await send("GET", "autopilot/pause")
     }
@@ -211,6 +342,49 @@ struct APIClient {
         try await send("PUT", "budget", body: Self.encoder.encode(["cap_usd": usd]))
     }
 
+    /// How many profiles swipe autopilot may swipe on, per run and per day.
+    func swipeLimits() async throws -> SwipeLimits {
+        try await send("GET", "swipes/limits")
+    }
+
+    func setSwipeLimits(_ limits: SwipeLimits) async throws -> SwipeLimits {
+        try await send("PUT", "swipes/limits", body: Self.encoder.encode(limits))
+    }
+
+    // Connected apps.
+
+    /// Each dating app (Tinder, Hinge, Bumble) with its connector state.
+    func connectedApps() async throws -> [ConnectedApp] {
+        try await send("GET", "connectors")
+    }
+
+    /// Stores the app's session token on the server, which turns its connector on and syncs now. `404`: the
+    /// app has no connector.
+    func connect(app: String, token: String) async throws {
+        try await data("PUT", "connectors/\(app)/token", body: Self.encoder.encode(["token": token]))
+    }
+
+    /// Keeps the app copilot-only: the server deletes its session token and stops syncing, sending and
+    /// swiping there. `connect` turns it back on.
+    func chooseCopilotOnly(app: String) async throws {
+        try await data("PUT", "connectors/\(app)/copilot-only")
+    }
+
+    // Google Calendar.
+
+    /// Whether the server holds a Google Calendar refresh token, so offered time slots get holds.
+    func calendarConnected() async throws -> Bool {
+        let calendar: [String: Bool] = try await send("GET", "calendar")
+        return calendar["connected"] ?? false
+    }
+
+    /// Google's consent page, to open in a web authentication session. Google returns to the server, which sends
+    /// the session on to `datingcrm://calendar`. `503`: the server has no Google OAuth client set up.
+    func calendarConsentURL() async throws -> URL {
+        let consent: Consent = try await send("GET", "calendar/connect")
+        return consent.url
+    }
+
     /// Whether the match read may guess ethnicity, religion, health, sexuality and politics. Off by default.
     func protectedTraitGuesses() async throws -> Bool {
         try await enabled("GET", "settings/protected-trait-guesses")
@@ -227,6 +401,31 @@ struct APIClient {
 
     func setAIDisclosure(_ on: Bool) async throws {
         _ = try await enabled("PUT", "settings/ai-disclosure", on)
+    }
+
+    /// Push name previews, Blur photos and the night window.
+    func settings() async throws -> UserSettings {
+        try await send("GET", "settings")
+    }
+
+    /// The hours autopilot sends nothing, 0 to 23 in the user's time zone. 1 to 7 by default.
+    func setNightWindow(start: Int, end: Int) async throws -> UserSettings {
+        try await send("PATCH", "settings", body: Self.encoder.encode(["night_window_start": start, "night_window_end": end]))
+    }
+
+    /// Lets hot-lead and handover pushes name the match. Off by default.
+    func setPushNamePreviews(_ on: Bool) async throws -> UserSettings {
+        try await send("PATCH", "settings", body: Self.encoder.encode(["push_name_previews": on]))
+    }
+
+    /// Blurs faces until tapped. Off by default.
+    func setBlurPhotos(_ on: Bool) async throws -> UserSettings {
+        try await send("PATCH", "settings", body: Self.encoder.encode(["blur_photos": on]))
+    }
+
+    /// What the app did toward dating apps and the calendar, newest first.
+    func activityLog() async throws -> [ActivityEntry] {
+        try await send("GET", "audit-log")
     }
 
     /// The user's cards, on every app, whose name or handle contains `query`.
@@ -272,7 +471,7 @@ struct APIClient {
         }
         var request = URLRequest(url: url)
         request.httpMethod = method
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         if let body {
             request.httpBody = body
             request.setValue(contentType, forHTTPHeaderField: "Content-Type")
@@ -283,8 +482,9 @@ struct APIClient {
         return data
     }
 
-    // The only dates the app reads or writes are plain days such as `due_date`.
-    private static let dayFormat: DateFormatter = {
+    // Plain days such as `due_date`. The app writes only these; it reads timestamps too.
+    // `nonisolated`: the decoder's date closure is Sendable.
+    nonisolated private static let dayFormat: DateFormatter = {
         let format = DateFormatter()
         format.locale = Locale(identifier: "en_US_POSIX")
         format.dateFormat = "yyyy-MM-dd"
@@ -294,7 +494,16 @@ struct APIClient {
     private static let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
-        decoder.dateDecodingStrategy = .formatted(dayFormat)
+        // A plain day (`2026-12-01`) or a full timestamp, with or without fractional seconds.
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let text = try decoder.singleValueContainer().decode(String.self)
+            if let date = dayFormat.date(from: text)
+                ?? (try? Date(text, strategy: .iso8601.time(includingFractionalSeconds: true)))
+                ?? (try? Date(text, strategy: .iso8601)) {
+                return date
+            }
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Not a date: \(text)"))
+        }
         return decoder
     }()
 
@@ -306,8 +515,22 @@ struct APIClient {
     }()
 }
 
+struct SignedIn: Decodable {
+    let token: String
+    /// True when this sign-in created the account (with an invite code).
+    let newAccount: Bool
+}
+
+private struct Consent: Decodable {
+    let url: URL
+}
+
 private struct SwipeDecided: Decodable {
     let applied: Bool
+}
+
+private struct LayoutSetting: Codable {
+    let layout: SwipeLayout?
 }
 
 private struct Purge: Encodable {

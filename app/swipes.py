@@ -45,7 +45,16 @@ PRESCREEN_SYSTEM = (
 
 Swipe = Literal["like", "pass"]
 
-_COLUMNS = "id, app, profile_id, name, bio, photos, suggestion, reason, source, decision"
+# The table is named in full, not aliased, so the paid item's subquery also works in `UPDATE ... RETURNING`.
+CANDIDATE_COLUMNS = """
+    id, app, profile_id, name, bio, photos, age, distance_mi, suggestion, reason, source, decision,
+    (SELECT json_build_object('id', p.id, 'app', p.app, 'item', p.item, 'name', swipe_candidates.name,
+                              'reason', p.reason, 'status', p.status, 'candidate_id', p.candidate_id,
+                              'photo_url', swipe_candidates.photos->>0, 'cost', p.cost)
+     FROM paid_item_proposals p
+     WHERE p.user_id = swipe_candidates.user_id AND p.candidate_id = swipe_candidates.id AND p.status = 'pending'
+       AND swipe_candidates.decision IS NULL) AS paid_item
+"""
 
 
 class Candidate(BaseModel):
@@ -54,10 +63,13 @@ class Candidate(BaseModel):
     name: str
     bio: str
     photos: list[str]
+    age: int | None  # null when the dating app does not say
+    distance_mi: int | None
     suggestion: Swipe
     reason: str
     source: Literal["jev", "model"]  # which pre-filter suggested
     decision: Swipe | None  # null until the user swipes
+    paid_item: paid_items.Proposal | None  # the Super Like proposed for this profile, while it waits
 
 
 class Decided(Candidate):
@@ -105,7 +117,7 @@ def pending(db: Connection, user_id: int, app: str | None = None) -> list:
     """The candidates that wait for the user's swipe, oldest first."""
     return list(db.execute(
         text(
-            f"SELECT {_COLUMNS} FROM swipe_candidates WHERE user_id = :user_id AND decision IS NULL"
+            f"SELECT {CANDIDATE_COLUMNS} FROM swipe_candidates WHERE user_id = :user_id AND decision IS NULL"
             " AND (CAST(:app AS text) IS NULL OR app = :app) ORDER BY id"
         ),
         {"user_id": user_id, "app": app},
@@ -160,8 +172,10 @@ def screen(db: Connection, user_id: int, app: str) -> None:
         candidate_id = db.execute(
             text(
                 """
-                INSERT INTO swipe_candidates (user_id, app, profile_id, name, bio, photos, suggestion, reason, source)
-                VALUES (:user_id, :app, :profile_id, :name, :bio, CAST(:photos AS jsonb), :suggestion, :reason, :source)
+                INSERT INTO swipe_candidates
+                    (user_id, app, profile_id, name, bio, photos, age, distance_mi, suggestion, reason, source)
+                VALUES (:user_id, :app, :profile_id, :name, :bio, CAST(:photos AS jsonb), :age, :distance_mi,
+                        :suggestion, :reason, :source)
                 RETURNING id
                 """
             ),
@@ -172,13 +186,15 @@ def screen(db: Connection, user_id: int, app: str) -> None:
                 "name": candidate["name"],
                 "bio": candidate["bio"],
                 "photos": json.dumps(candidate["photos"]),
+                "age": candidate.get("age"),  # optional in the connector contract
+                "distance_mi": candidate.get("distance_mi"),
                 "suggestion": "like" if suggestion == "super like" else suggestion,
                 "reason": reason,
                 "source": source,
             },
         ).scalar_one()
         if suggestion == "super like":  # proposed only: the user approves it in the review queue or it is not spent
-            paid_items.propose(db, user_id, app, "super_like", reason, candidate_id)
+            paid_items.propose(db, user_id, app, "super_like", reason, candidate_id, candidate.get("cost"))
 
 
 @router.post("/swipes/{app}/suggestions", response_model=list[Candidate])
@@ -201,7 +217,7 @@ def decide(candidate_id: int, body: Decision, user: CurrentUser, db: Db):
     row = db.execute(
         text(
             "UPDATE swipe_candidates SET decision = :decision, decided_at = now()"
-            f" WHERE id = :id AND user_id = :user_id AND decision IS NULL RETURNING {_COLUMNS}"
+            f" WHERE id = :id AND user_id = :user_id AND decision IS NULL RETURNING {CANDIDATE_COLUMNS}"
         ),
         {"decision": body.decision, "id": candidate_id, "user_id": user.id},
     ).one_or_none()
@@ -247,13 +263,34 @@ def set_limits(body: Limits, user: CurrentUser, db: Db):
     return body
 
 
+class Layout(BaseModel):
+    """How the Swipe tab shows candidates, as the user picked (ADR 0004)."""
+
+    layout: Literal["one_at_a_time", "list"]
+
+
+class StoredLayout(BaseModel):
+    layout: Literal["one_at_a_time", "list"] | None  # null until the user picks: the app shows one at a time
+
+
+@router.get("/swipes/layout", response_model=StoredLayout)
+def read_layout(user: CurrentUser, db: Db):
+    return {"layout": db.execute(text("SELECT swipe_layout FROM users WHERE id = :id"), {"id": user.id}).scalar_one()}
+
+
+@router.put("/swipes/layout", response_model=StoredLayout)
+def set_layout(body: Layout, user: CurrentUser, db: Db):
+    db.execute(text("UPDATE users SET swipe_layout = :layout WHERE id = :id"), {"id": user.id, "layout": body.layout})
+    return body
+
+
 @handler("swipe_autopilot", autopilot="swipe", every=AUTOPILOT_INTERVAL)
 def swipe_autopilot(db: Connection, user_id: int, payload: dict) -> None:
     """Swipe alone on the user's candidates, on every app whose swipe autopilot is allowed.
 
-    The worker skips the job unless swipe autonomy is guardrails or full (it is off by default) and nothing is
+    The worker skips the job unless swipe autonomy is autopilot or full_autopilot (it is off by default) and nothing is
     paused for all apps. The job asks `autopilot_allowed()` again for each app and before each swipe, so a pause
-    of one app (a ban signal), the kill switch or the budget cap stops it in the middle of a run.
+    of one app (a ban signal), a pause of all apps or the budget cap stops it in the middle of a run.
     """
     wants = current_preferences(db, user_id)
     allowed = limits(db, user_id)

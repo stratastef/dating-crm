@@ -312,3 +312,44 @@ def test_a_rejected_token_pauses_tinder_autopilot_and_alerts_with_app_and_reason
     [alert] = client.get("/connectors/alerts").json()
     assert (alert["app"], alert["reason"], alert["capability"]) == ("tinder", "auth failure", "read_matches")
     assert "expired-session-secret" not in str(alert)
+
+
+# Connected apps: each dating app's connector state, as the phone's Connected apps screen shows it.
+
+
+def connector_states(client) -> dict[str, tuple]:
+    """Each app's state, and the reason of its alert when it has one."""
+    rows = client.get("/connectors").json()
+    return {row["app"]: (row["state"], row["alert"] and row["alert"]["reason"]) for row in rows}
+
+
+def test_each_dating_app_reports_its_connector_state(client, app, tinder):
+    assert connector_states(client) == {
+        "tinder": ("not_connected", None),
+        "hinge": ("no_connector", None),
+        "bumble": ("no_connector", None),
+    }
+
+    submit_token(client)
+    assert connector_states(client)["tinder"] == ("connected", None)
+
+    submit_token(client, "expired-session-secret")
+    run_jobs(app)
+    assert connector_states(client)["tinder"] == ("broken", "auth failure")
+
+    assert client.put("/connectors/tinder/copilot-only").status_code == 204
+    assert connector_states(client)["tinder"] == ("copilot_only", None)  # the user's choice answers the alert
+
+
+def test_only_an_app_with_a_connector_can_be_marked_copilot_only(client):
+    assert client.put("/connectors/hinge/copilot-only").status_code == 404
+
+
+def test_a_pasted_token_connects_a_copilot_only_app_and_the_next_sync_runs(client, app, tinder):
+    client.put("/connectors/tinder/copilot-only")
+
+    submit_token(client)
+    run_jobs(app)
+
+    assert connector_states(client)["tinder"] == ("connected", None)
+    assert len(cards(client)) == 3

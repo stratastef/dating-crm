@@ -117,7 +117,7 @@ def test_at_the_cap_jev_is_not_called_and_its_checks_fail_closed(client, jev):
 @pytest.fixture
 def swipe_job(client, app, user_id):
     """`swipe_job()` queues an autopilot job for the test user and returns its status once the worker ran it."""
-    client.put("/autonomy/swipe", json={"level": "full"})
+    client.put("/autonomy/swipe", json={"level": "full_autopilot"})
 
     @handler("test_budget_swipe", autopilot="swipe")
     def swipe(db, user_id, payload):

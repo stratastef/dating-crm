@@ -4,6 +4,7 @@ import base64
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import anthropic
@@ -145,14 +146,19 @@ def record(
             send_push(own, user_id, "AI budget reached", "Autopilot is paused until next month or a higher cap.")
 
 
+def month_start(at: datetime, ahead: int = 0) -> datetime:
+    """When the calendar month (UTC) of `at` began, or the one `ahead` months later. The AI budget counts these
+    months, and the dashboard's "this month" is the same one."""
+    at = at.astimezone(UTC)
+    month = at.year * 12 + at.month - 1 + ahead
+    return datetime(month // 12, month % 12 + 1, 1, tzinfo=UTC)
+
+
 def spend(db: Connection, user_id: int) -> Decimal:
     """What the user's recorded Claude calls cost so far this calendar month (UTC), in USD."""
     return db.execute(
-        text(
-            "SELECT coalesce(sum(cost_usd), 0) FROM llm_calls WHERE user_id = :user_id"
-            " AND created_at >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"
-        ),
-        {"user_id": user_id},
+        text("SELECT coalesce(sum(cost_usd), 0) FROM llm_calls WHERE user_id = :user_id AND created_at >= :month"),
+        {"user_id": user_id, "month": month_start(datetime.now(UTC))},
     ).scalar_one()
 
 

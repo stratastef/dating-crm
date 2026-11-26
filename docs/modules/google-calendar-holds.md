@@ -10,7 +10,7 @@ Do this once per server, at <https://console.cloud.google.com>:
 2. In APIs & Services > Library, enable the **Google Calendar API**.
 3. In APIs & Services > OAuth consent screen, choose user type **External**, and add the scopes `.../auth/calendar.events` and `.../auth/calendar.freebusy`. Add your own Google account under Test users.
 4. Set the publishing status to **In production**. In **Testing**, Google expires the refresh token after 7 days and the calendar disconnects. Your own unverified app shows a warning page on connect; continue through it.
-5. In APIs & Services > Credentials, create an **OAuth client ID** of type **Web application**. Add `https://<your server>/calendar/callback` as an authorized redirect URI (`http://localhost:8000/calendar/callback` for local use).
+5. In APIs & Services > Credentials, create an **OAuth client ID** of type **Web application**. Add `https://<your server>/calendar/callback` as an authorized redirect URI (`http://localhost:8000/calendar/callback` for local use; the simulator reaches the Mac's `localhost`, a phone does not). Nothing in Google names the app: the server sends the browser on to it.
 6. Give the server the three values. Compose passes them to the API and worker:
 
 | Variable | Value |
@@ -23,9 +23,12 @@ Do this once per server, at <https://console.cloud.google.com>:
 
 | Route | Does |
 | --- | --- |
-| `GET /calendar/connect` | Returns `{"url": "..."}`: Google's consent page. Open it in a browser. `503` while a variable above is unset. |
-| `GET /calendar/callback?code=&state=` | Where Google sends the browser. Stores the refresh token and shows one line of text. It takes no API token: `state` names the user and is valid for 10 minutes. |
-| `GET /calendar` | `{"connected": true}` once a refresh token is stored. |
+| `GET /calendar/connect` | Returns `{"url": "..."}`: Google's consent page. The app opens it in a web authentication session. `503` while a variable above is unset. |
+| `GET /calendar/callback?code=&state=` | Where Google sends the browser. Stores the refresh token, then answers `303` to `datingcrm://calendar`, which ends the app's session. It takes no API token: `state` names the user and is valid for 10 minutes; a bad or expired `state` is `400`. |
+| `GET /calendar/callback?error=&state=` | Google's answer when the user refuses (`error=access_denied`). Stores nothing and answers `303` to `datingcrm://calendar?error=access_denied`. |
+| `GET /calendar` | `{"connected": true}` once a refresh token is stored. The app asks this after the session ends: the return address is not proof. |
+
+The callback always returns to the iOS app (`APP_RETURN`), so connecting from a desktop browser stores the token but ends on an address the browser cannot open. The later web app needs its own return address, carried in `state`.
 
 The refresh token is stored in the token vault under the app name `google_calendar`. Never log it. Only the user's primary calendar is used. To disconnect, remove the app's access at <https://myaccount.google.com/permissions>; there is no disconnect route.
 
@@ -55,3 +58,7 @@ calendar.confirm_date(db, user_id, card_id, trigger="match agreed", start=start)
 - All four raise `NotConnected` if the user has no stored refresh token, and `httpx.HTTPError` if Google refuses or cannot be reached; nothing is stored then. The `PATCH` route answers `502` and leaves the stage unchanged.
 - Tests never reach Google: the autouse `gcal` fixture replaces `calendar.google`, the only object that calls Google. Set `gcal.busy` to `(start, end)` pairs and read `gcal.events`.
 - Calls to the real Google API have not been tried: no Google credentials were available when this was written. Check the scopes, the free/busy response and the event fields in `GoogleCalendar` on the first real connect.
+
+## On the phone
+
+`CalendarView(client:)` shows whether Google Calendar is connected (`client.calendarConnected()`, `GET /calendar`, see "Google Calendar holds") with Connect, or Reconnect once connected. Connect gets Google's consent page from `client.calendarConsentURL()` (`GET /calendar/connect`) and opens it in an ephemeral `ASWebAuthenticationSession` that waits for the `datingcrm` scheme; the server's callback sends it there. The view then asks the server again and shows a toast, or a plain line when it is still not connected: Google refused, the user closed the page, or the server answered `503` (no Google OAuth client set up). The session is UIKit's, not SwiftUI's `webAuthenticationSession`, which failed on the simulator with `presentationContextNotProvided`. The setup step can push `CalendarView` as is.

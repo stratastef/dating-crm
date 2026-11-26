@@ -1,7 +1,7 @@
-"""Chat autopilot: the `chat_reply` job answers a match's message without the user, in guardrails or full mode.
+"""Chat autopilot: the `chat_reply` job answers a match's message without the user, at Autopilot or Full autopilot.
 
 It composes existing pieces: `draft_for()` writes the reply, Jev checks it, `queue_send(unattended=True)`
-sends it or leaves it in the review queue, and in full mode the calendar supplies and holds the times offered.
+sends it or leaves it in the review queue, and at Full autopilot the calendar supplies and holds the times offered.
 """
 
 from collections.abc import Sequence
@@ -10,7 +10,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlalchemy import Connection, text
 
-from app import calendar, handover, jev, llm, review
+from app import calendar, handover, jev, llm, review, timing
 from app.auth import CurrentUser, Db
 from app.autopilot import autonomy_levels
 from app.card_lookup import unanswered
@@ -47,15 +47,20 @@ def _answer_to_offer(db: Connection, user_id: int, holds: Sequence, message: str
 
 @handler("chat_reply", autopilot="chat")
 def chat_reply(db: Connection, user_id: int, payload: dict) -> None:
-    """Answer the newest message of a card's match. Queued for each new message from a match while chat
-    autopilot may act; the worker runs it only if `autopilot_allowed()` still says yes.
+    """Answer the newest message of a card's match, or write the opener to a match with no messages. Queued for
+    each new message from a match, and for each match without one that sync finds after the app's first sync since
+    it was connected (`app/sync.py`), while chat autopilot may act; the worker runs it only if
+    `autopilot_allowed()` still says yes.
 
     The reply is sent alone only if `queue_send(unattended=True)` lets it through. Otherwise it stays a
     pending draft in the review queue. Safe to run twice: a card with a draft under way is left alone.
     """
     card_id = payload["card_id"]
     card = db.execute(
-        text("SELECT app, name, stage, ai_disclosed FROM cards WHERE id = :id AND user_id = :user_id FOR UPDATE"),
+        text(
+            "SELECT app, name, stage, ai_disclosed, created_at FROM cards"
+            " WHERE id = :id AND user_id = :user_id FOR UPDATE"
+        ),
         {"id": card_id, "user_id": user_id},
     ).one_or_none()
     if not card or card.stage not in CHAT_STAGES or handover.is_paused(db, user_id, card_id):
@@ -67,27 +72,27 @@ def chat_reply(db: Connection, user_id: int, payload: dict) -> None:
         ),
         {"card_id": card_id, "user_id": user_id},
     ).one_or_none()
-    # An old message is not answered alone: a first sync reads whole chats.
-    if not newest or newest.sender != "them" or not newest.recent:
+    # An old message is not answered alone: a first sync reads whole chats. No message at all: the opener.
+    if newest and (newest.sender != "them" or not newest.recent):
         return
     under_way = db.execute(
         text(
             "SELECT EXISTS (SELECT 1 FROM drafts WHERE card_id = :card_id AND user_id = :user_id"
-            " AND status IN ('pending', 'approved', 'sending'))"
+            " AND status IN ('pending', 'copied', 'approved', 'sending'))"
         ),
         {"card_id": card_id, "user_id": user_id},
     ).scalar_one()
     if under_way:
-        return  # a draft waits for the user or is being sent: a second reply would cross it
+        return  # a draft waits for the user, waits to be pasted or is being sent: a second reply would cross it
 
     level = autonomy_levels(db, user_id)["chat"]
     # Every message the user has not answered counts, not only the newest: "when are you free?" then "??".
     waiting = unanswered(db, user_id, card_id)
     logistics = any("logistics" in (message.handover or []) for message in waiting)
-    if logistics and level != "full":
-        return  # guardrails mode: date logistics are the user's (the card is paused for handover anyway)
+    if logistics and level != "full_autopilot":
+        return  # Autopilot: date logistics are the user's (the card is paused for handover anyway)
 
-    # Full mode, and the match wrote about meeting: see what they say to the times held for them.
+    # Full autopilot, and the match wrote about meeting: see what they say to the times held for them.
     holds, answer = [], "none"
     if logistics:
         holds = db.execute(
@@ -114,7 +119,7 @@ def chat_reply(db: Connection, user_id: int, payload: dict) -> None:
     if logistics and "logistics" not in for_user:
         try:
             if isinstance(answer, int):
-                # A booked date is where full mode ends: the reply below stays in the review queue.
+                # A booked date is where Full autopilot ends: the reply below stays in the review queue.
                 calendar.confirm_date(
                     db, user_id, card_id, trigger=f"{TRIGGER} (full): match agreed", start=holds[answer].start
                 )
@@ -149,19 +154,28 @@ def chat_reply(db: Connection, user_id: int, payload: dict) -> None:
 
     # The guardrail judges the whole text that would go out, the added sentences included.
     message = " ".join(body)
+    guardrail = jev.guardrail_hits(db, user_id, message) + for_user
+    # `draft_for()` timed a reply from the chat. An opener is timed from when the match synced (ADR 0008).
+    send_at, reason = draft.send_at, draft.timing_reason
+    if not newest:
+        send_at, reason = timing.opener_time(db, user_id, card.created_at), timing.OPENER_REASON
     db.execute(
         text(
-            "UPDATE drafts SET original = :original, guardrail = :guardrail WHERE id = :id AND user_id = :user_id"
+            "UPDATE drafts SET original = :original, guardrail = :guardrail, send_at = :send_at,"
+            " timing_reason = :reason WHERE id = :id AND user_id = :user_id"
         ),
         {
             "id": draft.id,
             "user_id": user_id,
             "original": message,
-            "guardrail": jev.guardrail_hits(db, user_id, message) + for_user,
+            "guardrail": guardrail,
+            "send_at": send_at,
+            "reason": reason,
         },
     )
-    trigger = f"{TRIGGER} ({level}): reply to message {newest.id}"
-    if not queue_send(db, user_id, draft.id, trigger, unattended=True):
+    trigger = f"{TRIGGER} ({level}): " + (f"reply to message {newest.id}" if newest else "opener")
+    # A planned send: it goes out at its send time, when `send_draft` asks the same gate again.
+    if not queue_send(db, user_id, draft.id, trigger, unattended=True, run_at=send_at):
         review.notify_if_hot(db, user_id, card_id, card.name)  # the draft joined the review queue
 
 

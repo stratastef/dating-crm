@@ -7,7 +7,7 @@ import pytest
 from app import jev as jev_module
 from app.cards import upsert_card, upsert_message
 from app.jev import ask as real_ask  # imported before the autouse stub replaces it
-from tests.test_drafts import write_profile
+from tests.test_drafts import drafted, write_profile
 
 
 @pytest.fixture
@@ -159,7 +159,7 @@ def test_a_draft_is_stored_with_its_guardrail_and_hot_lead_results(app, client, 
     card_id = client.post("/cards", json={"app": "hinge", "name": "Sam"}).json()["id"]
     jev.yes = {"overpromise": ["best night"], "hot_lead": ["thursday"]}
 
-    llm.reply = "thursday then. it will be the best night of your life"
+    llm.reply = drafted("thursday then. it will be the best night of your life")
     draft = client.post(f"/cards/{card_id}/drafts").json()
 
     assert draft["guardrail"] == ["overpromise"]
@@ -170,7 +170,7 @@ def test_editing_a_draft_runs_the_guardrail_on_the_edit(app, client, llm, jev):
     write_profile(app, client, llm, "Short, lowercase, teasing.")
     card_id = client.post("/cards", json={"app": "hinge", "name": "Sam"}).json()["id"]
     jev.yes["denies_ai"] = ["not a bot"]
-    llm.reply = "thursday then"
+    llm.reply = drafted("thursday then")
     draft = client.post(f"/cards/{card_id}/drafts").json()
     assert draft["guardrail"] == []
 
@@ -185,7 +185,7 @@ def test_a_draft_jev_calls_a_hot_lead_is_pushed_at_once_and_is_hot_in_the_review
     card_id = client.post("/cards", json={"app": "hinge", "name": "Sam"}).json()["id"]  # no recent reply
     jev.yes["hot_lead"] = ["thursday"]
 
-    llm.reply = "thursday then"
+    llm.reply = drafted("thursday then")
     client.post(f"/cards/{card_id}/drafts")
 
     assert len(apns.sent) == 1

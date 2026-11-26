@@ -3,7 +3,7 @@ from sqlalchemy import text
 from app import calendar
 from app.audit import record_action
 from tests.test_calendar import NINE, SEVEN, connect
-from tests.test_drafts import write_profile
+from tests.test_drafts import drafted, write_profile
 from tests.test_reads import inference, read
 
 
@@ -113,7 +113,7 @@ def test_no_row_for_a_purged_person_remains_in_any_table(app, client, llm, gcal)
     client.post(f"/cards/{card_id}/messages", json={"sender": "me", "body": "hi quixote"})
     client.post(f"/cards/{card_id}/photos", json={"url": "https://example.com/quixote.jpg"})
     read(client, llm, card_id, [inference("interests", "quixote: climbing")])
-    llm.reply = "quixote, saturday?"
+    llm.reply = drafted("quixote, saturday?")
     assert client.post(f"/cards/{card_id}/drafts").status_code == 201
     connect(client, app)
 

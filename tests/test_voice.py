@@ -37,7 +37,8 @@ def test_the_style_profile_is_rewritten_when_a_new_chat_message_of_the_user_arri
     client.post(f"/cards/{card_id}/messages", json={"sender": "me", "body": "i only date people with libraries"})
     run_jobs(app)
 
-    assert client.get("/voice").json() == {"answers": {"Emoji?": "Never"}, "profile": "Now also dry."}
+    voice = client.get("/voice").json()
+    assert (voice["answers"], voice["profile"]) == ({"Emoji?": "Never"}, "Now also dry.")
     assert "i only date people with libraries" in llm.prompts[-1]
 
 
@@ -87,4 +88,18 @@ def test_questionnaire_answers_are_stored_per_user(client_for):
 
     assert saved.status_code == 200
     assert alice.get("/voice").json()["answers"] == {"How do you open?": "With a joke about their dog"}
-    assert bob.get("/voice").json() == {"answers": {}, "profile": None}
+    assert bob.get("/voice").json()["answers"] == {}
+    assert bob.get("/voice").json()["profile"] is None
+
+
+def test_the_questionnaire_questions_come_from_the_server_and_answering_them_writes_the_style_profile(app, client, llm):
+    questions = client.get("/voice").json()["questions"]
+    assert questions and all(isinstance(question, str) and question for question in questions)
+
+    llm.reply = "Warm, short, asks questions back."
+    saved = client.put("/voice/questionnaire", json={"answers": {question: "yes" for question in questions}})
+    run_jobs(app)
+
+    assert saved.json()["questions"] == questions
+    assert client.get("/voice").json()["profile"] == "Warm, short, asks questions back."
+    assert all(question in llm.prompts[-1] for question in questions)

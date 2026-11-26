@@ -11,7 +11,7 @@ struct SettingsTests {
         return (request.httpMethod, request.url?.absoluteString, body ?? nil)
     }
 
-    // Kill switch.
+    // Pause.
 
     @Test func readsWhatIsPaused() async throws {
         server.respond(#"{"all": false, "apps": ["tinder"]}"#)
@@ -50,23 +50,33 @@ struct SettingsTests {
     // Autonomy per job.
 
     @Test func readsTheAutonomyLevelOfEachJob() async throws {
-        server.respond(#"{"chat": "guardrails", "profile": "copilot", "swipe": "off"}"#)
+        server.respond(#"{"chat": "autopilot", "profile": "full_autopilot", "swipe": "off"}"#)
 
         let levels = try await server.client().autonomy()
 
-        #expect(levels == ["chat": .guardrails, "profile": .copilot, "swipe": .off])
+        #expect(levels == ["chat": .autopilot, "profile": .fullAutopilot, "swipe": .off])
         #expect(try sent().url == "https://crm.test/autonomy")
     }
 
     @Test func setsTheAutonomyLevelOfOneJob() async throws {
-        server.respond(#"{"chat": "full", "profile": "copilot", "swipe": "off"}"#)
+        server.respond(#"{"chat": "full_autopilot", "profile": "copilot", "swipe": "off"}"#)
 
-        let levels = try await server.client().setAutonomy(job: "chat", level: .full)
+        let levels = try await server.client().setAutonomy(job: "chat", level: .fullAutopilot)
 
-        #expect(levels["chat"] == .full)
+        #expect(levels["chat"] == .fullAutopilot)
         #expect(try sent().method == "PUT")
         #expect(try sent().url == "https://crm.test/autonomy/chat")
-        #expect(try sent().body == ["level": "full"])
+        #expect(try sent().body == ["level": "full_autopilot"])
+    }
+
+    @Test func thePickerNamesTheLevelsAsTheGlossaryDoes() {
+        #expect(AutonomyLevel.allCases.map(\.title) == ["Off", "Copilot", "Autopilot", "Full autopilot"])
+    }
+
+    @Test func eachLevelHasItsOwnPlainDescription() {
+        let summaries = AutonomyLevel.allCases.map(\.summary)
+        #expect(Set(summaries).count == AutonomyLevel.allCases.count)
+        #expect(summaries.allSatisfy { !$0.isEmpty })
     }
 
     // Budget and spend.
@@ -89,6 +99,34 @@ struct SettingsTests {
         #expect(try sent().method == "PUT")
         #expect(try sent().url == "https://crm.test/budget")
         #expect(try sent().body == ["cap_usd": 20])
+    }
+
+    @Test func showsThisMonthsSpendAgainstTheCap() {
+        #expect(Budget(spendUsd: 8.2, capUsd: 30, paused: false).spentOfCap == "$8.20 of $30")
+        #expect(Budget(spendUsd: 0, capUsd: 12.5, paused: false).spentOfCap == "$0 of $12.50")
+    }
+
+    // Swipe limits.
+
+    @Test func readsTheSwipeLimits() async throws {
+        server.respond(#"{"swipes_per_run": 5, "swipes_per_day": 20}"#)
+
+        let limits = try await server.client().swipeLimits()
+
+        #expect(limits == SwipeLimits(swipesPerRun: 5, swipesPerDay: 20))
+        #expect(try sent().method == "GET")
+        #expect(try sent().url == "https://crm.test/swipes/limits")
+    }
+
+    @Test func setsTheSwipeLimits() async throws {
+        server.respond(#"{"swipes_per_run": 3, "swipes_per_day": 40}"#)
+
+        let limits = try await server.client().setSwipeLimits(SwipeLimits(swipesPerRun: 3, swipesPerDay: 40))
+
+        #expect(limits == SwipeLimits(swipesPerRun: 3, swipesPerDay: 40))
+        #expect(try sent().method == "PUT")
+        #expect(try sent().url == "https://crm.test/swipes/limits")
+        #expect(try sent().body == ["swipes_per_run": 3, "swipes_per_day": 40])
     }
 
     // Protected-trait opt-in and AI disclosure.
@@ -120,7 +158,7 @@ struct SettingsTests {
     // Find and purge.
 
     @Test func findsAPersonsCardsAndSwipeCandidatesByName() async throws {
-        server.respond(#"[{"id": 3, "app": "tinder", "name": "Zelda Fitz", "stage": "chatting", "notes": ""}]"#)
+        server.respond(#"[{"id": 3, "app": "tinder", "name": "Zelda Fitz", "stage": "chatting", "notes": "", "stalled": false, "hot": false}]"#)
         server.respond("[\(SwipeTests.eve)]")
 
         let cards = try await server.client().findPeople("zelda fitz")
@@ -150,5 +188,11 @@ struct SettingsTests {
         #expect(!PurgeConfirmation.allows(typed: "purge", chosen: 0))
         #expect(!PurgeConfirmation.allows(typed: "", chosen: 1))
         #expect(!PurgeConfirmation.allows(typed: "yes", chosen: 1))
+    }
+
+    @Test func thePurgeButtonNamesThePeopleItDeletes() {
+        #expect(PurgeConfirmation.button(names: ["Ada"]) == "Delete everything about Ada")
+        #expect(PurgeConfirmation.button(names: ["Ada", "Bea"]) == "Delete everything about Ada and Bea")
+        #expect(PurgeConfirmation.button(names: ["Ada", "Bea", "Cleo"]) == "Delete everything about Ada, Bea, and Cleo")
     }
 }

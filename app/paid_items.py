@@ -16,7 +16,8 @@ from app.connectors import CapabilityFailed, CapabilityUnavailable, PaidItem, _r
 router = APIRouter()
 
 _SELECT = (
-    "SELECT p.id, p.app, p.item, COALESCE(c.name, p.app) AS name, p.reason, p.status"
+    "SELECT p.id, p.app, p.item, COALESCE(c.name, p.app) AS name, p.reason, p.status, p.candidate_id,"
+    " c.photos->>0 AS photo_url, p.cost, p.created_at"
     " FROM paid_item_proposals p LEFT JOIN swipe_candidates c ON c.id = p.candidate_id"
 )
 # A proposal for a profile waits only while the profile does: after a swipe there is nobody to spend it on.
@@ -30,6 +31,9 @@ class Proposal(BaseModel):
     name: str  # the profile the item is for; the app's name for an item spent on nobody (a Boost)
     reason: str
     status: str  # pending, declined, spent, or failed (approved, but the app did not spend it)
+    candidate_id: int | None  # the swipe candidate the item is for, whose profile the app opens; null for a Boost
+    photo_url: str | None  # the candidate's first photo; null for a Boost or a profile without photos
+    cost: str | None  # what the item costs, as the dating app reported it ("$1.99"); null when it reported none
 
 
 def _connectors() -> dict:
@@ -43,9 +47,16 @@ class NotApproved(Exception):
 
 
 def propose(
-    db: Connection, user_id: int, app: str, item: PaidItem, reason: str, candidate_id: int | None = None
+    db: Connection,
+    user_id: int,
+    app: str,
+    item: PaidItem,
+    reason: str,
+    candidate_id: int | None = None,
+    cost: str | None = None,
 ) -> int | None:
-    """Put a paid item in the user's review queue and return the proposal's ID. Spends nothing.
+    """Put a paid item in the user's review queue and return the proposal's ID. Spends nothing. `cost` is
+    what the item costs when the app's connector reported it.
 
     None when the app's connector cannot spend this item, or the same proposal exists: one per candidate ever,
     and one pending at a time for an item spent on nobody.
@@ -56,8 +67,8 @@ def propose(
     return db.execute(
         text(
             """
-            INSERT INTO paid_item_proposals (user_id, app, item, candidate_id, reason)
-            SELECT :user_id, :app, :item, :candidate_id, :reason
+            INSERT INTO paid_item_proposals (user_id, app, item, candidate_id, reason, cost)
+            SELECT :user_id, :app, :item, :candidate_id, :reason, :cost
             WHERE NOT EXISTS (
                 SELECT 1 FROM paid_item_proposals WHERE user_id = :user_id AND app = :app AND item = :item
                 AND (candidate_id = :candidate_id OR (CAST(:candidate_id AS bigint) IS NULL AND status = 'pending'))
@@ -65,7 +76,7 @@ def propose(
             ON CONFLICT DO NOTHING RETURNING id
             """
         ),
-        {"user_id": user_id, "app": app, "item": item, "candidate_id": candidate_id, "reason": reason},
+        {"user_id": user_id, "app": app, "item": item, "candidate_id": candidate_id, "reason": reason, "cost": cost},
     ).scalar_one_or_none()
 
 

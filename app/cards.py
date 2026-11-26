@@ -1,19 +1,22 @@
 """Match cards: one card per match, moving through the pipeline stages."""
 
+from collections.abc import Sequence
 from datetime import date, datetime, timedelta
 from typing import Literal
 
 import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, computed_field, field_validator
-from sqlalchemy import Connection, text
+from sqlalchemy import Connection, Row, text
 from sqlalchemy.exc import IntegrityError
 
 from app import calendar, handover, tombstones
 from app.auth import CurrentUser, Db
 from app.autopilot import autopilot_allowed
 from app.card_lookup import own_card
+from app.drafts import DRAFT_COLUMNS, PLANNED, SCHEDULED, Draft, present
 from app.jobs import enqueue, handler
+from app.review import is_hot_lead
 from app.voice import queue_profile
 
 router = APIRouter()
@@ -21,10 +24,10 @@ router = APIRouter()
 # The seven pipeline stages, in order. The `cards.stage` check constraint lists the same values.
 Stage = Literal["matched", "chatting", "number_swapped", "date_set", "dated", "seeing_them", "archived"]
 
-_COLUMNS = (
+CARD_COLUMNS = (
     "id, app, external_id, name, stage, stage_changed_at, notes, next_action, due_date, created_at,"
     " stalled_at IS NOT NULL AS stalled, date_rating, date_note, handover, handover_suggestions,"
-    " led_to_date, ai_disclosed"
+    " led_to_date, ai_disclosed, topic"
 )
 
 # Only cards in these stages can be Stalled. Stalled is a flag (`cards.stalled_at`), not a stage.
@@ -56,7 +59,18 @@ def is_good_date(rating: int | None) -> bool:
     return rating is not None and rating >= 4
 
 
+class LastMessage(BaseModel):
+    sender: str  # `me` or `them`
+    body: str  # the first 100 characters
+    sent_at: datetime
+
+
 class Card(BaseModel):
+    """A card with its card summary: everything a row in the app shows, so the app makes no other call.
+
+    Every card response is built by `summarize()`.
+    """
+
     id: int
     app: str
     external_id: str | None
@@ -77,6 +91,23 @@ class Card(BaseModel):
     led_to_date: bool
     # A message that carried the AI disclosure was sent to this match (see `app/send.py`).
     ai_disclosed: bool
+    # The card summary. The newest message by `sent_at`, from either side; null when there are none.
+    last_message: LastMessage | None
+    hot: bool  # a hot lead: `is_hot_lead()` in `app/review.py`, as on the review queue
+    pending_draft: Draft | None  # the newest pending draft, the one the review queue shows; null when none
+    drafts: list[Draft]  # the card's draft list: its pending, copied and failed drafts, newest first
+    # Autopilot's planned send: the draft it sends alone at its `send_at`, with its `timing_reason`; null when none.
+    planned_send: Draft | None
+    # The user's scheduled send: their draft that goes out at the `send_at` they chose; null when none.
+    scheduled_send: Draft | None
+    lead_photo_url: str | None  # the first photo attached to the card; null when unknown
+    # Where the Pipeline lists the card, and why: see `app/pipeline.py`.
+    pipeline_group: str  # a `Group`: `waiting_for_you`, `handled_by_autopilot`, ...
+    reason: str | None  # a `Reason` when the card is Waiting for you, else null
+    handover_trigger: str | None  # with reason `handover`: the handover check that hit, such as `logistics`
+    autopilot_activity: str | None  # an `Activity` when the card is Handled by autopilot, else null
+    # What the chat is about, in a few words ("museums"): written with the card's latest draft, empty before one.
+    topic: str
 
     @computed_field
     @property
@@ -88,6 +119,73 @@ class Card(BaseModel):
     @property
     def good_date(self) -> bool:
         return is_good_date(self.date_rating)
+
+
+def summarize(db: Connection, user_id: int, cards: Sequence[Row]) -> list[Card]:
+    """The user's card rows, selected with `CARD_COLUMNS`, with their card summaries, in the same order."""
+    params = {"user_id": user_id, "ids": [card.id for card in cards]}
+    last_messages = {
+        row.card_id: dict(row._mapping)
+        for row in db.execute(
+            text(
+                """
+                SELECT DISTINCT ON (card_id) card_id, sender, left(body, 100) AS body, sent_at FROM messages
+                WHERE user_id = :user_id AND card_id = ANY(:ids)
+                ORDER BY card_id, sent_at DESC, id DESC
+                """
+            ),
+            params,
+        )
+    }
+    waiting = db.execute(
+        text(
+            f"""
+            SELECT {DRAFT_COLUMNS}, {SCHEDULED} AS scheduled FROM drafts
+            WHERE user_id = :user_id AND card_id = ANY(:ids)
+              AND (status IN ('pending', 'copied', 'failed') OR {PLANNED} OR {SCHEDULED})
+            ORDER BY created_at DESC, id DESC
+            """
+        ),
+        params,
+    ).all()
+    drafts: dict[int, list[Draft]] = {}
+    planned: dict[int, Draft] = {}
+    scheduled: dict[int, Draft] = {}
+    for row, draft in zip(waiting, present(db, user_id, waiting), strict=True):
+        if row.scheduled:
+            scheduled[draft.card_id] = draft
+        elif draft.status == "approved":
+            planned[draft.card_id] = draft
+        else:
+            drafts.setdefault(draft.card_id, []).append(draft)
+    lead_photos = dict(
+        db.execute(
+            text(
+                "SELECT DISTINCT ON (card_id) card_id, url FROM card_photos"
+                " WHERE user_id = :user_id AND card_id = ANY(:ids) ORDER BY card_id, id"
+            ),
+            params,
+        ).all()
+    )
+    # shortcut: one hot-lead query per card, like the review queue. Fold `is_hot_lead()` into one query over
+    # all the ids if a Pipeline of a few hundred cards gets slow.
+    summaries = [
+        {
+            **card._mapping,
+            "last_message": last_messages.get(card.id),
+            "hot": is_hot_lead(db, user_id, card.id),
+            "pending_draft": next((draft for draft in drafts.get(card.id, []) if draft.status == "pending"), None),
+            "drafts": drafts.get(card.id, []),
+            "planned_send": planned.get(card.id),
+            "scheduled_send": scheduled.get(card.id),
+            "lead_photo_url": lead_photos.get(card.id),
+        }
+        for card in cards
+    ]
+    from app.pipeline import place  # imported here: app.pipeline imports this module for `GET /pipeline`
+
+    place(db, user_id, summaries)
+    return [Card.model_validate(summary) for summary in summaries]
 
 
 class NewCard(BaseModel):
@@ -105,39 +203,48 @@ def create_card(card: NewCard, user: CurrentUser, db: Db):
     if card.external_id and tombstones.is_buried(db, user.id, "match", card.app, card.external_id):
         raise HTTPException(status_code=409, detail="this person asked for their data to be deleted")
     try:
-        return db.execute(
+        row = db.execute(
             text(
                 f"""
                 INSERT INTO cards (user_id, app, external_id, name, stage, notes, next_action, due_date)
                 VALUES (:user_id, :app, :external_id, :name, :stage, :notes, :next_action, :due_date)
-                RETURNING {_COLUMNS}
+                RETURNING {CARD_COLUMNS}
                 """
             ),
             {"user_id": user.id, **card.model_dump()},
         ).one()
     except IntegrityError:
         raise HTTPException(status_code=409, detail="a card with this app and external_id already exists")
+    return summarize(db, user.id, [row])[0]
 
 
-def upsert_card(db: Connection, user_id: int, app: str, external_id: str, name: str) -> int | None:
+def upsert_card(
+    db: Connection, user_id: int, app: str, external_id: str, name: str, opener: bool = False
+) -> int | None:
     """Create the card for a synced match in Matched, or refresh its name. Returns the card id.
 
     An existing card keeps its stage, notes, next action and due date. A match the user purged is not stored
-    again: None is returned and the caller must store nothing about them.
+    again: None is returned and the caller must store nothing about them. With `opener`, a card this creates gets
+    chat autopilot's opener, if it may act: sync asks for it for a match with no messages that is new since the
+    app was connected.
     """
     if tombstones.is_buried(db, user_id, "match", app, external_id):
         return None
-    return db.execute(
+    card = db.execute(
         text(
             """
             INSERT INTO cards (user_id, app, external_id, name, stage)
             VALUES (:user_id, :app, :external_id, :name, 'matched')
             ON CONFLICT (user_id, app, external_id) DO UPDATE SET name = EXCLUDED.name
-            RETURNING id
+            RETURNING id, created_at = now() AS created
             """
         ),
         {"user_id": user_id, "app": app, "external_id": external_id, "name": name},
-    ).scalar_one()
+    ).one()
+    # `now()` is when this transaction began, so only a card it inserted was created then.
+    if card.created and opener:
+        _queue_reply(db, user_id, card.id)
+    return card.id
 
 
 def has_message(db: Connection, user_id: int, card_id: int, external_id: str) -> bool:
@@ -151,21 +258,33 @@ def has_message(db: Connection, user_id: int, card_id: int, external_id: str) ->
 
 
 def _queue_reply(db: Connection, user_id: int, card_id: int) -> None:
-    """Call after each new message from the match: chat autopilot answers it, if it may act (`app/chat_autopilot.py`)."""
+    """Call after each new message from the match, and for a new match with none: chat autopilot answers it or
+    writes the opener, if it may act (`app/chat_autopilot.py`)."""
     app = own_card(db, user_id, card_id).app
     if autopilot_allowed(db, user_id, app, "chat"):
         enqueue(db, user_id, "chat_reply", {"app": app, "card_id": card_id})
 
 
 def upsert_message(
-    db: Connection, user_id: int, card_id: int, external_id: str | None, sender: str, body: str, sent_at: datetime | str
+    db: Connection,
+    user_id: int,
+    card_id: int,
+    external_id: str | None,
+    sender: str,
+    body: str,
+    sent_at: datetime | str,
+    *,
+    sent_by_autopilot: bool = False,
 ) -> None:
     """Add a synced message unless the card already has it. Without an `external_id` it is always added.
 
     A new message has the same effects as one added through `POST /cards/{id}/messages`, and it also moves a
-    Matched card to Chatting.
+    Matched card to Chatting. `sent_by_autopilot` marks a message autopilot sent alone (`app/send.py`).
     """
-    if insert_message(db, user_id, card_id, external_id, sender, body, sent_at, skip_duplicate=True):
+    stored = insert_message(
+        db, user_id, card_id, external_id, sender, body, sent_at, skip_duplicate=True, sent_by_autopilot=sent_by_autopilot
+    )
+    if stored:
         db.execute(
             text(
                 "UPDATE cards SET stage = 'chatting', stage_changed_at = now()"
@@ -195,10 +314,10 @@ class CardChanges(BaseModel):
 
 @router.get("/cards", response_model=list[Card])
 def list_cards(user: CurrentUser, db: Db, stage: Stage | None = None, app: str | None = None):
-    return db.execute(
+    rows = db.execute(
         text(
             f"""
-            SELECT {_COLUMNS} FROM cards
+            SELECT {CARD_COLUMNS} FROM cards
             WHERE user_id = :user_id
               AND (CAST(:stage AS text) IS NULL OR stage = :stage)
               AND (CAST(:app AS text) IS NULL OR app = :app)
@@ -207,6 +326,7 @@ def list_cards(user: CurrentUser, db: Db, stage: Stage | None = None, app: str |
         ),
         {"user_id": user.id, "stage": stage, "app": app},
     ).all()
+    return summarize(db, user.id, rows)
 
 
 @router.patch("/cards/{card_id}", response_model=Card)
@@ -228,7 +348,7 @@ def update_card(card_id: int, changes: CardChanges, user: CurrentUser, db: Db):
             f"""
             UPDATE cards SET {", ".join(assignments) or "notes = notes"}
             WHERE id = :id AND user_id = :user_id
-            RETURNING {_COLUMNS}
+            RETURNING {CARD_COLUMNS}
             """
         ),
         {"id": card_id, "user_id": user.id, **fields},
@@ -242,15 +362,15 @@ def update_card(card_id: int, changes: CardChanges, user: CurrentUser, db: Db):
         except httpx.HTTPError:
             # Raising rolls the stage change back, so the card and the calendar stay in step.
             raise HTTPException(status_code=502, detail="Google Calendar could not be reached; try again")
-    return row
+    return summarize(db, user.id, [row])[0]
 
 
 @router.get("/cards/{card_id}", response_model=Card)
 def read_card(card_id: int, user: CurrentUser, db: Db):
-    return own_card(db, user.id, card_id, _COLUMNS)
+    return summarize(db, user.id, [own_card(db, user.id, card_id, CARD_COLUMNS)])[0]
 
 
-_MESSAGE_COLUMNS = "id, card_id, external_id, sender, body, sent_at, handover"
+_MESSAGE_COLUMNS = "id, card_id, external_id, sender, body, sent_at, handover, sent_by_autopilot"
 
 
 class Message(BaseModel):
@@ -262,6 +382,8 @@ class Message(BaseModel):
     sent_at: datetime
     # The handover checks an incoming message hit (see `app/jev.py`); null when it was not checked.
     handover: list[str] | None
+    # Autopilot sent it alone; false for the user's own messages, including drafts they sent.
+    sent_by_autopilot: bool
 
 
 class NewMessage(BaseModel):
@@ -281,23 +403,27 @@ def insert_message(
     sent_at: datetime | str | None = None,
     *,
     skip_duplicate: bool = False,
+    sent_by_autopilot: bool = False,
 ) -> dict | None:
     """Store one message on the user's card and run everything a new message sets off. Every message is
     stored through this function, so those effects are in one place:
 
-    - from `me`: the style profile is rewritten from the user's own messages, and a pending handover ends;
+    - from either side: autopilot's planned send to the match is dropped;
+    - from `me`: the style profile is rewritten from the user's own messages, a pending handover ends, and the
+      card's copied drafts older than the message are `sent`;
     - from `them`: Stalled is cleared, the handover trigger runs, and chat autopilot is asked to reply.
 
     Returns the stored message, or None when the user has no such card. `sent_at` defaults to now. A message
     whose `external_id` the card already has raises `IntegrityError`; with `skip_duplicate` it is left alone
-    and None is returned.
+    and None is returned. `sent_by_autopilot` marks a message autopilot sent alone.
     """
     # Selecting from the user's cards means a card they do not own inserts nothing.
     row = db.execute(
         text(
             f"""
-            INSERT INTO messages (user_id, card_id, external_id, sender, body, sent_at)
-            SELECT user_id, id, :external_id, :sender, :body, COALESCE(CAST(:sent_at AS timestamptz), now())
+            INSERT INTO messages (user_id, card_id, external_id, sender, body, sent_at, sent_by_autopilot)
+            SELECT user_id, id, :external_id, :sender, :body, COALESCE(CAST(:sent_at AS timestamptz), now()),
+                :sent_by_autopilot
             FROM cards WHERE id = :card_id AND user_id = :user_id
             {"ON CONFLICT (card_id, external_id) DO NOTHING" if skip_duplicate else ""}
             RETURNING {_MESSAGE_COLUMNS}
@@ -310,13 +436,26 @@ def insert_message(
             "sender": sender,
             "body": body,
             "sent_at": sent_at,
+            "sent_by_autopilot": sent_by_autopilot,
         },
     ).one_or_none()
     if not row:
         return None
+    from app.send import drop_planned_sends  # imported here: app.send imports this module
+
+    # Autopilot's planned send now answers an old message, or crosses the user's own: the reply job plans anew.
+    drop_planned_sends(db, user_id, card_id)
     if sender == "me":
         queue_profile(db, user_id)
         handover.answered(db, user_id, card_id)
+        # The user pasted what they copied: a copied draft older than this message is sent (ADR 0003).
+        db.execute(
+            text(
+                "UPDATE drafts SET status = 'sent', updated_at = now()"
+                " WHERE card_id = :card_id AND user_id = :user_id AND status = 'copied' AND copied_at < :sent_at"
+            ),
+            {"card_id": card_id, "user_id": user_id, "sent_at": row.sent_at},
+        )
         return dict(row._mapping)
     # A reply clears Stalled. If it was an old message added late, the next `mark_stalled` run sets the flag again.
     db.execute(
@@ -345,7 +484,7 @@ def add_message(card_id: int, message: NewMessage, user: CurrentUser, db: Db):
 
 @router.get("/cards/{card_id}/messages", response_model=list[Message])
 def list_messages(card_id: int, user: CurrentUser, db: Db):
-    read_card(card_id, user, db)  # 404 unless the card is the caller's
+    own_card(db, user.id, card_id)  # 404 unless the card is the caller's
     return db.execute(
         text(
             f"""

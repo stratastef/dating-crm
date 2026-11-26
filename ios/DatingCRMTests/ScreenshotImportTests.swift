@@ -5,7 +5,7 @@ import UIKit
 
 struct ScreenshotImportTests {
     let server = StubServer()
-    let draftJSON = #"{"id": 5, "card_id": 1, "kind": "reply", "status": "pending", "original": "both. badly.", "edited": null}"#
+    let draftJSON = #"{"id": 5, "card_id": 1, "kind": "reply", "status": "pending", "original": "both. badly.", "edited": null, "sendable": false}"#
 
     /// A real picture, as the share sheet hands one over.
     private var png: Data {

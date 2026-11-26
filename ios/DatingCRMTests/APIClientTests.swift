@@ -8,23 +8,93 @@ struct APIClientTests {
     @Test func listsTheUsersCardsWithTheBearerToken() async throws {
         server.respond("""
         [{"id": 1, "app": "tinder", "external_id": null, "name": "Ada", "stage": "number_swapped",
-          "stage_changed_at": "2026-11-20T10:00:00.123456Z", "notes": "Climbs", "next_action": "Call",
-          "due_date": "2026-12-01", "created_at": "2026-11-19T09:00:00Z"},
+          "stage_changed_at": "2026-11-20T10:00:00Z", "notes": "Climbs", "next_action": "Call",
+          "due_date": "2026-12-01", "created_at": "2026-11-19T09:00:00Z", "stalled": false, "hot": false},
          {"id": 2, "app": "hinge", "external_id": "h1", "name": "Bea", "stage": "matched",
           "stage_changed_at": "2026-11-20T10:00:00Z", "notes": "", "next_action": null,
-          "due_date": null, "created_at": "2026-11-19T09:00:00Z"}]
+          "due_date": null, "created_at": "2026-11-19T09:00:00Z", "stalled": false, "hot": false}]
         """)
 
         let cards = try await server.client().cards()
 
+        let changed = Date(timeIntervalSince1970: 1_795_168_800)
+        let created = Date(timeIntervalSince1970: 1_795_078_800)
         #expect(cards == [
-            Card(id: 1, app: "tinder", name: "Ada", stage: .numberSwapped, notes: "Climbs", nextAction: "Call", dueDate: day(2026, 12, 1)),
-            Card(id: 2, app: "hinge", name: "Bea", stage: .matched, notes: "", nextAction: nil, dueDate: nil),
+            Card(id: 1, app: "tinder", name: "Ada", stage: .numberSwapped, notes: "Climbs", nextAction: "Call", dueDate: day(2026, 12, 1), stageChangedAt: changed, createdAt: created),
+            Card(id: 2, app: "hinge", name: "Bea", stage: .matched, notes: "", nextAction: nil, dueDate: nil, stageChangedAt: changed, createdAt: created),
         ])
         let request = try #require(server.requests.first)
         #expect(request.httpMethod == "GET")
         #expect(request.url?.absoluteString == "https://crm.test/cards")
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer secret")
+    }
+
+    @Test func decodesTheCardSummaryARowShows() async throws {
+        server.respond("""
+        [{"id": 1, "app": "tinder", "name": "Ada", "stage": "chatting", "notes": "",
+          "stage_changed_at": "2026-11-19T09:00:00Z", "stalled": true, "hot": true,
+          "last_message": {"sender": "them", "body": "saturday?", "sent_at": "2026-11-20T10:00:00Z"},
+          "pending_draft": {"id": 5, "card_id": 1, "kind": "reply", "status": "pending", "original": "yes!", "edited": null,
+                            "guardrail": [], "hot_lead": true, "sendable": true},
+          "lead_photo_url": "https://photos.test/ada.jpg"},
+         {"id": 2, "app": "hinge", "name": "Bea", "stage": "matched", "notes": "",
+          "stage_changed_at": "2026-11-19T09:00:00Z", "stalled": false, "hot": false,
+          "last_message": null, "pending_draft": null, "lead_photo_url": null}]
+        """)
+
+        let cards = try await server.client().cards()
+
+        #expect(cards[0].stalled && cards[0].hot)
+        #expect(cards[0].lastMessage == LastMessage(sender: .them, body: "saturday?", sentAt: Date(timeIntervalSince1970: 1_795_168_800)))
+        #expect(cards[0].pendingDraft == Draft(id: 5, kind: .reply, original: "yes!", edited: nil, guardrail: [], sendable: true))
+        #expect(cards[0].leadPhotoUrl == URL(string: "https://photos.test/ada.jpg"))
+        #expect(!cards[1].stalled && !cards[1].hot)
+        #expect(cards[1].lastMessage == nil && cards[1].pendingDraft == nil && cards[1].leadPhotoUrl == nil)
+        // The row's time: the last message, or the last stage change when there are none.
+        #expect(cards[0].lastActivity == Date(timeIntervalSince1970: 1_795_168_800))
+        #expect(cards[1].lastActivity == Date(timeIntervalSince1970: 1_795_078_800))
+    }
+
+    @Test func addsACardByHand() async throws {
+        server.respond(
+            #"{"id": 9, "app": "feeld", "name": "Ada", "stage": "chatting", "notes": "", "stalled": false, "hot": false}"#,
+            status: 201
+        )
+
+        let card = try await server.client().addCard(name: "Ada", app: "feeld", stage: .chatting)
+
+        #expect(card == Card(id: 9, app: "feeld", name: "Ada", stage: .chatting, notes: ""))
+        let request = try #require(server.requests.first)
+        #expect(request.httpMethod == "POST")
+        #expect(request.url?.absoluteString == "https://crm.test/cards")
+        #expect(try sentJSON(request) == ["name": "Ada", "app": "feeld", "stage": "chatting"] as NSDictionary)
+    }
+
+    @Test func readsThePipelineGroupedByWhoActsNext() async throws {
+        server.respond("""
+        [{"group": "waiting_for_you", "cards": [
+           {"id": 1, "app": "tinder", "name": "Ada", "stage": "chatting", "notes": "", "stalled": false, "hot": true,
+            "pipeline_group": "waiting_for_you", "reason": "handover", "handover_trigger": "logistics",
+            "autopilot_activity": null}]},
+         {"group": "handled_by_autopilot", "cards": [
+           {"id": 2, "app": "tinder", "name": "Bea", "stage": "matched", "notes": "", "stalled": false, "hot": false,
+            "pipeline_group": "handled_by_autopilot", "reason": null, "handover_trigger": null,
+            "autopilot_activity": "drafting_reply", "topic": "museums"}]}]
+        """)
+
+        let groups = try await server.client().pipeline()
+
+        #expect(groups.map(\.group) == ["waiting_for_you", "handled_by_autopilot"])
+        #expect(groups.map(\.title) == ["Waiting for you", "Handled by autopilot"])
+        let ada = try #require(groups.first?.cards.first)
+        #expect((ada.pipelineGroup, ada.reason, ada.handoverTrigger) == ("waiting_for_you", "handover", "logistics"))
+        let bea = try #require(groups.last?.cards.first)
+        #expect((bea.pipelineGroup, bea.reason, bea.autopilotActivity) == ("handled_by_autopilot", nil, "drafting_reply"))
+        #expect(bea.topic == "museums")
+        let request = try #require(server.requests.first)
+        #expect(request.httpMethod == "GET")
+        #expect(request.url?.absoluteString == "https://crm.test/pipeline")
+        #expect(request.httpBody == nil)
     }
 
     @Test func boardStagesAreTheServersSevenInPipelineOrder() {
@@ -35,19 +105,44 @@ struct APIClientTests {
 
     @Test func listsACardsMessages() async throws {
         server.respond("""
-        [{"id": 7, "card_id": 1, "external_id": null, "sender": "them", "body": "Hi!", "sent_at": "2026-11-20T10:00:00Z"},
-         {"id": 8, "card_id": 1, "external_id": null, "sender": "me", "body": "Hey", "sent_at": "2026-11-20T10:05:00Z"}]
+        [{"id": 7, "card_id": 1, "external_id": null, "sender": "them", "body": "Hi!", "sent_at": "2026-11-20T10:00:00Z",
+          "handover": [], "sent_by_autopilot": false},
+         {"id": 8, "card_id": 1, "external_id": null, "sender": "me", "body": "Hey", "sent_at": "2026-11-20T10:05:00Z",
+          "handover": null, "sent_by_autopilot": false}]
         """)
 
         let messages = try await server.client().messages(cardID: 1)
 
-        #expect(messages == [Message(id: 7, sender: .them, body: "Hi!"), Message(id: 8, sender: .me, body: "Hey")])
+        #expect(messages == [
+            Message(id: 7, sender: .them, body: "Hi!", sentAt: Date(timeIntervalSince1970: 1_795_168_800), handover: []),
+            Message(id: 8, sender: .me, body: "Hey", sentAt: Date(timeIntervalSince1970: 1_795_169_100)),
+        ])
         #expect(server.requests.first?.url?.absoluteString == "https://crm.test/cards/1/messages")
+    }
+
+    @Test func decodesFullTimestampsAndPlainDays() async throws {
+        // The server sends timestamps with microseconds and either `Z` or an offset, and due dates as plain days.
+        server.respond("""
+        [{"id": 7, "card_id": 1, "external_id": null, "sender": "them", "body": "Hi!", "sent_at": "2026-11-20T10:00:00.123456Z",
+          "sent_by_autopilot": false},
+         {"id": 8, "card_id": 1, "external_id": null, "sender": "me", "body": "Hey", "sent_at": "2026-11-20T11:05:00+01:00",
+          "sent_by_autopilot": false}]
+        """)
+        server.respond(cardJSON(stage: "chatting", nextAction: "null", dueDate: "\"2026-12-01\""))
+
+        let messages = try await server.client().messages(cardID: 1)
+        let card = try await server.client().card(id: 1)
+
+        #expect(abs(messages[0].sentAt.timeIntervalSince1970 - 1_795_168_800.123) < 0.001)
+        #expect(messages[1].sentAt == Date(timeIntervalSince1970: 1_795_169_100))
+        #expect(card.dueDate == day(2026, 12, 1))
     }
 
     @Test func savesStageNotesNextActionAndDueDate() async throws {
         server.respond(cardJSON(stage: "date_set", nextAction: "\"Book table\"", dueDate: "\"2026-12-05\""))
-        let edited = Card(id: 1, app: "tinder", name: "Ada", stage: .dateSet, notes: "Climbs", nextAction: "Book table", dueDate: day(2026, 12, 5))
+        let edited = Card(
+            id: 1, app: "tinder", name: "Ada", stage: .dateSet, notes: "Climbs", nextAction: "Book table", dueDate: day(2026, 12, 5),
+            stageChangedAt: Date(timeIntervalSince1970: 1_795_168_800), createdAt: Date(timeIntervalSince1970: 1_795_078_800))
 
         let saved = try await server.client().update(edited)
 
@@ -75,13 +170,13 @@ struct APIClientTests {
 
     @Test func asksForADraftOnACard() async throws {
         server.respond(
-            #"{"id": 5, "card_id": 1, "kind": "opener", "status": "pending", "original": "is biscuit accepting visitors", "edited": null}"#,
+            #"{"id": 5, "card_id": 1, "kind": "opener", "status": "pending", "original": "is biscuit accepting visitors", "edited": null, "sendable": true}"#,
             status: 201
         )
 
         let draft = try await server.client().writeDraft(cardID: 1)
 
-        #expect(draft == Draft(id: 5, kind: .opener, original: "is biscuit accepting visitors", edited: nil))
+        #expect(draft == Draft(id: 5, kind: .opener, original: "is biscuit accepting visitors", edited: nil, sendable: true))
         #expect(draft.text == "is biscuit accepting visitors")
         let request = try #require(server.requests.first)
         #expect(request.httpMethod == "POST")
@@ -90,7 +185,7 @@ struct APIClientTests {
 
     @Test func savesTheUsersEditOfADraft() async throws {
         server.respond(
-            #"{"id": 5, "card_id": 1, "kind": "reply", "status": "pending", "original": "both. badly.", "edited": "both, badly"}"#
+            #"{"id": 5, "card_id": 1, "kind": "reply", "status": "pending", "original": "both. badly.", "edited": "both, badly", "sendable": false}"#
         )
 
         let draft = try await server.client().saveEdit(draftID: 5, text: "both, badly")
@@ -106,7 +201,7 @@ struct APIClientTests {
     @Test func savesTheDateRatingAndNote() async throws {
         server.respond("""
         {"id": 1, "app": "tinder", "name": "Ada", "stage": "dated", "notes": "Climbs", "next_action": null,
-         "due_date": null, "date_rating": 4, "date_note": "Easy to talk to", "good_date": true}
+         "due_date": null, "date_rating": 4, "date_note": "Easy to talk to", "good_date": true, "stalled": false, "hot": false}
         """)
         var rated = Card(id: 1, app: "tinder", name: "Ada", stage: .dated, notes: "Climbs")
         rated.dateRating = 4
@@ -144,7 +239,7 @@ struct APIClientTests {
         """
         {"id": 1, "app": "tinder", "external_id": null, "name": "Ada", "stage": "\(stage)",
          "stage_changed_at": "2026-11-20T10:00:00Z", "notes": "Climbs", "next_action": \(nextAction),
-         "due_date": \(dueDate), "created_at": "2026-11-19T09:00:00Z"}
+         "due_date": \(dueDate), "created_at": "2026-11-19T09:00:00Z", "stalled": false, "hot": false}
         """
     }
 

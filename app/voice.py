@@ -14,11 +14,24 @@ from app.jobs import enqueue, handler
 router = APIRouter()
 
 
+# The voice questionnaire. The app renders these, so a change here reaches the phone without a release.
+# Answers are keyed by the question's text: reword a question and its old answer stays, under the old text.
+QUESTIONS = [
+    "How do you usually open a chat with a new match?",
+    "Describe how you text in a few words: funny, warm, dry, flirty?",
+    "Do you send short messages or longer ones?",
+    "Do you use emoji, capital letters and full punctuation?",
+    "How do you ask someone out?",
+    "What would you never say in a chat?",
+]
+
+
 class Questionnaire(BaseModel):
     answers: dict[str, str]  # question -> answer
 
 
 class Voice(BaseModel):
+    questions: list[str] = QUESTIONS
     answers: dict[str, str]
     profile: str | None  # null until the worker has generated it
 

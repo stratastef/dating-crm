@@ -93,12 +93,12 @@ def incoming(db: Connection, user_id: int, card_id: int, message_id: int, body: 
     hits = jev.record_handover(db, user_id, message_id, body)
     if not hits:
         return hits
-    # Full mode coordinates a time alone (see `app/chat_autopilot.py`), so logistics alone do not hand over
-    # while it may act. Every other trigger does, in every mode: a place or exclusivity is its own hit.
+    # Full autopilot coordinates a time alone (see `app/chat_autopilot.py`), so logistics alone do not hand over
+    # while it may act. Every other trigger does, at every level: a place or exclusivity is its own hit.
     app = db.execute(
         text("SELECT app FROM cards WHERE id = :id AND user_id = :user_id"), {"id": card_id, "user_id": user_id}
     ).scalar_one()
-    full = autonomy_levels(db, user_id)["chat"] == "full" and autopilot_allowed(db, user_id, app, "chat")
+    full = autonomy_levels(db, user_id)["chat"] == "full_autopilot" and autopilot_allowed(db, user_id, app, "chat")
     if full and hits == ["logistics"]:
         return hits
     name = db.execute(

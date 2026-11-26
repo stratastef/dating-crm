@@ -1,25 +1,26 @@
 import SwiftUI
 
-/// Asks for a 1–5 rating and a short note when a card reaches Dated.
+/// Asks for the date's rating and a short note. It opens from the card on reaching Dated, from Today's dates to rate
+/// and from the Pipeline's "Rate the date" rows. Nothing is selected at first, so Save waits for a real choice.
 struct DateRatingSheet: View {
     let name: String
     let onRated: (Int, String) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var rating = 3
+    @State private var rating: Int?
     @State private var note = ""
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("How was the date with \(name)?") {
-                    Picker("Rating", selection: $rating) {
-                        ForEach(1...5, id: \.self) { Text("\($0)").tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    TextField("Short note", text: $note, axis: .vertical)
+            List {
+                RatingPicker(title: "How was the date with \(name)?", rating: $rating)
+                Section {
+                    GrowingField(label: "Note", prompt: "What stood out", text: $note)
+                } header: {
+                    Text("Note").foregroundStyle(Color.primary)
                 }
             }
+            .scrollDismissesKeyboard(.immediately)
             .navigationTitle("Rate the date")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -28,12 +29,12 @@ struct DateRatingSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        onRated(rating, note)
+                        if let rating { onRated(rating, note) }
                         dismiss()
                     }
+                    .disabled(rating == nil)
                 }
             }
         }
-        .presentationDetents([.medium])
     }
 }

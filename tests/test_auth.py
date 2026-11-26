@@ -60,12 +60,13 @@ def test_one_user_cannot_read_another_users_rows(notes_app, client_for):
 
 
 def test_every_table_except_users_carries_a_user_id(app):
+    # Invite codes belong to no user: one creates a user.
     with app.state.engine.connect() as connection:
         missing = connection.execute(
             text(
                 """
                 SELECT table_name FROM information_schema.tables t
-                WHERE table_schema = 'public' AND table_name NOT IN ('users', 'alembic_version')
+                WHERE table_schema = 'public' AND table_name NOT IN ('users', 'alembic_version', 'invite_codes')
                   AND NOT EXISTS (
                     SELECT 1 FROM information_schema.columns c
                     WHERE c.table_schema = t.table_schema AND c.table_name = t.table_name

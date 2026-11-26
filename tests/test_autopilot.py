@@ -1,3 +1,6 @@
+import subprocess
+import sys
+
 import pytest
 from sqlalchemy import text
 
@@ -11,16 +14,43 @@ def test_autonomy_defaults_to_copilot_with_swipe_off(client):
 def test_user_sets_autonomy_for_one_job(client, client_for):
     other = client_for("other@example.com")
 
-    assert client.put("/autonomy/swipe", json={"level": "guardrails"}).status_code == 200
-    client.put("/autonomy/swipe", json={"level": "full"})
+    assert client.put("/autonomy/swipe", json={"level": "autopilot"}).status_code == 200
+    client.put("/autonomy/swipe", json={"level": "full_autopilot"})
 
-    assert client.get("/autonomy").json() == {"chat": "copilot", "profile": "copilot", "swipe": "full"}
+    assert client.get("/autonomy").json() == {"chat": "copilot", "profile": "copilot", "swipe": "full_autopilot"}
     assert other.get("/autonomy").json()["swipe"] == "off"
 
 
-def test_unknown_job_or_level_is_rejected(client):
-    assert client.put("/autonomy/dance", json={"level": "full"}).status_code == 422
-    assert client.put("/autonomy/chat", json={"level": "yolo"}).status_code == 422
+def test_autonomy_accepts_only_off_copilot_autopilot_and_full_autopilot(client):
+    for level in ["off", "copilot", "autopilot", "full_autopilot"]:
+        assert client.put("/autonomy/chat", json={"level": level}).json()["chat"] == level
+    for level in ["guardrails", "full", "yolo"]:  # the first two are the old names of autopilot and full autopilot
+        assert client.put("/autonomy/chat", json={"level": level}).status_code == 422
+    assert client.get("/autonomy").json()["chat"] == "full_autopilot"
+
+
+def test_unknown_job_is_rejected(client):
+    assert client.put("/autonomy/dance", json={"level": "full_autopilot"}).status_code == 422
+
+
+def alembic(*args: str) -> None:
+    subprocess.run([sys.executable, "-m", "alembic", *args], check=True)
+
+
+def test_existing_users_guardrails_becomes_autopilot_and_full_becomes_full_autopilot(client, app):
+    alembic("downgrade", "t46_autonomy_levels-1")  # back to the old level names
+    try:
+        with app.state.engine.begin() as db:
+            db.execute(
+                text(
+                    "INSERT INTO autonomy_settings (user_id, job, level)"
+                    " SELECT id, job, level FROM users, (VALUES ('chat', 'guardrails'), ('swipe', 'full')) AS v(job, level)"
+                )
+            )
+    finally:
+        alembic("upgrade", "head")
+
+    assert client.get("/autonomy").json() == {"chat": "autopilot", "profile": "copilot", "swipe": "full_autopilot"}
 
 
 def test_user_pauses_and_resumes_all_autopilot_or_one_app(client, client_for):
@@ -56,7 +86,7 @@ def swipe_job(client, app):
 
 
 def test_worker_skips_autopilot_jobs_for_a_paused_app_and_records_why(client, app, swipe_job):
-    client.put("/autonomy/swipe", json={"level": "full"})
+    client.put("/autonomy/swipe", json={"level": "full_autopilot"})
     client.post("/autopilot/pause", params={"app": "tinder"})
     tinder, hinge = swipe_job("tinder"), swipe_job("hinge")
 
@@ -71,7 +101,7 @@ def test_worker_skips_autopilot_jobs_for_a_paused_app_and_records_why(client, ap
 
 
 def test_worker_skips_every_autopilot_job_while_all_apps_are_paused(client, app, swipe_job):
-    client.put("/autonomy/swipe", json={"level": "full"})
+    client.put("/autonomy/swipe", json={"level": "full_autopilot"})
     client.post("/autopilot/pause")
     paused = swipe_job("hinge")
     ping = client.post("/jobs/ping").json()["id"]

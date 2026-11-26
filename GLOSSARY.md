@@ -51,12 +51,16 @@ A draft the user copied that does not yet appear in the chat. It stays in view u
 _Avoid_: Approved draft
 
 **Send time**:
-When a draft goes out. For autopilot it is planned from the conversation; for the user's own drafts it is suggested and can be scheduled.
+When a draft goes out. For autopilot it is planned from the conversation, or for an opener at a random time 30 minutes to 6 hours after the match; for the user's own drafts it is suggested and can be scheduled.
 _Avoid_: Delay, schedule (alone)
 
 **Planned send**:
 A draft autopilot will send alone at its send time. The user sees it with its reason and can send it now or hold it, which moves it to Review.
 _Avoid_: Queued message
+
+**Scheduled send**:
+A draft of the user's that goes out at a send time they chose (Send at), as given, with no five-second Undo. They can cancel it until it goes out, which makes it a pending draft again.
+_Avoid_: Planned send (that is autopilot's)
 
 **Live**:
 A match who sent a message in the last five minutes.
@@ -142,6 +146,10 @@ One claim in a match read, with its evidence and confidence. The user can correc
 A profile the app found for the user to like or pass, with the AI's suggestion and its reason.
 _Avoid_: Profile
 
+**Swipe layout**:
+How the Swipe tab shows swipe candidates, as the user chose: one at a time, or a list. One at a time until they choose.
+_Avoid_: View mode
+
 ### Connecting apps
 
 **Connector**:
@@ -165,11 +173,11 @@ The screen that shows every card, grouped by who acts next: waiting for you, han
 _Avoid_: Board
 
 **Waiting for you**:
-A card blocked on the user: a pending handover, a draft in Review, a copied draft not yet sent, a Stalled card, an overdue next action, or a Dated card with no rating. A next action due today does not count until it is overdue.
+A card blocked on the user: a pending handover, a draft in Review, a copied draft not yet sent, a failed send, a Stalled card, an overdue next action, a Dated card with no rating, a match's message autopilot is not answering, or a new match autopilot is not writing to. A next action due today does not count until it is overdue. An Archived card waits for the user too while one of these applies.
 _Avoid_: Needs you, due
 
 **Handled by autopilot**:
-A Matched or Chatting card that autopilot can act on now: chat autonomy is Autopilot or Full autopilot, the app's connector works, nothing is paused and the AI budget is not reached.
+A Matched or Chatting card that autopilot can act on now: chat autonomy is Autopilot or Full autopilot, the app's connector works, the card is linked to its match and has no handover, nothing is paused and the AI budget is not reached.
 
 **Waiting for them**:
 A Matched or Chatting card where the match owes a reply and autopilot cannot act on it.

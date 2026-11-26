@@ -21,13 +21,14 @@ def paid_items(client) -> list[dict]:
 
 
 def test_autopilot_proposes_a_super_like_in_the_review_queue_and_spends_nothing(signed_in, tinder, autopilot, llm):
-    signed_in.put("/autonomy/swipe", json={"level": "full"})
+    signed_in.put("/autonomy/swipe", json={"level": "full_autopilot"})
     llm.replies = ["super like\nShe climbs and wants kids."]  # Eve; Dana is Jev's pass and Fay a plain like
 
     assert autopilot()["status"] == "done"
 
     [item] = paid_items(signed_in)
     assert (item["card_name"], item["hot"], item["card_id"]) == ("Eve", False, None)
+    eve = signed_in.get("/people/candidates?q=Eve").json()[0]
     assert item["paid_item"] == {
         "id": item["paid_item"]["id"],
         "app": "tinder",
@@ -35,6 +36,9 @@ def test_autopilot_proposes_a_super_like_in_the_review_queue_and_spends_nothing(
         "name": "Eve",
         "reason": "She climbs and wants kids.",
         "status": "pending",
+        "candidate_id": eve["id"],
+        "photo_url": f"https://images-ssl.gotinder.com/{EVE}/p-e5-1.jpg",
+        "cost": None,  # Tinder reports none
     }
     # Autopilot waits: Eve is neither super liked nor liked, and nothing about her is in the audit log.
     assert not any(EVE in call for call in tinder.calls())
@@ -87,7 +91,7 @@ def test_a_declined_super_like_is_never_spent_and_autopilot_then_likes_for_free(
     assert response.status_code == 200 and response.json()["status"] == "declined"
     assert paid_items(signed_in) == []
     assert answer(signed_in, proposed, "approve").status_code == 409
-    signed_in.put("/autonomy/swipe", json={"level": "full"})
+    signed_in.put("/autonomy/swipe", json={"level": "full_autopilot"})
     autopilot()
     assert f"GET /like/{EVE}" in tinder.calls()
     assert not any(call.startswith("POST") for call in tinder.calls())
@@ -143,6 +147,27 @@ def test_an_approved_boost_is_spent_and_logged(app, signed_in, tinder):
     assert tinder.calls() == ["POST /boost"]
     [entry] = signed_in.get("/audit-log?type=boost").json()
     assert (entry["app"], entry["target"]) == ("tinder", "account")
+    assert (item["paid_item"]["candidate_id"], item["paid_item"]["photo_url"]) == (None, None)  # spent on nobody
+
+
+def test_a_paid_item_carries_the_candidates_photo_and_link_and_the_cost_the_connector_reported(
+    signed_in, tinder, llm, monkeypatch
+):
+    read = TinderConnector.read_candidates
+    monkeypatch.setattr(
+        TinderConnector,
+        "read_candidates",
+        lambda self, token: [{**profile, "cost": "$1.99"} for profile in read(self, token)],
+    )
+    llm.replies = ["pass\nNothing in common.", "super like\nShe climbs and wants kids."]  # Dana, then Eve
+
+    signed_in.post("/swipes/tinder/suggestions")
+
+    [item] = paid_items(signed_in)
+    eve = signed_in.get("/people/candidates?q=Eve").json()[0]
+    assert item["paid_item"]["candidate_id"] == eve["id"]
+    assert item["paid_item"]["photo_url"] == f"https://images-ssl.gotinder.com/{EVE}/p-e5-1.jpg"
+    assert item["paid_item"]["cost"] == "$1.99"
 
 
 def test_an_item_no_connector_can_spend_is_not_proposed(app, signed_in, tinder, monkeypatch, llm):

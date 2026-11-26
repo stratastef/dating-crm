@@ -162,3 +162,45 @@ def test_an_edit_that_is_not_light_is_refused_with_the_ranking(client, llm):
 def test_ranking_needs_at_least_one_photo(client, llm):
     assert client.post("/photos/rank").status_code == 409
     assert llm.prompts == []
+
+
+def test_a_deleted_photo_is_gone_from_the_users_photos(client, client_for, photos_dir):
+    kept = upload(client, png(red_and_blue())).json()
+    deleted = upload(client, png(Image.new("RGB", (10, 10), "green"))).json()["id"]
+    other = client_for("bob@example.com")
+
+    assert other.delete(f"/photos/{deleted}").status_code == 404  # only the owner deletes
+
+    assert client.delete(f"/photos/{deleted}").status_code == 204
+    assert client.get("/photos").json() == [kept]
+    assert client.get(f"/photos/{deleted}/image").status_code == 404
+    assert client.delete(f"/photos/{deleted}").status_code == 404
+    assert not any(path.name == str(deleted) for path in photos_dir.rglob("*"))  # the file is gone too
+
+
+def test_the_order_the_user_sets_is_the_order_returned(client, llm):
+    first, second, third = (upload(client, png(red_and_blue())).json()["id"] for _ in range(3))
+    llm.reply = json.dumps([{"id": id, "reason": f"Reason {id}."} for id in [first, second, third]])
+    client.post("/photos/rank")
+
+    ordered = client.put("/photos/order", json={"ids": [third, first, second]})
+
+    assert ordered.status_code == 200
+    assert [(photo["id"], photo["rank"], photo["reason"]) for photo in ordered.json()] == [
+        (third, 1, f"Reason {third}."),
+        (first, 2, f"Reason {first}."),
+        (second, 3, f"Reason {second}."),
+    ]
+    assert client.get("/photos").json() == ordered.json()
+    added = upload(client, png(red_and_blue())).json()["id"]
+    assert [photo["id"] for photo in client.get("/photos").json()] == [third, first, second, added]
+
+
+def test_an_order_that_does_not_name_exactly_the_users_photos_is_refused(client, client_for):
+    mine = [upload(client, png(red_and_blue())).json()["id"] for _ in range(2)]
+    theirs = upload(client_for("bob@example.com"), png(red_and_blue())).json()["id"]
+    before = client.get("/photos").json()
+
+    for ids in [mine[:1], [*mine, mine[0]], [mine[1], theirs], [*mine, theirs]]:
+        assert client.put("/photos/order", json={"ids": ids}).status_code == 422
+    assert client.get("/photos").json() == before

@@ -1,7 +1,7 @@
 import json
 
 from app.jev import JevUnavailable
-from tests.test_drafts import write_profile
+from tests.test_drafts import drafted, write_profile
 
 
 def inference(kind, value, **changes):
@@ -56,6 +56,7 @@ def test_a_read_stores_each_inference_with_its_evidence_and_confidence(client, l
             "evidence": "'come climb with us'",
             "confidence": 0.9,
             "corrected": None,
+            "confidence_word": "Sure",
         },
         {
             "id": stored[1]["id"],
@@ -65,11 +66,35 @@ def test_a_read_stores_each_inference_with_its_evidence_and_confidence(client, l
             "evidence": "double exclamation marks",
             "confidence": 0.6,
             "corrected": None,
+            "confidence_word": "Likely",
         },
     ]
     prompt = llm.prompts[-1]
     assert "Has a dog called Biscuit" in prompt and "them: biscuit says hi!! come climb with us" in prompt
     assert llm.images[-1] == []  # no photos on the card: the read is from text only
+
+
+def test_an_inference_is_sure_from_0_8_likely_from_0_5_and_otherwise_a_guess(client, llm):
+    card_id = new_card(client)
+    read(
+        client,
+        llm,
+        card_id,
+        [
+            inference("texting_style", "short", confidence=0.8),
+            inference("interests", "climbing", confidence=0.79),
+            inference("values", "family", confidence=0.5),
+            inference("tone", "playful", confidence=0.49),
+        ],
+    )
+
+    stored = client.get(f"/cards/{card_id}/read").json()
+    assert [(row["confidence"], row["confidence_word"]) for row in stored] == [
+        (0.8, "Sure"),
+        (0.79, "Likely"),
+        (0.5, "Likely"),
+        (0.49, "Guess"),
+    ]
 
 
 def test_a_correction_overrides_the_inference_and_survives_the_next_read(client_for, llm):
@@ -203,7 +228,7 @@ def test_a_draft_that_plays_on_an_insecurity_hits_the_guardrail(app, client, llm
     card_id = new_card(client)
     jev.yes["plays_on_insecurity"] = ["nobody else"]
 
-    llm.reply = "nobody else will put up with you"
+    llm.reply = drafted("nobody else will put up with you")
     draft = client.post(f"/cards/{card_id}/drafts").json()
 
     assert draft["guardrail"] == ["plays_on_insecurity"]
@@ -244,7 +269,7 @@ def test_a_draft_takes_its_tone_from_the_read_and_from_the_users_correction_of_i
     card_id = new_card(client)
     tone = read(client, llm, card_id, [inference("tone", "bold"), inference("interests", "climbing")]).json()[0]
 
-    llm.reply = "race you up the wall"
+    llm.reply = drafted("race you up the wall")
     client.post(f"/cards/{card_id}/drafts")
     assert "tone: bold" in llm.prompts[-1] and "interests: climbing" in llm.prompts[-1]
     assert "tone" in llm.systems[-1]
@@ -265,7 +290,7 @@ def test_a_draft_never_sees_an_inference_the_read_dropped(app, client, llm):
         [inference("values", "ashamed of her job", targets_insecurity=True), inference("religion", "Catholic")],
     )
 
-    llm.reply = "hi"
+    llm.reply = drafted("hi")
     client.post(f"/cards/{card_id}/drafts")
 
     assert "ashamed" not in llm.prompts[-1] and "Catholic" not in llm.prompts[-1]

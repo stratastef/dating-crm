@@ -10,6 +10,8 @@ A rule from the spec that protects a match or the user (handover, guardrail, pro
 - **One test per rule**, named after the rule, that goes red when the enforcement is removed.
 - **Checked independently.** A model's label on its own output (`protected_trait: false`) is a claim. A second check that never saw that label decides.
 - **Fail closed.** When a classifier, a connector or a budget lookup cannot answer, the action stops and the user is asked. Unattended sending, swiping and spending all stop.
+- **Fakes are opt-in.** A fake for an external service runs only when configuration names it (`SMS_PROVIDER=log`). With nothing configured, the service fails closed.
+- **Checked when it runs.** A bound on an unattended action (night window, pause, budget, handover) is checked again at the moment the action runs, not only when it is planned: settings change in between.
 - **One gate per action.** Each unattended action has a single function every caller goes through (`queue_send`, `apply_decision`, `paid_items.spend`). A second path to the same action is a defect.
 
 ## Consistency across modules

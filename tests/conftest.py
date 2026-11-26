@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import sys
 import uuid
@@ -205,4 +206,27 @@ def jev(monkeypatch):
     """Every test gets the stub, so no test can call Jev."""
     stub = StubJev()
     monkeypatch.setattr("app.jev.ask", stub)
+    return stub
+
+
+class StubSms:
+    """Stands in for `app.sms.send`, the one function that texts a phone. `sent` records each `(phone, body)`."""
+
+    def __init__(self):
+        self.sent: list[tuple[str, str]] = []
+
+    def __call__(self, phone: str, body: str) -> None:
+        self.sent.append((phone, body))
+
+    def code(self, phone: str) -> str:
+        """The six-digit code in the last text to `phone`."""
+        body = next(body for to, body in reversed(self.sent) if to == phone)
+        return re.search(r"\b\d{6}\b", body)[0]  # pyright: ignore[reportOptionalSubscript]
+
+
+@pytest.fixture(autouse=True)
+def sms(monkeypatch):
+    """Every test gets the stub, so no test can text a phone."""
+    stub = StubSms()
+    monkeypatch.setattr("app.sms.send", stub)
     return stub

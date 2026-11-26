@@ -30,13 +30,13 @@ class Device(BaseModel):
 
 @router.post("/devices", status_code=204)
 def register_device(device: Device, user: CurrentUser, db: Db) -> None:
-    # A phone belongs to whoever signed in on it last.
+    # A phone belongs to whoever signed in on it last, until that API token signs out.
     db.execute(
         text(
-            "INSERT INTO devices (user_id, token) VALUES (:user_id, :token) "
-            "ON CONFLICT (token) DO UPDATE SET user_id = EXCLUDED.user_id"
+            "INSERT INTO devices (user_id, token, api_token_id) VALUES (:user_id, :token, :api_token_id) "
+            "ON CONFLICT (token) DO UPDATE SET user_id = EXCLUDED.user_id, api_token_id = EXCLUDED.api_token_id"
         ),
-        {"user_id": user.id, "token": device.token},
+        {"user_id": user.id, "token": device.token, "api_token_id": user.token_id},
     )
 
 

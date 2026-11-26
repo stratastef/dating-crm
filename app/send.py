@@ -1,15 +1,19 @@
-"""Sending a draft through a connector: `queue_send()` approves a draft and the `send_draft` job sends it once."""
+"""Sending a draft through a connector: `queue_send()` queues a draft to send and the `send_draft` job sends it
+once. `cancel_send()` takes a queued send back until the job starts."""
+
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, HTTPException
+from pydantic import AwareDatetime, BaseModel
 from sqlalchemy import Connection, Row, text
 
-from app import calendar, handover
+from app import calendar, handover, timing
 from app.audit import record_action
 from app.auth import CurrentUser, Db
 from app.autopilot import autopilot_block
 from app.cards import upsert_message
 from app.connectors import CapabilityFailed, call, unavailable
-from app.drafts import _COLUMNS, Draft
+from app.drafts import DRAFT_COLUMNS, PLANNED, Draft, present
 from app.jobs import enqueue, handler
 from app.sync import CONNECTORS
 
@@ -22,6 +26,9 @@ DISCLOSURE = "Heads up: an AI assistant helps me write my messages here."
 
 # The stages in which autopilot chats. From Number swapped on the user texts off the app.
 CHAT_STAGES = ("matched", "chatting")
+
+# How long a user's Send waits before the worker sends it, so the user can take it back (`undo_send`).
+UNDO_WINDOW = timedelta(seconds=5)
 
 
 def unattended_block(db: Connection, user_id: int, draft_id: int) -> str | None:
@@ -37,7 +44,7 @@ def unattended_block(db: Connection, user_id: int, draft_id: int) -> str | None:
     ).one_or_none()
     if not draft:
         return "draft not found"
-    block = autopilot_block(db, user_id, draft.app, "chat")  # the kill switch, the AI budget and the autonomy level
+    block = autopilot_block(db, user_id, draft.app, "chat")  # a pause, the AI budget and the autonomy level
     if block:
         return block
     if draft.guardrail != []:  # a hit, Jev unavailable (`["unavailable"]`) or never checked (null)
@@ -49,11 +56,23 @@ def unattended_block(db: Connection, user_id: int, draft_id: int) -> str | None:
     return None
 
 
-def queue_send(db: Connection, user_id: int, draft_id: int, trigger: str, unattended: bool = False) -> Row | None:
-    """Approve a pending draft and queue the job that sends it, in the caller's transaction.
+def queue_send(
+    db: Connection,
+    user_id: int,
+    draft_id: int,
+    trigger: str,
+    unattended: bool = False,
+    run_at: datetime | None = None,
+    scheduled: bool = False,
+) -> Row | None:
+    """Queue a pending draft, or a failed one again (Retry), to send: it becomes `approved` and the job that sends
+    it is queued, in the caller's transaction.
 
-    Returns the draft, now `approved`, or None if the user has no such draft or it is not `pending`, so a
-    draft is queued at most once. `trigger` is what caused the send; it goes to the audit log.
+    Returns the draft, now `approved`, or None if the user has no such draft or it is not `pending` or `failed`,
+    so a draft is queued at most once. `trigger` is what caused the send; it goes to the audit log.
+
+    The job runs at `run_at`, or at once. Until it starts, `cancel_send()` takes the send back. `scheduled=True`
+    marks a scheduled send, one the user timed: `run_at` becomes the draft's send time.
 
     `unattended=True` is for a send no user asked for. It returns None and leaves the draft `pending`, so in
     the review queue, when `unattended_block()` gives a reason; the job asks again before it sends.
@@ -63,26 +82,66 @@ def queue_send(db: Connection, user_id: int, draft_id: int, trigger: str, unatte
     draft = db.execute(
         text(
             f"""
-            UPDATE drafts SET status = 'approved', updated_at = now()
-            WHERE id = :id AND user_id = :user_id AND status = 'pending' RETURNING {_COLUMNS}
+            UPDATE drafts SET status = 'approved', updated_at = now(),
+                send_at = CASE WHEN :scheduled THEN CAST(:run_at AS timestamptz) ELSE send_at END
+            WHERE id = :id AND user_id = :user_id AND status IN ('pending', 'failed') RETURNING {DRAFT_COLUMNS}
+            """
+        ),
+        {"id": draft_id, "user_id": user_id, "scheduled": scheduled, "run_at": run_at},
+    ).one_or_none()
+    if draft:
+        payload = {"draft_id": draft_id, "trigger": trigger, "unattended": unattended, "scheduled": scheduled}
+        enqueue(db, user_id, "send_draft", payload, run_at=run_at)
+    return draft
+
+
+def cancel_send(db: Connection, user_id: int, draft_id: int) -> Row | None:
+    """Take back a queued send before its job starts, in the caller's transaction: the draft is `pending` again
+    and its job does not run. Returns the draft, or None if it is not `approved`: the job has claimed it, or it
+    was never queued."""
+    draft = db.execute(
+        text(
+            f"""
+            UPDATE drafts SET status = 'pending', updated_at = now()
+            WHERE id = :id AND user_id = :user_id AND status = 'approved' RETURNING {DRAFT_COLUMNS}
             """
         ),
         {"id": draft_id, "user_id": user_id},
     ).one_or_none()
     if draft:
-        enqueue(db, user_id, "send_draft", {"draft_id": draft_id, "trigger": trigger, "unattended": unattended})
+        # Cancelled, not left to find the draft `pending`: a send queued again must not go out at the old time.
+        # A job a worker holds is skipped, not waited for; it finds the draft `pending` and sends nothing.
+        db.execute(
+            text(
+                """
+                UPDATE jobs SET status = 'skipped', last_error = 'the send was taken back' WHERE id IN (
+                    SELECT id FROM jobs WHERE user_id = :user_id AND kind = 'send_draft' AND status = 'queued'
+                      AND (payload->>'draft_id')::int = :id
+                    FOR UPDATE SKIP LOCKED)
+                """
+            ),
+            {"id": draft_id, "user_id": user_id},
+        )
     return draft
 
 
-def send_approved(db: Connection, user_id: int, draft_id: int, trigger: str) -> None:
-    """Queue the send of a draft the caller has just moved to `approved`, if its card's app can send now.
-
-    For the review queue, which approves drafts itself. Call it once per draft: a second job for the same
-    draft would mark it `failed`. When the app cannot send, the draft stays `approved` and the user copies it.
-    """
-    card = _card(db, user_id, draft_id)
-    if card and card.status == "approved" and not refusal(db, user_id, card.app, card.external_id, card.guardrail):
-        enqueue(db, user_id, "send_draft", {"draft_id": draft_id, "trigger": trigger})
+def drop_planned_sends(db: Connection, user_id: int, card_id: int) -> None:
+    """A message was added to the card: autopilot's planned sends to the match answer an old message, or cross
+    the user's own. Each is taken back and dismissed, and the slots it offered are free again. If the match
+    wrote, chat autopilot then plans a new reply."""
+    planned = db.execute(
+        text(f"SELECT id FROM drafts WHERE card_id = :card_id AND user_id = :user_id AND {PLANNED}"),
+        {"card_id": card_id, "user_id": user_id},
+    ).scalars().all()
+    for draft_id in planned:
+        if cancel_send(db, user_id, draft_id):  # None once the worker is sending it
+            db.execute(
+                text("UPDATE drafts SET status = 'dismissed' WHERE id = :id AND user_id = :user_id"),
+                {"id": draft_id, "user_id": user_id},
+            )
+            calendar.release_holds(
+                db, user_id, card_id, trigger=f"chat autopilot: dropped draft {draft_id}", draft_id=draft_id
+            )
 
 
 def _card(db: Connection, user_id: int, draft_id: int) -> Row | None:
@@ -99,7 +158,7 @@ def _card(db: Connection, user_id: int, draft_id: int) -> Row | None:
 def refusal(
     db: Connection, user_id: int, app: str, match_id: str | None, guardrail: list[str] | None = None
 ) -> str | None:
-    """Why a message cannot be sent to this match now, or None if it can. The kill switch is not asked: it
+    """Why a message cannot be sent to this match now, or None if it can. A pause is not asked: it
     pauses autopilot, and `unattended_block()` holds it for a send no user asked for. A tap still sends.
 
     `guardrail` is the draft's guardrail result. The user's tap may send a draft with any other hit, because
@@ -114,25 +173,96 @@ def refusal(
     return unavailable(db, user_id, CONNECTORS[app](), "send")
 
 
+class Send(BaseModel):
+    send_at: AwareDatetime | None = None  # a time the user chose; none sends it now
+
+
 @router.post("/drafts/{draft_id}/send", response_model=Draft, status_code=202)
-def tap_send(draft_id: int, user: CurrentUser, db: Db):
-    """The user approves a draft: queue it for the worker to send. `409` says why when it cannot be sent."""
+def tap_send(draft_id: int, user: CurrentUser, db: Db, send: Send | None = None):
+    """The user's Send: queue the draft for the worker to send once `UNDO_WINDOW` has passed, or Send at: at the
+    `send_at` they chose, as given (no undo wait, no bounds). `409` says why when it cannot be sent."""
     card = _card(db, user.id, draft_id)
     if not card:
         raise HTTPException(status_code=404, detail="draft not found")
     why = refusal(db, user.id, card.app, card.external_id, card.guardrail)
     if why:
         raise HTTPException(status_code=409, detail=why)
-    draft = queue_send(db, user.id, draft_id, trigger=f"copilot: user tapped send on draft {draft_id}")
+    trigger = f"copilot: user tapped send on draft {draft_id}"
+    send_at = send and send.send_at
+    if send_at:
+        draft = queue_send(db, user.id, draft_id, trigger, run_at=send_at, scheduled=True)
+    else:
+        draft = queue_send(db, user.id, draft_id, trigger, run_at=datetime.now(UTC) + UNDO_WINDOW)
     if not draft:
         raise HTTPException(status_code=409, detail=f"the draft is already {card.status}")
-    return draft
+    return present(db, user.id, [draft])[0]
+
+
+@router.post("/drafts/{draft_id}/undo-send", response_model=Draft)
+@router.post("/drafts/{draft_id}/hold", response_model=Draft)
+@router.post("/drafts/{draft_id}/unschedule", response_model=Draft)
+def undo_send(draft_id: int, user: CurrentUser, db: Db):
+    """Take back a queued send while its job has not started: the user's Undo of their Send, Unschedule of their
+    scheduled send, or Hold on a planned send. The draft is `pending` again, its edit kept, so it waits in the
+    review queue. `409` once the worker has started sending it."""
+    card = _card(db, user.id, draft_id)
+    if not card:
+        raise HTTPException(status_code=404, detail="draft not found")
+    draft = cancel_send(db, user.id, draft_id)
+    if not draft:
+        raise HTTPException(status_code=409, detail=f"the draft is {card.status}")
+    return present(db, user.id, [draft])[0]
+
+
+@router.post("/drafts/{draft_id}/send-now", response_model=Draft, status_code=202)
+def send_now(draft_id: int, user: CurrentUser, db: Db):
+    """Send now on a planned send: its job is taken back and the draft queued again through `queue_send()`, to
+    go out at once, as the user's send. `409` says why when it cannot be sent, or once the worker has started."""
+    card = _card(db, user.id, draft_id)
+    if not card:
+        raise HTTPException(status_code=404, detail="draft not found")
+    why = refusal(db, user.id, card.app, card.external_id, card.guardrail)
+    if why:
+        raise HTTPException(status_code=409, detail=why)
+    trigger = f"copilot: user tapped send now on draft {draft_id}"
+    draft = cancel_send(db, user.id, draft_id) and queue_send(db, user.id, draft_id, trigger)
+    if not draft:
+        raise HTTPException(status_code=409, detail=f"the draft is {card.status}")
+    return present(db, user.id, [draft])[0]
+
+
+def _planned_again(db: Connection, user_id: int, draft_id: int, payload: dict) -> bool:
+    """Plan a send no user asked for again if it would now go out inside the user's night window: the window or
+    their time zone changed since it was planned. The same rule as planning (`timing.night_rule()`) picks the new
+    time, and the draft waits for it, still `approved`. True if it was planned again."""
+    draft = db.execute(
+        text(
+            "SELECT card_id, greatest(send_at, now()) AS at FROM drafts"
+            " WHERE id = :id AND user_id = :user_id AND status = 'approved'"
+        ),
+        {"id": draft_id, "user_id": user_id},
+    ).one_or_none()
+    if not draft:
+        return False
+    # shortcut: an opener moved here is not spaced from the user's other openers (`timing.opener_time()`); space
+    # it too if a changed night window ever sends several in the same minute.
+    later = timing.night_rule(db, user_id, draft.card_id, draft.at, draft.at)
+    if later == draft.at:
+        return False
+    db.execute(
+        text("UPDATE drafts SET send_at = :later, updated_at = now() WHERE id = :id AND user_id = :user_id"),
+        {"id": draft_id, "user_id": user_id, "later": later},
+    )
+    enqueue(db, user_id, "send_draft", payload, run_at=later)
+    return True
 
 
 @handler("send_draft")
 def send_draft(db: Connection, user_id: int, payload: dict) -> None:
     """Send an approved draft, at most once, and store the sent message on its card. Safe to run twice."""
     draft_id = payload["draft_id"]
+    if payload.get("unattended") and _planned_again(db, user_id, draft_id, payload):
+        return
     # The claim commits on its own before the app is touched, so it survives a crash or a failed attempt.
     # A run that finds the draft already `sending` follows an attempt that died: the message may have gone
     # out, so it is not sent again.
@@ -181,7 +311,16 @@ def send_draft(db: Connection, user_id: int, payload: dict) -> None:
         sent = call(db, user_id, CONNECTORS[draft.app](), "send", draft.external_id, draft.body)
     except CapabilityFailed:
         return finish("failed")  # no retry: the message may have reached the app before the error
-    upsert_message(db, user_id, draft.card_id, sent["id"], "me", draft.body, sent["sent_at"])
+    upsert_message(
+        db,
+        user_id,
+        draft.card_id,
+        sent["id"],
+        "me",
+        draft.body,
+        sent["sent_at"],
+        sent_by_autopilot=bool(payload.get("unattended")),
+    )
     if DISCLOSURE in draft.body:
         # Whoever sent it, the match has now been told: chat autopilot does not add the sentence again.
         db.execute(

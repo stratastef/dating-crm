@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// The match read on a card: each inference with its evidence and confidence, and a way to correct it.
+/// The match read on a card: each inference with the AI marker, its evidence and confidence word (Sure, Likely, Guess),
+/// and a tap to correct it.
 struct ReadSection: View {
     let client: APIClient
     let cardID: Int
@@ -12,33 +13,38 @@ struct ReadSection: View {
     @State private var error: String?
 
     var body: some View {
-        Section("Match read") {
+        Section {
             if let error {
-                Text(error).foregroundStyle(.red)
+                ErrorRow(text: error) { await load { try await client.read(cardID: cardID) } }
             }
             ForEach(read) { inference in
                 Button {
                     correction = inference.text
                     correcting = inference
                 } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack {
-                            Text(inference.title).font(.caption).foregroundStyle(.secondary)
-                            Spacer()
-                            Text(inference.corrected == nil ? "\(Int((inference.confidence * 100).rounded()))% sure" : "Corrected by you")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 3) {
+                        AIMarker(.suggests)  // every inference is the AI's read, as on every other AI-made thing
+                        AdaptiveStack(spacing: 6) {
+                            Text(inference.title).font(.subheadline.weight(.semibold))
+                            Text(inference.corrected == nil ? inference.confidenceWord : "Corrected by you")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondaryText)
                         }
-                        Text(inference.text).foregroundStyle(.primary)
-                        Text("Evidence: \(inference.evidence)").font(.caption).foregroundStyle(.secondary)
+                        Text(inference.text)
+                        Text("Evidence: \(inference.evidence)").font(.subheadline).foregroundStyle(.secondaryText)
                     }
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(.rect)
                 }
                 .accessibilityHint("Corrects this inference")
             }
             Button(read.isEmpty ? "Read match" : "Read again", systemImage: "sparkles") {
                 Task { await load { try await client.makeRead(cardID: cardID) } }
             }
+            .frame(minHeight: 44)
             .disabled(reading)
+        } header: {
+            Text("Match read").foregroundStyle(Color.primary)
         }
         .task {
             await load { try await client.read(cardID: cardID) }
@@ -63,7 +69,7 @@ struct ReadSection: View {
             read = try await fetch()
             error = nil
         } catch {
-            self.error = error.localizedDescription
+            self.error = "The match read did not load. Check your connection, then tap to try again."
         }
     }
 
@@ -74,7 +80,7 @@ struct ReadSection: View {
             read = read.map { $0.id == corrected.id ? corrected : $0 }
             error = nil
         } catch {
-            self.error = error.localizedDescription
+            self.error = "The correction was not saved. Check your connection, then correct it again."
         }
     }
 }
