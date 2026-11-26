@@ -1,14 +1,14 @@
 """send timing: each draft's send time and timing reason, and the user's night window
 
 Revision ID: t71_send_timing
-Revises: t67_stages_reached
+Revises: t69_privacy_settings
 """
 
 import sqlalchemy as sa
 from alembic import op
 
 revision = "t71_send_timing"
-down_revision = "t67_stages_reached"
+down_revision = "t69_privacy_settings"
 branch_labels = None
 depends_on = None
 

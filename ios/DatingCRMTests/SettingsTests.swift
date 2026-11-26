@@ -189,4 +189,10 @@ struct SettingsTests {
         #expect(!PurgeConfirmation.allows(typed: "", chosen: 1))
         #expect(!PurgeConfirmation.allows(typed: "yes", chosen: 1))
     }
+
+    @Test func thePurgeButtonNamesThePeopleItDeletes() {
+        #expect(PurgeConfirmation.button(names: ["Ada"]) == "Delete everything about Ada")
+        #expect(PurgeConfirmation.button(names: ["Ada", "Bea"]) == "Delete everything about Ada and Bea")
+        #expect(PurgeConfirmation.button(names: ["Ada", "Bea", "Cleo"]) == "Delete everything about Ada, Bea, and Cleo")
+    }
 }

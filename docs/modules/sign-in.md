@@ -6,7 +6,7 @@ A user signs in with their phone number and a six-digit sign-in code sent by SMS
 
 | Route | Body | Answers |
 | --- | --- | --- |
-| `POST /sign-in/code` | `{"phone": "+491701234567", "invite_code": "K7QX-M2PA"}`; `invite_code` is optional | `204`: the code was texted. `403 invite_code_needed`: no account has this number and no invite code came. `403 invite_code_invalid`: no account has this number and the invite code is unknown or used. `429 too_many_requests`: rate limit. `422`: not E.164. |
+| `POST /sign-in/code` | `{"phone": "+491701234567", "invite_code": "K7QX-M2PA"}`; `invite_code` is optional | `204`: the code was texted. `403 invite_code_needed`: no account has this number and no invite code came. `403 invite_code_invalid`: no account has this number and the invite code is unknown or used. `429 too_many_requests`: rate limit. `503 sms_not_sent`: the SMS provider is not set up, refused the text or could not be reached; no code for this number works. `422`: not E.164. |
 | `POST /sign-in` | `{"phone": ..., "code": "123456"}` | `200 {"token": ..., "new_account": true}`: `new_account` is true when this sign-in created the account. `401 wrong_code`. `410 code_expired`: expired, used, replaced, or never sent. `429 too_many_tries`. `403 invite_code_invalid`: the invite code created another account after this code was sent. |
 | `POST /sign-out` | none, with the bearer token | `204`. Revokes the caller's token only, and unregisters the push device that token registered. |
 
@@ -36,9 +36,29 @@ Create invite codes (one per line, three here):
 uv run python -m app.invite_codes 3
 ```
 
-## The `sms` seam
+## The `sms` seam and Twilio
 
-`app.sms.send(phone, body)` is the only function that texts a phone. For now it writes the text, code included, to the server log at `WARNING`; the SMS provider (#50) replaces its body. The text reads "123456 is your Dating CRM code. It expires in 10 minutes."
+`app.sms.send(phone, body)` is the only function that texts a phone, and `app.sms.post()` the only one that talks to the SMS provider, Twilio (ADR 0010). It is a plain HTTPS call to Twilio's Messages API; no Twilio SDK is installed. The text reads "123456 is your Dating CRM code. It expires in 10 minutes."
+
+- **`SMS_PROVIDER` not set** (tests and local development): the text, code included, goes to the server log at `WARNING`. Nothing else is needed. Never leave it unset on a server testers use.
+- **`SMS_PROVIDER=twilio`**: the text goes through Twilio. The request fails closed: if a setting below is missing, or Twilio refuses the text or cannot be reached, `POST /sign-in/code` answers `503 sms_not_sent` and every code for that number stops working. The request still counts towards the rate limits. The API log gets one `WARNING` line with Twilio's error, without the text. Any other value of `SMS_PROVIDER` fails the same way.
+- A text Twilio accepts but the carrier fails to deliver is not noticed. The user taps "Send a new code". The Twilio Console shows it under Monitor, Logs, Messages.
+
+Settings, passed by Compose to the API:
+
+| Variable | Value |
+| --- | --- |
+| `SMS_PROVIDER` | `twilio` |
+| `TWILIO_ACCOUNT_SID` | Account SID (`AC…`), Console home page |
+| `TWILIO_AUTH_TOKEN` | Auth token, Console home page |
+| `TWILIO_SENDER` | `DatingCRM`, the sender name shown in Germany and other countries that allow one. Or a Messaging Service SID (`MG…`), which picks the sender per country; US testers need one, with a verified toll-free number in it. |
+
+What the owner must do before testers get codes (details in ADR 0010):
+
+1. Create a Twilio account and upgrade it: legal name, payment method, starting balance. A trial account cannot send this text.
+2. Console, Messaging, Settings, Geo permissions: allow only the testers' countries.
+3. Germany only: set `TWILIO_SENDER=DatingCRM`. To add US testers, buy a toll-free number and get it verified (use case: one-time sign-in codes). Then create a Messaging Service with that number and the sender name `DatingCRM`, and set `TWILIO_SENDER` to its `MG…` SID.
+4. Set the four variables, restart the API, and request a code with your own number. A text from DatingCRM must arrive.
 
 ## Give an existing account a phone number
 
@@ -55,8 +75,10 @@ The owner's v1 account can then sign in by SMS. `uv run python -m app.auth you@e
 ## Tests
 
 - The autouse `sms` fixture replaces `app.sms.send`. `sms.sent` lists each `(phone, body)`; `sms.code(phone)` is the code in the last text to that number.
+- The `twilio` fixture in `tests/test_sign_in.py` puts the real `app.sms.send` back with throwaway Twilio settings, and replaces `app.sms.post`. `twilio.sent` lists each request's form data (`To`, `From` or `MessagingServiceSid`, `Body`) with `url` and `auth`. Set `twilio.answer` to Twilio's `(status, json)` or to an exception. `twilio.code()` is the code in the last text.
 - `tests/test_sign_in.py` moves time by replacing `app.sign_in.now` (fixture `clock`).
 
 ## Not done
 
-- The real SMS provider: #50.
+- No real text has been sent: the owner creates the Twilio account and checks that a code arrives (#50).
+- The app shows its "could not be reached" message for `503 sms_not_sent`.

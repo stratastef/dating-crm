@@ -85,3 +85,24 @@ def test_deleting_a_user_still_removes_their_log(app, client, record):
     with app.state.engine.begin() as connection:
         connection.execute(text("DELETE FROM users"))
         assert connection.execute(text("SELECT count(*) FROM audit_log")).scalar_one() == 0
+
+
+def test_an_entry_about_a_person_shows_their_current_name_and_one_about_the_user_none(app, client, record):
+    """The log never stores a name: the activity log reads it from the card or swipe candidate."""
+    card_id = client.post("/cards", json={"app": "tinder", "name": "Ada"}).json()["id"]
+    with app.state.engine.begin() as connection:
+        candidate_id = connection.execute(
+            text(
+                "INSERT INTO swipe_candidates (user_id, app, profile_id, name, bio, photos, suggestion, reason, source)"
+                " SELECT id, 'tinder', 'p1', 'Bea', '', '[]', 'like', '', 'model' FROM users RETURNING id"
+            )
+        ).scalar_one()
+    record("user@example.com", type="message", app="tinder", target=f"card:{card_id}", trigger="copilot")
+    record("user@example.com", type="calendar_hold", app="tinder", target=f"card:{card_id} hold 2026-12-01", trigger="x")
+    record("user@example.com", type="like", app="tinder", target=f"candidate:{candidate_id}", trigger="swipe")
+    record("user@example.com", type="profile_change", app="tinder", target="bio", trigger="copilot")
+    client.patch(f"/cards/{card_id}", json={"name": "Ada L."})
+
+    names = [entry["name"] for entry in client.get("/audit-log").json()]
+
+    assert names == [None, "Bea", "Ada L.", "Ada L."]

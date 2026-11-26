@@ -12,6 +12,7 @@ struct MainTabView: View {
     @State private var selection = AppTab(rawValue: ProcessInfo.processInfo.environment["DCRM_TAB"] ?? "") ?? .today
     // From Today's review summary.
     @State private var reviewCount = 0
+    @AppStorage(BlurredFace.key) private var blurPhotos = false
 
     var body: some View {
         TabView(selection: $selection) {
@@ -40,6 +41,10 @@ struct MainTabView: View {
         // A tapped push opens its card, which the Pipeline shows.
         .onChange(of: push.openedCardID, initial: true) { _, id in
             if id != nil { selection = .pipeline }
+        }
+        // Blur photos is the server's setting; a change made on another phone shows from the next launch.
+        .task {
+            if let settings = try? await client.settings() { blurPhotos = settings.blurPhotos }
         }
     }
 }
