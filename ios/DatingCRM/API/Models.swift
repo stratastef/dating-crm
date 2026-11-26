@@ -66,6 +66,8 @@ struct Card: Codable, Identifiable, Hashable {
     var pendingDraft: Draft?
     /// The card's draft list: its pending, copied and failed drafts, newest first. The card docks the first.
     var drafts: [Draft]?
+    /// Autopilot's planned send: the draft it sends alone at its `sendAt`, with its `timingReason`.
+    var plannedSend: Draft?
     /// nil when unknown: the row shows the monogram.
     var leadPhotoUrl: URL?
 
@@ -76,7 +78,7 @@ struct Card: Codable, Identifiable, Hashable {
     var reason: String?
     /// With reason `handover`: the check that hit, such as `logistics`.
     var handoverTrigger: String?
-    /// When the card is Handled by autopilot: `writing_opener`, `drafting_reply` or `sent_waiting`.
+    /// When the card is Handled by autopilot: `writing_opener`, `drafting_reply`, `planned` or `sent_waiting`.
     var autopilotActivity: String?
     /// What the chat is about in a few words, such as "museums"; empty until the card's first draft.
     var topic: String?
@@ -230,6 +232,10 @@ struct Draft: Codable, Identifiable, Hashable {
     var guardrail: [String]? = nil
     /// The app can send it now (ADR 0003): Send. Otherwise the user copies it into the dating app: Copy.
     var sendable = false
+    /// Its send time: when autopilot sends it alone, or when it is best sent. Nil from an older server.
+    var sendAt: Date?
+    /// Why that time, in a few words ("they take their time"); may be empty.
+    var timingReason: String?
     /// `pending`, `copied` or `failed` on the card's draft list; also `approved`, `sending`, `sent`, `dismissed`.
     var status = "pending"
 
@@ -486,6 +492,10 @@ struct UserSettings: Decodable, Equatable {
     var pushNamePreviews: Bool
     /// Faces stay blurred until tapped (ADR 0009). See `BlurredFace`.
     var blurPhotos: Bool
+    /// The night window: autopilot sends nothing from this hour until the end hour, 0 to 23, in the user's time
+    /// zone. A start after the end wraps past midnight.
+    var nightWindowStart = 1
+    var nightWindowEnd = 7
 }
 
 /// One action the app took toward a dating app or the calendar, and what triggered it (`GET /audit-log`).

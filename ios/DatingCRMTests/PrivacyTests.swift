@@ -12,7 +12,7 @@ struct PrivacyTests {
 
     static let settings = #"""
     {"stalled_after_days": 3, "time_zone": "UTC", "setup_dismissed": false,
-     "push_name_previews": false, "blur_photos": true}
+     "push_name_previews": false, "blur_photos": true, "night_window_start": 1, "night_window_end": 7}
     """#
 
     @Test func readsPushNamePreviewsAndBlurPhotosFromTheSettings() async throws {

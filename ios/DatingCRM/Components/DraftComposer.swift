@@ -7,7 +7,8 @@ import UIKit
 /// - copied: "Copied, not sent yet", with Clear and Copy again;
 /// - failed: why, still editable, with Copy and Retry.
 ///
-/// With no draft it offers Write draft in Matched and Chatting, and shows nothing from Number swapped on. Without
+/// With no draft it offers Write draft in Matched and Chatting, and shows nothing from Number swapped on or while
+/// autopilot has a planned send (`Card.plannedSend`, shown in the chat). Without
 /// a style profile, Write draft sets `needsVoice` and the card opens the voice questionnaire.
 struct DraftComposer: View {
     let client: APIClient
@@ -33,7 +34,7 @@ struct DraftComposer: View {
         if let draft {
             dock(draft)
                 .onChange(of: draft.id, initial: true) { text = draft.text }
-        } else if card.stage.chatsInApp {
+        } else if card.stage.chatsInApp && card.plannedSend == nil {  // a planned send answers already: no second reply
             box {
                 if let error {
                     ErrorRow(text: error) { await write() }

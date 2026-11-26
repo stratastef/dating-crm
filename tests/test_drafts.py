@@ -3,9 +3,10 @@ import json
 from app.jobs import run_once
 
 
-def drafted(message: str, topic: str = "") -> str:
-    """What Claude replies when it writes a draft: the message and the chat's topic."""
-    return json.dumps({"message": message, "topic": topic})
+def drafted(message: str, topic: str = "", **timing) -> str:
+    """What Claude replies when it writes a draft: the message and the chat's topic. `timing` adds the send-time
+    fields, `adjustment` and `timing_reason`."""
+    return json.dumps({"message": message, "topic": topic, **timing})
 
 
 def write_profile(app, client, llm, profile):
@@ -21,7 +22,7 @@ def test_a_card_with_no_messages_gets_an_opener_written_from_the_style_profile(a
     write_profile(app, client, llm, "Short, lowercase, teasing.")
     card_id = client.post("/cards", json={"app": "hinge", "name": "Sam", "notes": "Has a dog called Biscuit"}).json()["id"]
 
-    llm.reply = drafted("is biscuit accepting visitors")
+    llm.reply = drafted("is biscuit accepting visitors", timing_reason="a fresh match")
     draft = client.post(f"/cards/{card_id}/drafts")
 
     assert draft.status_code == 201
@@ -36,7 +37,10 @@ def test_a_card_with_no_messages_gets_an_opener_written_from_the_style_profile(a
         "guardrail": [],
         "hot_lead": False,
         "sendable": False,  # Hinge has no connector
+        "send_at": body["send_at"],  # when it is best sent: see `tests/test_send_timing.py`
+        "timing_reason": "a fresh match",
     }
+    assert body["send_at"]
     prompt = llm.prompts[-1]
     assert "opener" in prompt
     assert "Short, lowercase, teasing." in prompt
