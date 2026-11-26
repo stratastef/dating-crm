@@ -29,7 +29,7 @@ import Foundation
         loaded = true
     }
 
-    /// For an item the server no longer holds: approved, declined, taken over or handed back.
+    /// For an item the server no longer holds: sent, declined, taken over or handed back.
     func remove(_ item: QueueItem) {
         items.removeAll { $0.id == item.id }
     }

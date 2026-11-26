@@ -8,7 +8,7 @@ struct ReviewQueueTests {
     @Test func listsTheQueueAndKeepsItemsOfKindsItDoesNotKnow() async throws {
         server.respond("""
         [{"kind": "draft", "hot": true, "card_id": 1, "card_name": "Ada",
-          "draft": {"id": 5, "card_id": 1, "kind": "reply", "status": "pending", "original": "saturday?", "edited": null}},
+          "draft": {"id": 5, "card_id": 1, "kind": "reply", "status": "pending", "original": "saturday?", "edited": null, "sendable": false}},
          {"kind": "handover", "hot": false, "card_id": 2, "card_name": "Kim", "draft": null}]
         """)
 
@@ -29,7 +29,7 @@ struct ReviewQueueTests {
         [{"kind": "draft", "hot": true, "card_id": 1, "card_name": "Ada",
           "card": {"id": 1, "app": "tinder", "name": "Ada", "stage": "chatting", "notes": "", "stalled": false,
                    "hot": true, "lead_photo_url": "https://photos.test/ada.jpg"},
-          "draft": {"id": 5, "card_id": 1, "kind": "reply", "status": "pending", "original": "saturday?", "edited": null},
+          "draft": {"id": 5, "card_id": 1, "kind": "reply", "status": "pending", "original": "saturday?", "edited": null, "sendable": false},
           "message": {"body": "when are you free?", "sent_at": "2026-11-20T10:05:00Z"}, "triggers": null},
          {"kind": "handover", "hot": true, "card_id": 2, "card_name": "Kim", "card": null, "draft": null,
           "message": {"body": "are you a bot?", "sent_at": "2026-11-20T10:00:00Z"}, "triggers": ["asks_if_ai"],
@@ -59,7 +59,7 @@ struct ReviewQueueTests {
 
     private let oneDraft = """
     [{"kind": "draft", "hot": false, "card_id": 1, "card_name": "Ada",
-      "draft": {"id": 5, "card_id": 1, "kind": "reply", "status": "pending", "original": "saturday?", "edited": null}}]
+      "draft": {"id": 5, "card_id": 1, "kind": "reply", "status": "pending", "original": "saturday?", "edited": null, "sendable": false}}]
     """
 
     @Test func undoAfterDismissRestoresTheDraftToReviewAndTheServerNeverHearsOfIt() async throws {
@@ -82,7 +82,7 @@ struct ReviewQueueTests {
 
     @Test func aDismissedDraftReachesTheServerOnceUndoIsNoLongerOffered() async throws {
         server.respond(oneDraft)
-        server.respond(#"{"id": 5, "card_id": 1, "kind": "reply", "status": "dismissed", "original": "saturday?", "edited": null}"#)
+        server.respond(#"{"id": 5, "card_id": 1, "kind": "reply", "status": "dismissed", "original": "saturday?", "edited": null, "sendable": false}"#)
         let review = ReviewQueue(client: server.client(), undoWindow: .milliseconds(10))
         await review.load()
         let item = try #require(review.items.first)
@@ -95,18 +95,39 @@ struct ReviewQueueTests {
         #expect(request.url?.absoluteString == "https://crm.test/drafts/5/dismiss")
     }
 
-    @Test func approvesADraft() async throws {
-        server.respond(#"{"id": 5, "card_id": 1, "kind": "reply", "status": "approved", "original": "saturday?", "edited": null}"#)
+    @Test func copiesADraftAndReadsWhyItIsNotSent() async throws {
+        server.respond(#"""
+        {"id": 5, "card_id": 1, "kind": "reply", "status": "copied", "original": "no, I'm not a bot",
+         "edited": null, "guardrail": ["denies_ai"], "hot_lead": false, "sendable": false}
+        """#)
 
-        try await server.client().approve(draftID: 5)
+        let draft = try await server.client().copy(draftID: 5)
 
+        #expect(draft.deniesAI)
+        #expect(!draft.sendable)
         let request = try #require(server.requests.first)
         #expect(request.httpMethod == "POST")
-        #expect(request.url?.absoluteString == "https://crm.test/drafts/5/approve")
+        #expect(request.url?.absoluteString == "https://crm.test/drafts/5/copy")
+        #expect(request.httpBody == nil)
+    }
+
+    @Test func listsACopiedDraftAsItsOwnKind() async throws {
+        server.respond("""
+        [{"kind": "copied_draft", "hot": false, "card_id": 1, "card_name": "Ada",
+          "draft": {"id": 5, "card_id": 1, "kind": "reply", "status": "copied", "original": "saturday?",
+                    "edited": null, "sendable": true}}]
+        """)
+
+        let items = try await server.client().queue()
+
+        #expect(items == [
+            QueueItem(kind: "copied_draft", hot: false, cardID: 1, cardName: "Ada",
+                      draft: Draft(id: 5, kind: .reply, original: "saturday?", edited: nil, sendable: true)),
+        ])
     }
 
     @Test func dismissesADraft() async throws {
-        server.respond(#"{"id": 5, "card_id": 1, "kind": "reply", "status": "dismissed", "original": "saturday?", "edited": null}"#)
+        server.respond(#"{"id": 5, "card_id": 1, "kind": "reply", "status": "dismissed", "original": "saturday?", "edited": null, "sendable": false}"#)
 
         try await server.client().dismiss(draftID: 5)
 

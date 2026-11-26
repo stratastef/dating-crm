@@ -72,27 +72,7 @@ def test_the_queue_lists_pending_drafts_with_hot_leads_first(app, client_for, ll
     assert bob.get("/queue").json() == []
 
 
-def test_an_approved_draft_leaves_the_queue_and_is_handed_on_with_the_users_edit(app, client, llm, monkeypatch):
-    handed_on = []
-    monkeypatch.setattr("app.review.hand_on_approved_draft", lambda db, user_id, draft: handed_on.append(draft))
-    write_profile(app, client, llm, "Short, lowercase, teasing.")
-    card_id = card_with_reply(client, "Kim", minutes_ago=90)
-    draft_id = client.post(f"/cards/{card_id}/drafts").json()["id"]
-    client.patch(f"/drafts/{draft_id}", json={"edited": "saturday it is"})
-
-    approved = client.post(f"/drafts/{draft_id}/approve")
-
-    assert approved.status_code == 200
-    assert approved.json()["status"] == "approved"
-    assert client.get("/queue").json() == []
-    assert [(draft.id, draft.edited) for draft in handed_on] == [(draft_id, "saturday it is")]
-    assert client.post(f"/drafts/{draft_id}/approve").status_code == 409  # already decided
-    assert len(handed_on) == 1
-
-
-def test_a_dismissed_draft_leaves_the_queue_and_is_not_handed_on(app, client_for, llm, monkeypatch):
-    handed_on = []
-    monkeypatch.setattr("app.review.hand_on_approved_draft", lambda db, user_id, draft: handed_on.append(draft))
+def test_a_dismissed_draft_leaves_the_queue(app, client_for, llm):
     alice = client_for("alice@example.com")
     bob = client_for("bob@example.com")
     write_profile(app, alice, llm, "Short, lowercase, teasing.")
@@ -100,13 +80,11 @@ def test_a_dismissed_draft_leaves_the_queue_and_is_not_handed_on(app, client_for
     draft_id = alice.post(f"/cards/{card_id}/drafts").json()["id"]
 
     assert bob.post(f"/drafts/{draft_id}/dismiss").status_code == 404
-    assert bob.post(f"/drafts/{draft_id}/approve").status_code == 404
     dismissed = alice.post(f"/drafts/{draft_id}/dismiss")
 
     assert dismissed.status_code == 200
     assert dismissed.json()["status"] == "dismissed"
     assert alice.get("/queue").json() == []
-    assert handed_on == []
 
 
 def test_the_review_queue_lists_hot_leads_first_then_the_oldest_first_whatever_their_kind(app, signed_in, llm, jev):

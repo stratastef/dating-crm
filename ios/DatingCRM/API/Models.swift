@@ -169,9 +169,16 @@ struct Draft: Codable, Identifiable, Hashable {
     var kind: Kind
     var original: String
     var edited: String?
+    /// The guardrail checks the text hit, such as `denies_ai`. Nil when not checked.
+    var guardrail: [String]? = nil
+    /// The app can send it now (ADR 0003): Send. Otherwise the user copies it into the dating app: Copy.
+    var sendable = false
 
     /// What to show and copy: the user's edit when there is one.
     var text: String { edited ?? original }
+
+    /// The server never sends it until the user edits it.
+    var deniesAI: Bool { guardrail?.contains("denies_ai") == true }
 }
 
 /// One thing Claude inferred about a match. `value` is Claude's; `corrected` is the user's correction of it.
@@ -195,7 +202,7 @@ struct Inference: Codable, Identifiable, Hashable {
     }
 }
 
-/// One thing that waits for the user's review: `draft`, `handover` or `paid_item`. The server adds more kinds later.
+/// One thing that waits for the user's review: `draft`, `copied_draft`, `handover` or `paid_item`. The server adds more kinds later.
 struct QueueItem: Codable, Identifiable, Hashable {
     var kind: String
     /// A hot lead: the server pushed it at once.
@@ -205,7 +212,7 @@ struct QueueItem: Codable, Identifiable, Hashable {
     var cardName: String
     /// The card summary, for the face, the dating app and opening the card. Nil when `cardID` is.
     var card: Card?
-    /// Set when `kind` is `draft`.
+    /// Set when `kind` is `draft` or `copied_draft`.
     var draft: Draft?
     /// The match's message the item is about: the one a reply answers, or the one that fired a handover.
     var message: QuotedMessage?

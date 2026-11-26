@@ -39,7 +39,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/connectors.py` | `Connector` contract, `call()`, `is_copilot_only()`, `alerts()` |
 | `app/push.py` | `send_push()` and `POST /devices` |
 | `app/calendar.py` | Google Calendar: routes under `/calendar`, `free_slots()`, `hold_slot()`, `release_holds()`, `confirm_date()` |
-| `app/review.py` | Review queue: `GET /queue`, approve and dismiss a draft, `is_hot_lead()` |
+| `app/review.py` | Review queue: `GET /queue`, copy and dismiss a draft, `is_hot_lead()` |
 | `app/handover.py` | Handover: pauses a card on a handover trigger, suggested replies, take-over and hand-back, `is_paused()` |
 | `app/chat_autopilot.py` | Chat autopilot: the `chat_reply` job, `GET` and `PUT /settings/ai-disclosure` |
 | `app/tinder.py` | `TinderConnector`: reads matches and messages from Tinder's unofficial web API |

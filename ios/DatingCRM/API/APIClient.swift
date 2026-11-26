@@ -102,9 +102,9 @@ struct APIClient {
         try await send("PATCH", "inferences/\(inferenceID)", body: Self.encoder.encode(["corrected": text]))
     }
 
-    /// Approves a draft: the server queues it and its worker sends it through the dating app. `409` means the
-    /// server refused: sending is off for the app, or the draft was already sent. A pause does not
-    /// stop it.
+    /// Send: the server queues the draft and its worker sends it through the dating app. `409` means the
+    /// server refused: sending is off for the app, the draft denies being AI, or it was already sent. A pause
+    /// does not stop it.
     func sendDraft(draftID: Int) async throws {
         try await data("POST", "drafts/\(draftID)/send")
     }
@@ -114,12 +114,13 @@ struct APIClient {
         try await send("GET", "queue")
     }
 
-    /// Approves a pending draft as the server holds it. Save an edit first.
-    func approve(draftID: Int) async throws {
-        try await data("POST", "drafts/\(draftID)/approve")
+    /// Copy: the user took a pending or failed draft's text to send by hand. It waits in Review as
+    /// `copied_draft` until the user's message shows up in the chat. Save an edit first.
+    func copy(draftID: Int) async throws -> Draft {
+        try await send("POST", "drafts/\(draftID)/copy")
     }
 
-    /// Drops a pending draft from the queue. Nothing is sent.
+    /// Drops a pending draft from the queue, or clears a copied or failed one. Nothing is sent.
     func dismiss(draftID: Int) async throws {
         try await data("POST", "drafts/\(draftID)/dismiss")
     }

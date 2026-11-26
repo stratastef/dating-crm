@@ -10,7 +10,7 @@ from sqlalchemy import Connection, text
 from app import calendar, paid_items
 from app.auth import CurrentUser, Db
 from app.drafts import _COLUMNS as _DRAFT_COLUMNS
-from app.drafts import Draft
+from app.drafts import Draft, present
 from app.push import send_push
 
 router = APIRouter()
@@ -24,14 +24,14 @@ class QuotedMessage(BaseModel):
 
 
 class QueueItem(BaseModel):
-    kind: str  # `draft`, `handover` or `paid_item`
+    kind: str  # `draft`, `copied_draft`, `handover` or `paid_item`
     hot: bool
     card_id: int | None  # null when `kind` is `paid_item`: a swipe candidate is not a card
     card_name: str
     # The card summary, `Card` in `app/cards.py` (a dict here: that module imports this one). Null when
     # `card_id` is.
     card: dict | None = None
-    draft: Draft | None  # set when `kind` is `draft`
+    draft: Draft | None  # set when `kind` is `draft` or `copied_draft`
     # The match's message the item is about: the one a reply draft answers, or the one that fired a handover.
     # Null for an opener and a paid item.
     message: QuotedMessage | None = None
@@ -76,13 +76,6 @@ def notify_if_hot(
         send_push(db, user_id, title, body or f"A draft for {name} is waiting for you", card_id=card_id)
 
 
-def hand_on_approved_draft(db: Connection, user_id: int, draft: Draft) -> None:
-    """Called once for each draft the user approves: queues its send when the card's app can send."""
-    from app.send import send_approved  # imported here: app.send imports app.cards, which leads back to this module
-
-    send_approved(db, user_id, draft.id, trigger=f"copilot: user approved draft {draft.id}")
-
-
 @router.get("/queue", response_model=list[QueueItem])
 def queue(user: CurrentUser, db: Db):
     """Everything that waits for the user: hot leads first, then oldest first."""
@@ -93,6 +86,7 @@ def queue(user: CurrentUser, db: Db):
         text(
             f"""
             SELECT {", ".join(f"drafts.{column}" for column in _DRAFT_COLUMNS.split(", "))}, drafts.created_at,
+                   drafts.copied_at,
                    cards.name AS card_name, answered.body AS message_body, answered.sent_at AS message_sent_at
             FROM drafts JOIN cards ON cards.id = drafts.card_id
             LEFT JOIN LATERAL (
@@ -101,7 +95,7 @@ def queue(user: CurrentUser, db: Db):
                   AND drafts.kind = 'reply' AND sent_at <= drafts.created_at
                 ORDER BY sent_at DESC, id DESC LIMIT 1
             ) answered ON true
-            WHERE drafts.user_id = :user_id AND drafts.status = 'pending'
+            WHERE drafts.user_id = :user_id AND drafts.status IN ('pending', 'copied')
             ORDER BY drafts.created_at, drafts.id
             """
         ),
@@ -125,17 +119,18 @@ def queue(user: CurrentUser, db: Db):
         {"user_id": user.id},
     ).all()
     cards = _summaries(db, user.id, [row.card_id for row in drafts] + [row.id for row in handovers])
-    for row in drafts:
+    for row, draft in zip(drafts, present(db, user.id, drafts), strict=True):
         item = QueueItem(
-            kind="draft",
+            kind="draft" if row.status == "pending" else "copied_draft",
             hot=cards[row.card_id]["hot"],
             card_id=row.card_id,
             card_name=row.card_name,
             card=cards[row.card_id],
-            draft=Draft.model_validate(row, from_attributes=True),
+            draft=draft,
             message=_quoted(row),
         )
-        waiting.append((row.created_at, item))
+        # A copied draft waits from when it was copied.
+        waiting.append((row.copied_at or row.created_at, item))
     for row in handovers:
         item = QueueItem(
             kind="handover",
@@ -179,40 +174,42 @@ def _quoted(row) -> QuotedMessage | None:
     return QuotedMessage(body=row.message_body, sent_at=row.message_sent_at) if row.message_body is not None else None
 
 
-def _decide(db: Connection, user_id: int, draft_id: int, status: str) -> Draft:
-    """Move a pending draft to `status`. 404 if it is not the user's, 409 if it was decided before."""
+def _decide(db: Connection, user_id: int, draft_id: int, status: str, allowed: tuple[str, ...]) -> Draft:
+    """Move the draft from one of the `allowed` statuses to `status`. 404 if it is not the user's, 409 if it is
+    in another status."""
     row = db.execute(
         text(
             f"""
-            UPDATE drafts SET status = :status, updated_at = now()
-            WHERE id = :id AND user_id = :user_id AND status = 'pending'
+            UPDATE drafts SET status = :status, updated_at = now(),
+                copied_at = CASE WHEN :status = 'copied' THEN now() ELSE copied_at END
+            WHERE id = :id AND user_id = :user_id AND status = ANY(:allowed)
             RETURNING {_DRAFT_COLUMNS}
             """
         ),
-        {"id": draft_id, "user_id": user_id, "status": status},
+        {"id": draft_id, "user_id": user_id, "status": status, "allowed": list(allowed)},
     ).one_or_none()
     if not row:
-        exists = db.execute(
-            text("SELECT 1 FROM drafts WHERE id = :id AND user_id = :user_id"), {"id": draft_id, "user_id": user_id}
-        ).one_or_none()
-        if exists:
-            raise HTTPException(status_code=409, detail="draft already decided")
+        now = db.execute(
+            text("SELECT status FROM drafts WHERE id = :id AND user_id = :user_id"), {"id": draft_id, "user_id": user_id}
+        ).scalar_one_or_none()
+        if now:
+            raise HTTPException(status_code=409, detail=f"the draft is {now}")
         raise HTTPException(status_code=404, detail="draft not found")
-    return Draft.model_validate(row, from_attributes=True)
+    return present(db, user_id, [row])[0]
 
 
-@router.post("/drafts/{draft_id}/approve", response_model=Draft)
-def approve_draft(draft_id: int, user: CurrentUser, db: Db):
-    """Approve a pending draft as it stands (the user's edit, if any) and hand it on."""
-    draft = _decide(db, user.id, draft_id, "approved")
-    hand_on_approved_draft(db, user.id, draft)
-    return draft
+@router.post("/drafts/{draft_id}/copy", response_model=Draft)
+def copy_draft(draft_id: int, user: CurrentUser, db: Db):
+    """The user copied a pending or failed draft to send it by hand, on any card. It waits in Review as
+    `copied_draft` until a newer message from the user appears on its card (`insert_message()` in `app/cards.py`)."""
+    return _decide(db, user.id, draft_id, "copied", ("pending", "failed"))
 
 
 @router.post("/drafts/{draft_id}/dismiss", response_model=Draft)
 def dismiss_draft(draft_id: int, user: CurrentUser, db: Db):
-    """Drop a pending draft from the queue. Nothing is sent, so the slots the draft offered are free again."""
-    draft = _decide(db, user.id, draft_id, "dismissed")
+    """Drop a pending draft from the queue, or clear a copied or failed one. Nothing is sent, so the slots the
+    draft offered are free again."""
+    draft = _decide(db, user.id, draft_id, "dismissed", ("pending", "copied", "failed"))
     try:
         calendar.release_holds(
             db, user.id, draft.card_id, trigger=f"copilot: user dismissed draft {draft.id}", draft_id=draft.id
