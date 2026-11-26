@@ -1,16 +1,10 @@
 import SwiftUI
 
-/// Everything that limits what the app does alone: Pause, autonomy per job, the AI budget, the
-/// privacy switches, and find-and-purge for a match who asks for their data to be deleted.
+/// The privacy switches, and find-and-purge for a match who asks for their data to be deleted. Pause, autonomy,
+/// the AI budget and swipe limits are on `AutopilotView`.
 struct SettingsView: View {
     let client: APIClient
 
-    /// The dating apps the user has cards on. Each gets its own pause switch.
-    @State private var apps: [String] = []
-    @State private var pauses = Pauses()
-    @State private var autonomy: [String: AutonomyLevel] = [:]
-    @State private var budget: Budget?
-    @State private var cap = ""
     @State private var protectedTraits = false
     @State private var disclosure = true
     @State private var error: String?
@@ -28,9 +22,6 @@ struct SettingsView: View {
             if let error {
                 Text(error).foregroundStyle(.red)
             }
-            killSwitch
-            autonomySection
-            budgetSection
             privacy
             purge
         }
@@ -38,61 +29,8 @@ struct SettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             await run {
-                apps = Set(try await client.cards().map(\.app)).sorted()
-                pauses = try await client.pauses()
-                autonomy = try await client.autonomy()
-                show(try await client.budget())
                 protectedTraits = try await client.protectedTraitGuesses()
                 disclosure = try await client.aiDisclosure()
-            }
-        }
-    }
-
-    private var killSwitch: some View {
-        Section {
-            Toggle("Pause all autopilot", isOn: paused(app: nil))
-                .tint(.red)
-            // An app paused on the server is listed even when the user has no card on it.
-            ForEach(Set(apps).union(pauses.apps).sorted(), id: \.self) { app in
-                Toggle("Pause \(app.capitalized)", isOn: paused(app: app))
-            }
-        } header: {
-            Text("Pause")
-        } footer: {
-            Text("A pause stops what the app does alone. A draft you send yourself still goes out.")
-        }
-    }
-
-    private var autonomySection: some View {
-        Section {
-            ForEach(autonomy.keys.sorted(), id: \.self) { job in
-                Picker(job.capitalized, selection: level(job: job)) {
-                    ForEach(AutonomyLevel.allCases) { Text($0.title).tag($0) }
-                }
-            }
-        } header: {
-            Text("Autonomy")
-        } footer: {
-            Text("Copilot: you approve everything. Autopilot and Full autopilot: the app acts alone within its limits.")
-        }
-    }
-
-    private var budgetSection: some View {
-        Section("AI budget") {
-            if let budget {
-                LabeledContent("Spent this month", value: budget.spendUsd.formatted(.currency(code: "USD")))
-                if budget.paused {
-                    Text("The cap is reached. Autopilot is paused until next month or a higher cap.")
-                        .foregroundStyle(.red)
-                }
-            }
-            HStack {
-                TextField("Monthly cap in USD", text: $cap)
-                    .keyboardType(.decimalPad)
-                Button("Set cap") {
-                    Task { await run { show(try await client.setBudgetCap(Double(cap) ?? 0)) } }
-                }
-                .disabled(Double(cap) == nil)
             }
         }
     }
@@ -168,27 +106,6 @@ struct SettingsView: View {
         }
         .foregroundStyle(.primary)
         .accessibilityAddTraits(chosen ? .isSelected : [])
-    }
-
-    private func paused(app: String?) -> Binding<Bool> {
-        Binding {
-            app.map(pauses.apps.contains) ?? pauses.all
-        } set: { on in
-            Task { await run { pauses = try await client.setPaused(on, app: app) } }
-        }
-    }
-
-    private func level(job: String) -> Binding<AutonomyLevel> {
-        Binding {
-            autonomy[job] ?? .off
-        } set: { level in
-            Task { await run { autonomy = try await client.setAutonomy(job: job, level: level) } }
-        }
-    }
-
-    private func show(_ budget: Budget) {
-        self.budget = budget
-        cap = budget.capUsd.formatted(.number.grouping(.never))
     }
 
     private func find() async {

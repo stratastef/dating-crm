@@ -73,6 +73,12 @@ struct SettingsTests {
         #expect(AutonomyLevel.allCases.map(\.title) == ["Off", "Copilot", "Autopilot", "Full autopilot"])
     }
 
+    @Test func eachLevelHasItsOwnPlainDescription() {
+        let summaries = AutonomyLevel.allCases.map(\.summary)
+        #expect(Set(summaries).count == AutonomyLevel.allCases.count)
+        #expect(summaries.allSatisfy { !$0.isEmpty })
+    }
+
     // Budget and spend.
 
     @Test func readsTheBudgetAndThisMonthsSpend() async throws {
@@ -93,6 +99,34 @@ struct SettingsTests {
         #expect(try sent().method == "PUT")
         #expect(try sent().url == "https://crm.test/budget")
         #expect(try sent().body == ["cap_usd": 20])
+    }
+
+    @Test func showsThisMonthsSpendAgainstTheCap() {
+        #expect(Budget(spendUsd: 8.2, capUsd: 30, paused: false).spentOfCap == "$8.20 of $30")
+        #expect(Budget(spendUsd: 0, capUsd: 12.5, paused: false).spentOfCap == "$0 of $12.50")
+    }
+
+    // Swipe limits.
+
+    @Test func readsTheSwipeLimits() async throws {
+        server.respond(#"{"swipes_per_run": 5, "swipes_per_day": 20}"#)
+
+        let limits = try await server.client().swipeLimits()
+
+        #expect(limits == SwipeLimits(swipesPerRun: 5, swipesPerDay: 20))
+        #expect(try sent().method == "GET")
+        #expect(try sent().url == "https://crm.test/swipes/limits")
+    }
+
+    @Test func setsTheSwipeLimits() async throws {
+        server.respond(#"{"swipes_per_run": 3, "swipes_per_day": 40}"#)
+
+        let limits = try await server.client().setSwipeLimits(SwipeLimits(swipesPerRun: 3, swipesPerDay: 40))
+
+        #expect(limits == SwipeLimits(swipesPerRun: 3, swipesPerDay: 40))
+        #expect(try sent().method == "PUT")
+        #expect(try sent().url == "https://crm.test/swipes/limits")
+        #expect(try sent().body == ["swipes_per_run": 3, "swipes_per_day": 40])
     }
 
     // Protected-trait opt-in and AI disclosure.

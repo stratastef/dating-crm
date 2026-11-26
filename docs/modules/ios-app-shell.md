@@ -8,7 +8,7 @@ The signed-in app is `MainTabView` (`ios/DatingCRM/Screens/MainTabView.swift`): 
 | Review | `QueueView` |
 | Pipeline | `BoardView`. A tapped push switches to this tab and opens the card. |
 | Swipe | `SwipeView` |
-| You | `YouView`: Dashboard, Preferences, Photos, Settings, Sign out |
+| You | `YouView`: Dashboard, Autopilot (`AutopilotView`), Preferences, Photos, Settings, Sign out |
 
 ## Look (ADR 0009, `docs/design/mockups/a3-combined.html`)
 
@@ -26,6 +26,7 @@ The shared components are in `ios/DatingCRM/Components/`, one file each:
 | `RelativeTime.since/day/due`, `TimeAgoText` | `RelativeTime.swift` | "10m", "4d", "Today", "Sat", "2 days late"; the year only when it is not this year. |
 | `Avatar(name:photo:)` | `Avatar.swift` | The photo at 48 pt, or the monogram in New York on the soft accent. Puts the row's separator 14 pt past itself. |
 | `AdaptiveStack` | `AdaptiveStack.swift` | Side by side, stacked at accessibility text sizes. For row metadata and button pairs. |
+| `AutonomySections(levels:choose:)` | `AutonomySections.swift` | One list section per job (Chat, Optimize profiles, Swipe) listing the four levels with `AutonomyLevel.summary`. The host loads the levels and saves the choice. Used by `AutopilotView`; meant for the setup step too. |
 | `\.motionReduced` | `Motion.swift` | True with Reduce Motion or Low Power Mode on. Read it before any spring, ring or color field and use a fade instead. |
 
 Type: SF Pro text styles. New York (`.fontDesign(.serif)`) only for explanations, empty states, setup and monograms.
