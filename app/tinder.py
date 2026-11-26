@@ -6,6 +6,7 @@ not confirmed against a real account: see docs/modules/tinder-connector.md for t
 """
 
 from collections.abc import Iterator
+from datetime import date
 
 import httpx
 
@@ -71,7 +72,8 @@ class TinderConnector(Connector):
         return {"id": message["_id"], "sent_at": message["sent_date"]}
 
     def read_candidates(self, token: str) -> list[dict]:
-        """The next profiles Tinder offers to swipe on: `id`, `name`, `bio` (may be empty), `photos` (URLs)."""
+        """The next profiles Tinder offers to swipe on: `id`, `name`, `bio` (may be empty), `photos` (URLs), `age`
+        and `distance_mi` (None when Tinder leaves them out)."""
         with self._client(token) as client:
             response = client.get("/v2/recs/core")
             response.raise_for_status()
@@ -81,6 +83,8 @@ class TinderConnector(Connector):
                     "name": result["user"]["name"],
                     "bio": result["user"].get("bio", ""),
                     "photos": [photo["url"] for photo in result["user"].get("photos", [])],
+                    "age": _age(result["user"].get("birth_date")),
+                    "distance_mi": result.get("distance_mi"),
                 }
                 # Tinder answers without `results` when it has nobody left to show.
                 for result in response.json()["data"].get("results") or []
@@ -132,3 +136,11 @@ class TinderConnector(Connector):
             page_token = data.get("next_page_token")
             if not page_token:
                 return
+
+
+def _age(birth_date: str | None) -> int | None:
+    """Whole years since an ISO 8601 birth date."""
+    if not birth_date:
+        return None
+    born, today = date.fromisoformat(birth_date[:10]), date.today()
+    return today.year - born.year - ((today.month, today.day) < (born.month, born.day))

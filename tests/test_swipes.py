@@ -1,6 +1,7 @@
 """Swipe copilot on Tinder, against the hand-written fixtures in `tests/fixtures/tinder`. No live calls."""
 
 import json
+from datetime import date
 from pathlib import Path
 
 import httpx
@@ -68,8 +69,9 @@ def user_id(db):
     return user_id
 
 
-def test_read_candidates_returns_each_profile_with_its_bio_and_photos(db, user_id, tinder):
+def test_read_candidates_returns_each_profile_with_its_bio_photos_age_and_distance(db, user_id, tinder):
     candidates = call(db, user_id, TinderConnector(), "read_candidates")
+    born_on_new_year = date.today().year  # every fixture birthday is January 1st
 
     assert candidates == [
         {
@@ -77,6 +79,8 @@ def test_read_candidates_returns_each_profile_with_its_bio_and_photos(db, user_i
             "name": "Dana",
             "bio": "Coffee first. I smoke a pack a day and love it.",
             "photos": ["https://images-ssl.gotinder.com/5f00000000000000000000d4/p-d4-1.jpg"],
+            "age": born_on_new_year - 1994,
+            "distance_mi": 3,
         },
         {
             "id": EVE,
@@ -86,8 +90,10 @@ def test_read_candidates_returns_each_profile_with_its_bio_and_photos(db, user_i
                 "https://images-ssl.gotinder.com/5f00000000000000000000e5/p-e5-1.jpg",
                 "https://images-ssl.gotinder.com/5f00000000000000000000e5/p-e5-2.jpg",
             ],
+            "age": born_on_new_year - 1996,
+            "distance_mi": 5,
         },
-        {"id": FAY, "name": "Fay", "bio": "", "photos": []},
+        {"id": FAY, "name": "Fay", "bio": "", "photos": [], "age": born_on_new_year - 1993, "distance_mi": 8},
     ]
 
 
@@ -187,6 +193,26 @@ def test_an_answer_that_is_neither_like_nor_pass_suggests_nothing(signed_in, llm
     assert suggestions(signed_in) == {}
 
 
+def test_a_candidate_shows_age_distance_and_the_super_like_proposed_for_them_while_it_waits(signed_in, llm):
+    llm.replies = ["pass\nNothing in common.", "super like\nShe climbs."]  # Dana, then Eve
+
+    found = suggestions(signed_in)
+
+    eve = found["Eve"]
+    assert (eve["age"], eve["distance_mi"]) == (date.today().year - 1996, 5)
+    assert eve["paid_item"] == {
+        "id": eve["paid_item"]["id"],
+        "app": "tinder",
+        "item": "super_like",
+        "name": "Eve",
+        "reason": "She climbs.",
+        "status": "pending",
+    }
+    assert found["Dana"]["paid_item"] is None
+    signed_in.post(f"/paid-items/{eve['paid_item']['id']}/decline")
+    assert [candidate["paid_item"] for candidate in signed_in.get("/swipes").json()] == [None, None]  # Dana, Eve
+
+
 def test_suggestions_need_a_stored_token_and_a_known_app(client, tinder):
     assert client.post("/swipes/tinder/suggestions").status_code == 409
     assert client.post("/swipes/hinge/suggestions").status_code == 404
@@ -245,3 +271,17 @@ def test_a_candidate_of_another_user_is_not_found(signed_in, client_for, llm):
 
     assert decide(client_for("other@example.com"), eve, "like").status_code == 404
     assert decide(signed_in, eve, "maybe").status_code == 422
+
+
+# Swipe layout (ADR 0004): the user picks one at a time or a list.
+
+
+def test_the_swipe_layout_is_empty_until_the_user_chooses_and_reads_back_once_chosen(client):
+    assert client.get("/swipes/layout").json() == {"layout": None}
+
+    assert client.put("/swipes/layout", json={"layout": "list"}).json() == {"layout": "list"}
+    assert client.get("/swipes/layout").json() == {"layout": "list"}
+    assert client.put("/swipes/layout", json={"layout": "one_at_a_time"}).status_code == 200
+    assert client.get("/swipes/layout").json() == {"layout": "one_at_a_time"}
+    assert client.put("/swipes/layout", json={"layout": "grid"}).status_code == 422
+    assert client.put("/swipes/layout", json={"layout": None}).status_code == 422

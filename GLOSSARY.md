@@ -142,6 +142,10 @@ One claim in a match read, with its evidence and confidence. The user can correc
 A profile the app found for the user to like or pass, with the AI's suggestion and its reason.
 _Avoid_: Profile
 
+**Swipe layout**:
+How the Swipe tab shows swipe candidates, as the user chose: one at a time, or a list. One at a time until they choose.
+_Avoid_: View mode
+
 ### Connecting apps
 
 **Connector**:

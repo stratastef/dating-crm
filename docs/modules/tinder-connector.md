@@ -38,6 +38,7 @@ The connector was built from public write-ups of the web API and was never run a
 | Any answer other than `2xx` means the message may or may not have been sent | A failed send is never retried |
 | An expired token gives HTTP `401` | Fallback to copilot |
 | `GET /v2/recs/core` returns `{"data": {"results": [{"user": {...}}]}}`, and `results` is absent or empty when nobody is left | `read_candidates` |
+| Each result holds `distance_mi` next to `user`, and `user.birth_date` as an ISO 8601 timestamp; the age is the whole years since it | `read_candidates` |
 | A candidate's `user` has `_id`, `name`, optional `bio` and `photos`, a list of objects with `url` | Candidate `profile_id`, name, bio, photo URLs |
 | `GET /like/{user _id}` likes and `GET /pass/{user _id}` passes, with no body, query or `s_number` needed, and both give HTTP `200` | `like`, `pass` |
 | The like is the free one: Super Like is a different endpoint (`/like/{id}/super`), which `like` never calls | A like spends no paid item |

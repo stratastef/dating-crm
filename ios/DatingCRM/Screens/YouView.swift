@@ -16,6 +16,7 @@ struct YouView: View {
             NavigationLink("Dashboard") { DashboardView(client: client) }
             NavigationLink("Autopilot") { AutopilotView(client: client) }
             NavigationLink("Preferences") { PreferencesView(client: client) }
+            NavigationLink("Swipe layout") { swipeLayout }
             NavigationLink("Connected apps") { ConnectedAppsView(client: client) }
             Section {
                 NavigationLink("Photos") { PhotosView(client: client) }
@@ -41,8 +42,13 @@ struct YouView: View {
             case "voice": VoiceView(client: client)
             case "preferences": PreferencesView(client: client)
             case "connected-apps": ConnectedAppsView(client: client)
+            case "swipe-layout": swipeLayout
             default: EmptyView()
             }
         }
+    }
+
+    private var swipeLayout: some View {
+        List { SwipeLayoutSection(client: client) }.navigationTitle("Swipe layout")
     }
 }
