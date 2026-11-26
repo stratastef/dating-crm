@@ -5,7 +5,7 @@ The signed-in app is `MainTabView` (`ios/DatingCRM/Screens/MainTabView.swift`): 
 | Tab | Shows now |
 | --- | --- |
 | Today | `TodayView` (see "Today"). Tapping the review count switches to Review. |
-| Review | `QueueView`. The tab's badge is the review count from Today's last load. |
+| Review | `QueueView`: the review queue as faces in glass (see "Review"). The tab's badge is the review count from Today's last load. |
 | Pipeline | `BoardView`, still under the seven stages. A tapped push switches to this tab and opens the card. Search (minimized to a toolbar button) filters the loaded cards by name; the plus button opens `NewCardSheet` to add a card by hand. |
 | Swipe | `SwipeView` |
 | You | `YouView`: Dashboard, Autopilot (`AutopilotView`), Preferences, Connected apps (`ConnectedAppsView`), Profile (Photos, Voice), Account (Settings, Sign out, which asks first) |
@@ -25,6 +25,7 @@ The shared components are in `ios/DatingCRM/Components/`, one file each:
 | `Toast` and `.toast($toast)` | `Toast.swift` | On Liquid Glass at the bottom for 5 seconds; Undo when `undo` is set. VoiceOver announces the text. |
 | `RelativeTime.since/day/due`, `TimeAgoText` | `RelativeTime.swift` | "10m", "4d", "Today", "Sat", "2 days late"; the year only when it is not this year. |
 | `Avatar(name:photo:)` | `Avatar.swift` | The photo at 48 pt, or the monogram in New York on the soft accent. Puts the row's separator 14 pt past itself. |
+| `FacePhoto(name:photo:)` | `FacePhoto.swift` | A face that fills its frame: the photo, or a 96 pt monogram at the top of the soft accent. For Review items and the card header. |
 | `AdaptiveStack` | `AdaptiveStack.swift` | Side by side, stacked at accessibility text sizes. For row metadata and button pairs. |
 | `AutonomySections(levels:choose:)` | `AutonomySections.swift` | One list section per job (Chat, Optimize profiles, Swipe) listing the four levels with `AutonomyLevel.summary`. The host loads the levels and saves the choice. Used by `AutopilotView`; meant for the setup step too. |
 | `.autosave(value, saved:) { save }` | `Autosave.swift` | Saves a second after the last change and when the view goes away. Pass `value` as `saved` until loaded. Ignore errors from a cancelled save. |
@@ -42,6 +43,15 @@ Type: SF Pro text styles. New York (`.fontDesign(.serif)`) only for explanations
 
 Every `Card` carries its card summary (see "Cards and messages"): `stageChangedAt`, `stalled`, `lastMessage` (`LastMessage`: sender, body, sent time), `hot`, `pendingDraft`, `leadPhotoUrl`. A row reads only these, never `/queue`. `BoardView.CardRow` is the A3 row: `Avatar` with the lead photo, the name with `TimeAgoText(date: card.lastActivity)` at the trailing edge (the last message, or the last stage change), "Chatting · Tinder", then the Hot, Stalled and Overdue badges. Name and time, and caption and badges, are each an `AdaptiveStack`, so they stack at accessibility sizes.
 
+## Review
+
+`Screens/QueueView.swift` renders `GET /queue` (see "Review queue") in a `ScrollView`, hot leads first, with pull to refresh. Its state is `ReviewQueue` (`ios/DatingCRM/ReviewQueue.swift`, `@Observable`): `items`, `load()`, `remove(item)` for an item the server no longer holds, and `dismiss(item)` / `undo(item)`.
+
+- **Faces in glass** (ADR 0009, the one place glass sits on content): `PhotoCard` puts `FacePhoto` behind the item and the plate on Liquid Glass over its lower part, 200 pt below the top. The glass is on the plate's background, not its content (glass turns the black capsule grey), under a 72% fill of the system background, so plate text is `.primary` only; grey text and the AI marker go on an `Inset` (solid background). The Hot badge sits on the soft accent.
+- **Every item:** `ItemHeader` (the name, a `NavigationLink(value: card)` that opens `CardDetailView`, and the Hot badge), then per kind: `DraftItem` ("Reply on Tinder" and the time of the answered message, the quote, the draft editable in place under the AI draft marker, Dismiss and Approve), `HandoverItem` (why autopilot stopped, from the trigger codes in `HandoverItem.reason`, the quote, each suggested reply under AI suggests with Copy, Hand back and Take over), `PaidItemCard` (the item and its cost, the reason, a link to the profile, Decline and Approve). The profile opens in `CandidateProfile`, a sheet with the candidate's photos and bio from `GET /swipes`.
+- **Dismiss with Undo:** `dismiss(item)` takes the draft out at once and calls `POST /drafts/{id}/dismiss` only after the undo window (5 s, the toast's time). Undo puts it back where it was and the server never hears of it; a reload meanwhile does not bring it back. A failed dismissal reloads, so the draft returns with the error.
+- **A new action** (Send, Copy, Retry) replaces Approve in `DraftItem`; one that ends the item calls `review.remove(item)`, one with Undo follows `dismiss`/`undo`. A new item kind gets its own view next to `DraftItem` and a branch in `QueueView`'s `ForEach`; kinds the app does not know are skipped.
+
 ## Connected apps
 
 `ConnectedAppsView(client:)` lists each dating app from `client.connectedApps()` (`GET /connectors`, see "Sync") with its `ConnectorState`: Connected, broken with its alert and when it came (the alert line in the accent, since it waits on the user), Copilot only, Not connected, or No connector (Hinge, Bumble: the app drafts and the user copies). Connect or Reconnect opens `ConnectAppSheet(client:app:onConnected:)`, which shows `ConnectAppSheet.steps[app]` (Tinder's say a computer is needed) and a secure field for the session token, and calls `client.connect(app:token:)`. Copilot only asks first, then calls `client.chooseCopilotOnly(app:)`. The setup step can push `ConnectedAppsView`; anything that offers Reconnect can present `ConnectAppSheet` alone.
@@ -58,5 +68,5 @@ Besides the Debug sign-in (`DCRM_SERVER`, `DCRM_TOKEN`) and `DCRM_TAB`, `DCRM_OP
 
 - The Review badge is the system red, not the accent: `UITabBarItem.appearance().badgeColor` has no effect on the SwiftUI `TabView`. It updates when Today loads, not when Review clears an item.
 - Not verified on screen: typing, autosave, the save error under a field and Edit on Voice and Preferences (screenshots only, no taps).
-- Not verified on screen: the toast (no screen shows one yet) and VoiceOver reading the AI marker and badges.
+- Not verified on screen: the toast (Review's Dismiss shows one, but nothing was tapped) and VoiceOver reading the AI marker and badges. Review's buttons, the card link and the profile sheet were not tapped either: screenshots only.
 - Error text is still system red, under 4.5:1 on white, outside `ErrorRow`. Settings is still a grey grouped form until its ticket.
