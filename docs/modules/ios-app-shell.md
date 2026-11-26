@@ -41,6 +41,7 @@ The shared components are in `ios/DatingCRM/Components/`, one file each:
 | `AutonomySections(levels:choose:)` | `AutonomySections.swift` | One list section per job (Chat, Optimize profiles, Swipe) listing the four levels with `AutonomyLevel.summary`. The host loads the levels and saves the choice. Used by `AutopilotView` and the setup step. |
 | `.autosave(value, saved:) { save }` | `Autosave.swift` | Saves a second after the last change and when the view goes away. Pass `value` as `saved` until loaded. Ignore errors from a cancelled save. |
 | `GrowingField(label:prompt:text:)` | `GrowingField.swift` | A text field that grows, hides the keyboard on return and takes taps on its whole 44 pt row. `label` is read by VoiceOver. |
+| `RatingPicker(title:rating:)` | `RatingPicker.swift` | The date's rating as one list section: 1 to 5 as 44 pt rows, each with its anchor ("Good: I'd like another date"), 4 and 5 marked "Good date", the footer "Good = rated 4 or 5." `rating` is nil until chosen. The rating sheet and the card's Details use it. |
 | `ErrorRow(text:retry:)` | `ErrorRow.swift` | A failed load or save next to what failed, in primary text with a red icon; tapping it retries. Borderless, so it can share a row with a field. |
 | `StatusStrip(client:tab:)` | `StatusStrip.swift` | The status strip, as a modifier on the `TabView`: its bottom accessory while `GET /status` has a message. Only `MainTabView` uses it. |
 | `\.motionReduced` | `Motion.swift` | True with Reduce Motion or Low Power Mode on. Read it before any spring, ring or color field and use a fade instead. |
@@ -94,8 +95,12 @@ Every `Card` carries its card summary (see "Cards and messages"): `stageChangedA
   - No draft: Write draft in Matched and Chatting (`POST /cards/{id}/drafts`, then a reload); nothing from Number swapped on. A `409` (no style profile yet) sets `needsVoice`, and the card pushes `VoiceView`.
   - Send and Retry call `client.sendDraft`, show `Toast.sending` (Undo: `client.undoSend`, then a reload; `409` says it is too late) and call `sent`: the card reloads at once (the draft leaves the dock), then every 3 seconds, at most 4 times, until a new message is in the chat. Copy calls `client.copy`, toasts "Copied. Paste it in Hinge." and reloads, so the draft docks again as copied.
   - "Send at" (send timing) goes in the button row of `DraftComposer.dock`, next to Send, at the comment there.
-- **Details**: the fields of the old card form (stage, next action, due date, notes, match read) in a plain list under the header, with Save in the toolbar. Reaching Dated unrated asks for a rating.
-- Screenshots: `docs/design/screenshots/redesign/t59-card-*.png`.
+- **Details**: a plain list under the header: Stage; Next action (a labeled `GrowingField`) with the Due date toggle and day; Notes; for a rated card or a Dated one, the date's rating (`RatingPicker`, nothing selected until rated) and its note; then the match read (`ReadSection`).
+  - Edits save as the user makes them: `.autosave` on the whole card compares `Edits` (stage, notes, next action, due date, rating, note), not the whole card, a second after the last change and when the card goes away (popping it, or pushing `VoiceView`). Switching to Chat keeps the debounce running. A load or a save's answer keeps edits the server does not have yet (`take(_:)`). A failed save shows `ErrorRow` under each field whose edit is not saved; tapping it saves again.
+  - Reaching Dated unrated opens the rating sheet; "Not now" leaves the rating on Details.
+  - Match read: each inference's kind, its `confidenceWord` (Sure, Likely, Guess; "Corrected by you" once corrected), the value and "Evidence: …" in `.subheadline`. Kind and word stack at accessibility sizes. A tap corrects it in an alert (`PATCH /inferences/{id}`).
+- **Rating sheet** (`DateRatingSheet(name:onRated:)`, `Screens/DateRatingSheet.swift`): one sheet for the card, Today's dates to rate and the Pipeline's "Rate the date" rows. `RatingPicker` with nothing selected, a note, "Not now" and Save, which waits for a rating. The host saves with `client.update` and no stage change.
+- Screenshots: `docs/design/screenshots/redesign/t59-card-*.png` (Chat), `t60-*.png` (Details, rating sheet), `t72-card-*.png` (planned send).
 
 ## Review
 

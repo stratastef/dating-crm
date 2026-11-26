@@ -7,7 +7,7 @@ for in the prompt.
 import json
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, computed_field
 from sqlalchemy import Connection, text
 
 from app import jev, llm
@@ -34,6 +34,12 @@ class Inference(BaseModel):
     evidence: str
     confidence: float  # 0 to 1
     corrected: str | None  # the user's correction; the value to use when set
+
+    @computed_field
+    @property
+    def confidence_word(self) -> str:
+        """`confidence` in a word for the card: Sure from 0.8, Likely from 0.5, otherwise Guess."""
+        return "Sure" if self.confidence >= 0.8 else "Likely" if self.confidence >= 0.5 else "Guess"
 
 
 class Correction(BaseModel):
