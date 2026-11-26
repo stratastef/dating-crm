@@ -7,6 +7,7 @@ Files:
 - [`goodhour-mark.svg`](goodhour-mark.svg): the mark, light and dark (follows `prefers-color-scheme`).
 - [`goodhour-lockup.svg`](goodhour-lockup.svg): mark and wordmark. The wordmark is live text; see [Wordmark](#wordmark-and-lockup).
 - [`goodhour-app-icon.svg`](goodhour-app-icon.svg), [`goodhour-app-icon-dark.svg`](goodhour-app-icon-dark.svg): 1024 × 1024 icon art.
+- [`motion-and-haptics.md`](motion-and-haptics.md): the animated splash and the haptics map.
 
 ## Name
 
