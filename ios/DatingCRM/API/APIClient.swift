@@ -200,6 +200,18 @@ struct APIClient {
         return decided.applied
     }
 
+    /// The Swipe layout the user chose. Nil until they choose: Swipe shows one at a time meanwhile.
+    func swipeLayout() async throws -> SwipeLayout? {
+        let setting: LayoutSetting = try await send("GET", "swipes/layout")
+        return setting.layout
+    }
+
+    func setSwipeLayout(_ layout: SwipeLayout) async throws -> SwipeLayout? {
+        let setting: LayoutSetting = try await send(
+            "PUT", "swipes/layout", body: Self.encoder.encode(LayoutSetting(layout: layout)))
+        return setting.layout
+    }
+
     /// The user's own photos, best first once ranked.
     func photos() async throws -> [ProfilePhoto] {
         try await send("GET", "photos")
@@ -419,6 +431,10 @@ private struct Consent: Decodable {
 
 private struct SwipeDecided: Decodable {
     let applied: Bool
+}
+
+private struct LayoutSetting: Codable {
+    let layout: SwipeLayout?
 }
 
 private struct Purge: Encodable {
