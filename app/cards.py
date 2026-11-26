@@ -15,7 +15,7 @@ from app.auth import CurrentUser, Db
 from app.autopilot import autopilot_allowed
 from app.card_lookup import own_card
 from app.drafts import _COLUMNS as _DRAFT_COLUMNS
-from app.drafts import Draft, present
+from app.drafts import PLANNED, Draft, present
 from app.jobs import enqueue, handler
 from app.review import is_hot_lead
 from app.voice import queue_profile
@@ -97,6 +97,8 @@ class Card(BaseModel):
     hot: bool  # a hot lead: `is_hot_lead()` in `app/review.py`, as on the review queue
     pending_draft: Draft | None  # the newest pending draft, the one the review queue shows; null when none
     drafts: list[Draft]  # the card's draft list: its pending, copied and failed drafts, newest first
+    # Autopilot's planned send: the draft it sends alone at its `send_at`, with its `timing_reason`; null when none.
+    planned_send: Draft | None
     lead_photo_url: str | None  # the first photo attached to the card; null when unknown
     # Where the Pipeline lists the card, and why: see `app/pipeline.py`.
     pipeline_group: str  # a `Group`: `waiting_for_you`, `handled_by_autopilot`, ...
@@ -138,15 +140,20 @@ def summarize(db: Connection, user_id: int, cards: Sequence[Row]) -> list[Card]:
         text(
             f"""
             SELECT {_DRAFT_COLUMNS} FROM drafts
-            WHERE user_id = :user_id AND card_id = ANY(:ids) AND status IN ('pending', 'copied', 'failed')
+            WHERE user_id = :user_id AND card_id = ANY(:ids)
+              AND (status IN ('pending', 'copied', 'failed') OR {PLANNED})
             ORDER BY created_at DESC, id DESC
             """
         ),
         params,
     ).all()
     drafts: dict[int, list[Draft]] = {}
+    planned: dict[int, Draft] = {}
     for draft in present(db, user_id, waiting):
-        drafts.setdefault(draft.card_id, []).append(draft)
+        if draft.status == "approved":
+            planned[draft.card_id] = draft
+        else:
+            drafts.setdefault(draft.card_id, []).append(draft)
     lead_photos = dict(
         db.execute(
             text(
@@ -165,6 +172,7 @@ def summarize(db: Connection, user_id: int, cards: Sequence[Row]) -> list[Card]:
             "hot": is_hot_lead(db, user_id, card.id),
             "pending_draft": next((draft for draft in drafts.get(card.id, []) if draft.status == "pending"), None),
             "drafts": drafts.get(card.id, []),
+            "planned_send": planned.get(card.id),
             "lead_photo_url": lead_photos.get(card.id),
         }
         for card in cards
@@ -388,7 +396,8 @@ def insert_message(
 
     - from `me`: the style profile is rewritten from the user's own messages, a pending handover ends, and the
       card's copied drafts older than the message are `sent`;
-    - from `them`: Stalled is cleared, the handover trigger runs, and chat autopilot is asked to reply.
+    - from `them`: Stalled is cleared, autopilot's planned send to them is dropped, the handover trigger runs,
+      and chat autopilot is asked to reply.
 
     Returns the stored message, or None when the user has no such card. `sent_at` defaults to now. A message
     whose `external_id` the card already has raises `IntegrityError`; with `skip_duplicate` it is left alone
@@ -435,6 +444,9 @@ def insert_message(
         text("UPDATE cards SET stalled_at = NULL WHERE id = :id AND user_id = :user_id"),
         {"id": card_id, "user_id": user_id},
     )
+    from app.send import drop_planned_sends  # imported here: app.send imports this module
+
+    drop_planned_sends(db, user_id, card_id)  # it answers an older message: the reply job plans a new one
     # shortcut: Jev is called here, inside the request or the sync job, once per sentence and check. Move
     # it to its own job if a sync gets slow.
     hits = handover.incoming(db, user_id, card_id, row.id, body)

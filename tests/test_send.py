@@ -91,6 +91,12 @@ def work_now(app) -> None:
         pass
 
 
+def work_after_send_time(app) -> None:
+    """Run every job that is due once autopilot's planned sends are: at most 12 hours out, plus the night window."""
+    while run_once(app.state.engine, now=datetime.now(UTC) + timedelta(days=1)):
+        pass
+
+
 def status(app, draft) -> str:
     with app.state.engine.begin() as db:
         return db.execute(text("SELECT status FROM drafts WHERE id = :id"), {"id": draft["id"]}).scalar_one()

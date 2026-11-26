@@ -28,7 +28,7 @@ The shared components are in `ios/DatingCRM/Components/`, one file each:
 | `Toast.sending(to: name) { undo }` | `Toast.swift` | The user's Send: "Sending to Ada…" with Undo and an accent ring that drains over the 5 seconds the server holds the send, then "Sent to Ada". With motion reduced the ring fades instead. `undo` calls `client.undoSend(draftID:)` (`409`: too late). Review uses it; so does the card's composer. |
 | `Held(after:) { action }` | `Held.swift` | Runs the action after 5 seconds unless `undo()` comes first; `undo()` is false once it started. Pair it with a toast's Undo for what the server cannot take back (a swipe). |
 | `SwipeLayoutSection(client:)` | `SwipeLayoutSection.swift` | The Swipe layout choice as one list section that loads and saves itself. Under You and in the setup step. |
-| `RelativeTime.since/day/due`, `TimeAgoText` | `RelativeTime.swift` | "10m", "4d", "Today", "Sat", "2 days late"; the year only when it is not this year. |
+| `RelativeTime.since/day/due/around`, `TimeAgoText` | `RelativeTime.swift` | "10m", "4d", "Today", "Sat", "2 days late"; the year only when it is not this year. `around` is a send time: "around 20:15", "tomorrow around 07:05". |
 | `Avatar(name:photo:size:)` | `Avatar.swift` | The photo at 48 pt (`size` for smaller, such as 32 pt in a navigation bar), or the monogram in New York on the soft accent. Puts the row's separator 14 pt past itself. |
 | `Inset { … }` | `Inset.swift` | A solid surface inside a glass plate or the composer, where grey text and the AI marker stay at 4.5:1. |
 | `DraftComposer(client:card:toast:needsVoice:reload:sent:)` | `DraftComposer.swift` | The card's draft docked at the bottom of its chat (see "Card detail"). |
@@ -66,9 +66,15 @@ Every `Card` carries its card summary (see "Cards and messages"): `stageChangedA
 `PipelineView` renders the groups `GET /pipeline` sends (`client.pipeline()`, `[PipelineGroup]`), in the server's order. Each card also carries `pipelineGroup`, `reason`, `handoverTrigger` and `autopilotActivity`, the server's codes, kept as strings so a newer server's code does not break decoding.
 
 - **Headers** are rows: the group's title, its count and a chevron, 44 pt, a tap collapses the group. Waiting for you is in the accent. Archived starts collapsed. A search opens every group.
-- **Status line**: `Card.pipelineStatus(now:calendar:)` (in `PipelineView.swift`) words the codes, one source per group: the reason for Waiting for you, the activity for Handled by autopilot, then the card's `topic` when it has one ("sent 4d ago, no reply yet · talking museums"), "You wrote 3h ago" for Waiting for them, the next action and its day for Texting off-app, else "Date rated 5/5" or "No next action". An unknown code shows no line. `AIMarker(.draft)` goes with "Reply ready in Review", `AIMarker(.autopilot)` with every Handled by autopilot row. "Rate the date" is a 44 pt button that opens `DateRatingSheet`.
+- **Status line**: `Card.pipelineStatus(now:calendar:)` (in `PipelineView.swift`) words the codes, one source per group: the reason for Waiting for you, the activity for Handled by autopilot, then the card's `topic` when it has one ("sent 4d ago, no reply yet · talking museums"), "You wrote 3h ago" for Waiting for them, the next action and its day for Texting off-app, else "Date rated 5/5" or "No next action". A planned send (`planned`) says when and why instead of the topic: "replies around 20:15 · they take their time", from `card.plannedSend` (`sendAt`, `timingReason`); with no reason it ends with the topic. An unknown code shows no line. `AIMarker(.draft)` goes with "Reply ready in Review", `AIMarker(.autopilot)` with every Handled by autopilot row. "Rate the date" is a 44 pt button that opens `DateRatingSheet`.
 - **Motion**: headers and cards are one `ForEach`, so a card whose group changed is the same row and moves there with a spring on reload. With `motionReduced` the card's row id includes its group, so it fades out and in instead.
-- Returning from a card, adding one and rating reload the Pipeline. Screenshots: `docs/design/screenshots/redesign/t52-pipeline-*.png`.
+- Returning from a card, adding one and rating reload the Pipeline. Screenshots: `docs/design/screenshots/redesign/t52-pipeline-*.png`, and with planned sends `t71-pipeline-*.png`.
+
+## Send timing
+
+- **The card's planned send:** `PlannedBubble` (private, in `CardDetailView.swift`) shows `card.plannedSend` after the last message in Chat: the user's bubble outlined with a dashed line (not sent yet), then the Autopilot marker and "Goes out around 20:15 · they take their time". It is not in the composer: the card's `drafts` list holds only what waits for the user, and the composer offers no Write draft while a planned send waits. Send now and Hold come with #72. Screenshots: `t71-card-*.png`.
+- **Night window:** a section of `AutopilotView` under Pause, two hour pickers (From, Until) loaded with `client.settings()` and saved together with `client.setNightWindow(start:end:)` (`UserSettings.nightWindowStart/End`, hours 0–23). Screenshots: `t71-autopilot-*.png`.
+- `Draft.sendAt` and `Draft.timingReason` are optional, so drafts from an older server decode.
 
 ## Card detail
 
@@ -82,9 +88,9 @@ Every `Card` carries its card summary (see "Cards and messages"): `stageChangedA
   - `pending`: the text editable in an `Inset` under AI draft, then Send if `sendable`, else Copy. Either saves an edit first. A draft that denies being AI says so and offers neither until edited.
   - `copied`: "Copied, not sent yet", the text, Clear (hidden at once, `POST /drafts/{id}/dismiss` after the toast's 5 seconds unless Undo, through `Held`) and Copy again (clipboard only).
   - `failed`: the warning Review shows, the text editable, Copy and Retry (Retry only if `sendable`).
-  - No draft: Write draft in Matched and Chatting (`POST /cards/{id}/drafts`, then a reload); nothing from Number swapped on. A `409` (no style profile yet) sets `needsVoice`, and the card pushes `VoiceView`.
+  - No draft: Write draft in Matched and Chatting (`POST /cards/{id}/drafts`, then a reload); nothing from Number swapped on, or while the card has a planned send. A `409` (no style profile yet) sets `needsVoice`, and the card pushes `VoiceView`.
   - Send and Retry call `client.sendDraft`, show `Toast.sending` (Undo: `client.undoSend`, then a reload; `409` says it is too late) and call `sent`: the card reloads at once (the draft leaves the dock), then every 3 seconds, at most 4 times, until a new message is in the chat. Copy calls `client.copy`, toasts "Copied. Paste it in Hinge." and reloads, so the draft docks again as copied.
-  - **Send timing** adds to the pending state: Send now and Hold on a planned send, "Send at" next to Send, and its ring (the `Countdown` style of `Toast.sending`) go in the button row of `DraftComposer.dock`, at the comment there. A planned send is an `approved` draft, which the card's draft list does not carry today: add it to `drafts` (`summarize()` in `app/cards.py`) with its send time, and give the composer a fourth state.
+  - **Send timing** adds to the pending state: Send now and Hold on a planned send, "Send at" next to Send, and its ring (the `Countdown` style of `Toast.sending`) go in the button row of `DraftComposer.dock`, at the comment there. A planned send is an `approved` draft, which the card's draft list does not carry: the card has it as `card.plannedSend` (shown by `PlannedBubble` today, see "Send timing"); #72 can dock it as a fourth state.
 - **Details**: the fields of the old card form (stage, next action, due date, notes, match read) in a plain list under the header, with Save in the toolbar. Reaching Dated unrated asks for a rating.
 - Screenshots: `docs/design/screenshots/redesign/t59-card-*.png`.
 
@@ -115,7 +121,7 @@ Every `Card` carries its card summary (see "Cards and messages"): `stageChangedA
 
 ## Simulator checks
 
-Besides the Debug sign-in (`DCRM_SERVER`, `DCRM_TOKEN`) and `DCRM_TAB`, `DCRM_OPEN=voice`, `dashboard`, `preferences`, `connected-apps`, `calendar`, `swipe-layout`, `photos`, `bios`, `notifications`, `privacy`, `activity-log` or `purge` pushes that screen under You on launch: `SIMCTL_CHILD_DCRM_TAB=you SIMCTL_CHILD_DCRM_OPEN=voice xcrun simctl launch …`. `DCRM_CARD=7` with `DCRM_TAB=pipeline` opens that card on launch. `DCRM_SETUP=1` opens setup instead of the tabs, or on one step with its name (`DCRM_SETUP=voice`; see "Setup").
+Besides the Debug sign-in (`DCRM_SERVER`, `DCRM_TOKEN`) and `DCRM_TAB`, `DCRM_OPEN=voice`, `dashboard`, `autopilot`, `preferences`, `connected-apps`, `calendar`, `swipe-layout`, `photos`, `bios`, `notifications`, `privacy`, `activity-log` or `purge` pushes that screen under You on launch: `SIMCTL_CHILD_DCRM_TAB=you SIMCTL_CHILD_DCRM_OPEN=voice xcrun simctl launch …`. `DCRM_CARD=7` with `DCRM_TAB=pipeline` opens that card on launch. `DCRM_SETUP=1` opens setup instead of the tabs, or on one step with its name (`DCRM_SETUP=voice`; see "Setup").
 
 ## Limits
 

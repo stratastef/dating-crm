@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// What the app may do alone: Pause first, then the autonomy level per job, the AI budget and the swipe limits.
+/// What the app may do alone: Pause first, then the night window, the autonomy level per job, the AI budget and the
+/// swipe limits.
 struct AutopilotView: View {
     let client: APIClient
 
@@ -12,6 +13,8 @@ struct AutopilotView: View {
     @State private var cap = ""
     @State private var perRun = ""
     @State private var perDay = ""
+    /// Holds the night window; nil until loaded.
+    @State private var settings: UserSettings?
     @State private var error: String?
 
     var body: some View {
@@ -20,6 +23,7 @@ struct AutopilotView: View {
                 Label(error, systemImage: "exclamationmark.triangle")
             }
             pauseSection
+            nightSection
             AutonomySections(levels: autonomy) { job, level in
                 Task { await run { autonomy = try await client.setAutonomy(job: job, level: level) } }
             }
@@ -34,6 +38,7 @@ struct AutopilotView: View {
                 autonomy = try await client.autonomy()
                 show(try await client.budget())
                 show(try await client.swipeLimits())
+                settings = try await client.settings()
                 apps = Set(try await client.cards().map(\.app)).sorted()
             }
         }
@@ -53,6 +58,39 @@ struct AutopilotView: View {
         }
         // Under the root `.tint(.primary)` an "on" switch is white on white in dark mode. Pause must read at a glance.
         .tint(.green)
+    }
+
+    private var nightSection: some View {
+        Section {
+            if let settings {
+                Picker("From", selection: nightHour(\.nightWindowStart, settings)) { hours }
+                Picker("Until", selection: nightHour(\.nightWindowEnd, settings)) { hours }
+            }
+        } header: {
+            header("Night window")
+        } footer: {
+            explanation("Autopilot sends nothing between these times, in your time zone. A reply due then goes out just after.")
+        }
+    }
+
+    private var hours: some View {
+        ForEach(0..<24, id: \.self) { hour in
+            let time = Calendar.current.date(bySettingHour: hour, minute: 0, second: 0, of: .now)!
+            Text(time.formatted(date: .omitted, time: .shortened)).tag(hour)
+        }
+    }
+
+    /// One end of the night window. A change saves both ends, as the server now holds them.
+    private func nightHour(_ end: WritableKeyPath<UserSettings, Int>, _ current: UserSettings) -> Binding<Int> {
+        Binding {
+            current[keyPath: end]
+        } set: { hour in
+            var changed = current
+            changed[keyPath: end] = hour
+            Task {
+                await run { settings = try await client.setNightWindow(start: changed.nightWindowStart, end: changed.nightWindowEnd) }
+            }
+        }
     }
 
     private var budgetSection: some View {

@@ -142,6 +142,9 @@ struct CardDetailView: View {
                         }
                         Bubble(message: message, name: card.name, last: index == messages.count - 1)
                     }
+                    if let planned = card.plannedSend {
+                        PlannedBubble(draft: planned).padding(.top, 8)
+                    }
                     if let handover = card.handover {
                         HandoverBanner(
                             client: client, card: card, handover: handover,
@@ -303,5 +306,35 @@ private struct Bubble: View {
         .accessibilityValue(
             [message.sentByAutopilot ? AIMarker.Kind.autopilot.spokenLabel : nil, last ? RelativeTime.ago(message.sentAt) : nil]
                 .compactMap(\.self).joined(separator: ", "))
+    }
+}
+
+/// Autopilot's planned send, after the last message: the user's bubble, outlined because it is not sent yet, then
+/// when it goes out and why ("Goes out around 20:15 · they take their time"). Send now and Hold come next (#72).
+private struct PlannedBubble: View {
+    let draft: Draft
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 3) {
+            Text(draft.text)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 9)
+                .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(Color.primary, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+            AdaptiveStack(spacing: 6) {
+                AIMarker(.autopilot)
+                Text(when).font(.footnote).foregroundStyle(.secondaryText)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .padding(.leading, 48)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Planned by autopilot: \(draft.text)")
+        .accessibilityValue(when)
+    }
+
+    private var when: String {
+        let time = draft.sendAt.map { "Goes out \(RelativeTime.around($0))" } ?? "Goes out soon"
+        guard let reason = draft.timingReason, !reason.isEmpty else { return time }
+        return "\(time) · \(reason)"
     }
 }

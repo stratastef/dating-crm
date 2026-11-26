@@ -22,7 +22,7 @@ An Archived card is `archived`, whatever else is true of it: archiving is how th
    7. `rate_date`: a Dated card has no rating.
    8. `your_turn`: a Matched or Chatting card autopilot is not handling, whose last message is from the match.
    9. `opener_due`: a Matched card autopilot is not handling, with no messages.
-2. **`handled_by_autopilot`**: a Matched or Chatting card autopilot is handling (below). `autopilot_activity` is `drafting_reply` (the match wrote last and a `chat_reply` job is queued or running) or `sent_waiting` (the user or autopilot wrote last). The time to show is `last_message.sent_at`, and the row ends with the card's `topic` (see "Cards and messages").
+2. **`handled_by_autopilot`**: a Matched or Chatting card autopilot is handling (below). `autopilot_activity` is `drafting_reply` (the match wrote last and a `chat_reply` job is queued or running), `planned` (the card has a planned send: its `planned_send` gives the send time and reason, see "Send timing") or `sent_waiting` (the user or autopilot wrote last). The time to show is `last_message.sent_at`, or `planned_send.send_at` for `planned`, and the row ends with the card's `topic` (see "Cards and messages").
 3. **`waiting_for_them`**: every other Matched or Chatting card.
 4. **`texting_off_app`**: Number swapped, Date set, Dated and Seeing them.
 
@@ -31,7 +31,7 @@ An Archived card is `archived`, whatever else is true of it: archiving is how th
 - chat autopilot may act for the card's app: nothing is paused for it or for all apps, the AI budget is not reached, and chat autonomy is Autopilot or Full autopilot (`autopilot_block()`);
 - the app can send to the card: it has a working connector (not copilot-only, a session token stored, `send` not switched off) and the card is linked to a match (`refusal()` in `app/send.py`, the rules an unattended send is held to);
 - the card has no handover, pending or taken over;
-- autopilot is doing something: the user or autopilot wrote last, or the match wrote last and a `chat_reply` job is queued. A reply job that wrote nothing (no style profile, an old message) leaves the card `your_turn`.
+- autopilot is doing something: the user or autopilot wrote last, or the match wrote last and a `chat_reply` job is queued or a planned send waits for its send time. A reply job that wrote nothing (no style profile, an old message) leaves the card `your_turn`.
 
 Autopilot sends no openers yet, so a new match is `opener_due` even when autopilot may act. When #73 adds the opener job, a card with no messages and that job queued becomes Handled by autopilot with `autopilot_activity` `writing_opener`.
 
