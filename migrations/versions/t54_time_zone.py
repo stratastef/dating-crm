@@ -1,14 +1,14 @@
 """add the user's time zone, which the app sends on each launch
 
 Revision ID: t54_time_zone
-Revises: t48_phone_sign_in
+Revises: t61_copilot_only_apps
 """
 
 import sqlalchemy as sa
 from alembic import op
 
 revision = "t54_time_zone"
-down_revision = "t48_phone_sign_in"
+down_revision = "t61_copilot_only_apps"
 branch_labels = None
 depends_on = None
 
