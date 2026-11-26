@@ -22,13 +22,26 @@ struct SignInTests {
         #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
     }
 
-    @Test func tradesThePhoneNumberAndCodeForAToken() async throws {
-        server.respond(#"{"token": "device-token"}"#)
+    @Test func sendsTheInviteCodeWithTheCodeRequestOfANewAccount() async throws {
+        server.respond("", status: 204)
 
-        let token = try await APIClient(baseURL: URL(string: "https://crm.test")!, token: "", transport: server.transport)
+        try await APIClient(baseURL: URL(string: "https://crm.test")!, token: "", transport: server.transport)
+            .requestSignInCode(phone: "+15555550100", inviteCode: "K7QX-M2PA")
+
+        let request = try #require(server.requests.first)
+        #expect(request.httpMethod == "POST")
+        #expect(request.url?.absoluteString == "https://crm.test/sign-in/code")
+        #expect(try body(request) == ["phone": "+15555550100", "invite_code": "K7QX-M2PA"])
+    }
+
+    @Test func tradesThePhoneNumberAndCodeForATokenAndLearnsWhetherItCreatedTheAccount() async throws {
+        server.respond(#"{"token": "device-token", "new_account": true}"#)
+
+        let signedIn = try await APIClient(baseURL: URL(string: "https://crm.test")!, token: "", transport: server.transport)
             .signIn(phone: "+15555550100", code: "123456")
 
-        #expect(token == "device-token")
+        #expect(signedIn.token == "device-token")
+        #expect(signedIn.newAccount)
         let request = try #require(server.requests.first)
         #expect(request.httpMethod == "POST")
         #expect(request.url?.absoluteString == "https://crm.test/sign-in")
