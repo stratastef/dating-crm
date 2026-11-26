@@ -23,7 +23,7 @@ struct HandoverSection: View {
                 Text(state == .takenOver
                     ? "You took over this chat. Autopilot stays out until you hand it back."
                     : "Autopilot paused this chat. It waits for your reply.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.secondaryText)
                 ForEach(suggestions, id: \.self) { suggestion in
                     Button(suggestion, systemImage: "doc.on.doc") {
                         UIPasteboard.general.string = suggestion

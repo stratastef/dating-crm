@@ -58,6 +58,7 @@ struct Message: Codable, Identifiable, Hashable {
     let id: Int
     var sender: Sender
     var body: String
+    var sentAt: Date
 }
 
 /// One week on the dashboard. `week` is local midnight of the Monday it starts on.

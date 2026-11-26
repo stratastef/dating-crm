@@ -41,8 +41,27 @@ struct APIClientTests {
 
         let messages = try await server.client().messages(cardID: 1)
 
-        #expect(messages == [Message(id: 7, sender: .them, body: "Hi!"), Message(id: 8, sender: .me, body: "Hey")])
+        #expect(messages == [
+            Message(id: 7, sender: .them, body: "Hi!", sentAt: Date(timeIntervalSince1970: 1_795_168_800)),
+            Message(id: 8, sender: .me, body: "Hey", sentAt: Date(timeIntervalSince1970: 1_795_169_100)),
+        ])
         #expect(server.requests.first?.url?.absoluteString == "https://crm.test/cards/1/messages")
+    }
+
+    @Test func decodesFullTimestampsAndPlainDays() async throws {
+        // The server sends timestamps with microseconds and either `Z` or an offset, and due dates as plain days.
+        server.respond("""
+        [{"id": 7, "card_id": 1, "external_id": null, "sender": "them", "body": "Hi!", "sent_at": "2026-11-20T10:00:00.123456Z"},
+         {"id": 8, "card_id": 1, "external_id": null, "sender": "me", "body": "Hey", "sent_at": "2026-11-20T11:05:00+01:00"}]
+        """)
+        server.respond(cardJSON(stage: "chatting", nextAction: "null", dueDate: "\"2026-12-01\""))
+
+        let messages = try await server.client().messages(cardID: 1)
+        let card = try await server.client().card(id: 1)
+
+        #expect(abs(messages[0].sentAt.timeIntervalSince1970 - 1_795_168_800.123) < 0.001)
+        #expect(messages[1].sentAt == Date(timeIntervalSince1970: 1_795_169_100))
+        #expect(card.dueDate == day(2026, 12, 1))
     }
 
     @Test func savesStageNotesNextActionAndDueDate() async throws {

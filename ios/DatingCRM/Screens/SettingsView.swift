@@ -4,9 +4,9 @@ import SwiftUI
 /// privacy switches, and find-and-purge for a match who asks for their data to be deleted.
 struct SettingsView: View {
     let client: APIClient
-    /// The dating apps the user has cards on. Each gets its own pause switch.
-    let apps: [String]
 
+    /// The dating apps the user has cards on. Each gets its own pause switch.
+    @State private var apps: [String] = []
     @State private var pauses = Pauses()
     @State private var autonomy: [String: AutonomyLevel] = [:]
     @State private var budget: Budget?
@@ -38,6 +38,7 @@ struct SettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             await run {
+                apps = Set(try await client.cards().map(\.app)).sorted()
                 pauses = try await client.pauses()
                 autonomy = try await client.autonomy()
                 show(try await client.budget())
@@ -146,7 +147,7 @@ struct SettingsView: View {
                 .disabled(!PurgeConfirmation.allows(typed: confirmation, chosen: chosen))
             }
             if let purgeResult {
-                Text(purgeResult).foregroundStyle(.secondary)
+                Text(purgeResult).foregroundStyle(.secondaryText)
             }
         } header: {
             Text("Find and purge")

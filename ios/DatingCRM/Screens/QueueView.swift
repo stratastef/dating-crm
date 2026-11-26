@@ -15,6 +15,7 @@ struct QueueView: View {
             }
             if loaded && items.isEmpty {
                 ContentUnavailableView("Nothing to review", systemImage: "checkmark.circle")
+                    .fontDesign(.serif)
             }
             ForEach(items) { item in
                 // Kinds this version does not know have no draft and are not shown.
@@ -82,22 +83,23 @@ private struct DraftRow: View {
 
     var body: some View {
         Section {
+            AIMarker(.draft)
             TextField("Draft", text: $text, axis: .vertical)
                 .lineLimit(2...)
-            HStack {
-                Button("Approve", systemImage: "checkmark") { run(approve: true) }
+            // Styled buttons, not the default: with the default, a tap anywhere in the row triggers both.
+            AdaptiveStack(spacing: 8) {
+                Button("Dismiss", role: .destructive) { run(approve: false) }
+                    .buttonStyle(.secondaryCapsule)
+                Button("Approve") { run(approve: true) }
+                    .buttonStyle(.primaryCapsule)
                     .disabled(text.isEmpty)
-                Spacer()
-                Button("Dismiss", systemImage: "xmark", role: .destructive) { run(approve: false) }
             }
-            // Without this, a tap anywhere in the row triggers both buttons.
-            .buttonStyle(.borderless)
             .disabled(busy)
         } header: {
             HStack {
-                Text(item.cardName)
+                Text(item.cardName).foregroundStyle(Color.primary)
                 if item.hot {
-                    Label("Hot lead", systemImage: "flame.fill").foregroundStyle(.orange)
+                    Badge(.hot)
                 }
             }
         }
