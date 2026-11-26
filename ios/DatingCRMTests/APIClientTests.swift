@@ -18,9 +18,10 @@ struct APIClientTests {
         let cards = try await server.client().cards()
 
         let changed = Date(timeIntervalSince1970: 1_795_168_800)
+        let created = Date(timeIntervalSince1970: 1_795_078_800)
         #expect(cards == [
-            Card(id: 1, app: "tinder", name: "Ada", stage: .numberSwapped, notes: "Climbs", nextAction: "Call", dueDate: day(2026, 12, 1), stageChangedAt: changed),
-            Card(id: 2, app: "hinge", name: "Bea", stage: .matched, notes: "", nextAction: nil, dueDate: nil, stageChangedAt: changed),
+            Card(id: 1, app: "tinder", name: "Ada", stage: .numberSwapped, notes: "Climbs", nextAction: "Call", dueDate: day(2026, 12, 1), stageChangedAt: changed, createdAt: created),
+            Card(id: 2, app: "hinge", name: "Bea", stage: .matched, notes: "", nextAction: nil, dueDate: nil, stageChangedAt: changed, createdAt: created),
         ])
         let request = try #require(server.requests.first)
         #expect(request.httpMethod == "GET")
@@ -104,14 +105,16 @@ struct APIClientTests {
 
     @Test func listsACardsMessages() async throws {
         server.respond("""
-        [{"id": 7, "card_id": 1, "external_id": null, "sender": "them", "body": "Hi!", "sent_at": "2026-11-20T10:00:00Z"},
-         {"id": 8, "card_id": 1, "external_id": null, "sender": "me", "body": "Hey", "sent_at": "2026-11-20T10:05:00Z"}]
+        [{"id": 7, "card_id": 1, "external_id": null, "sender": "them", "body": "Hi!", "sent_at": "2026-11-20T10:00:00Z",
+          "handover": [], "sent_by_autopilot": false},
+         {"id": 8, "card_id": 1, "external_id": null, "sender": "me", "body": "Hey", "sent_at": "2026-11-20T10:05:00Z",
+          "handover": null, "sent_by_autopilot": false}]
         """)
 
         let messages = try await server.client().messages(cardID: 1)
 
         #expect(messages == [
-            Message(id: 7, sender: .them, body: "Hi!", sentAt: Date(timeIntervalSince1970: 1_795_168_800)),
+            Message(id: 7, sender: .them, body: "Hi!", sentAt: Date(timeIntervalSince1970: 1_795_168_800), handover: []),
             Message(id: 8, sender: .me, body: "Hey", sentAt: Date(timeIntervalSince1970: 1_795_169_100)),
         ])
         #expect(server.requests.first?.url?.absoluteString == "https://crm.test/cards/1/messages")
@@ -120,8 +123,10 @@ struct APIClientTests {
     @Test func decodesFullTimestampsAndPlainDays() async throws {
         // The server sends timestamps with microseconds and either `Z` or an offset, and due dates as plain days.
         server.respond("""
-        [{"id": 7, "card_id": 1, "external_id": null, "sender": "them", "body": "Hi!", "sent_at": "2026-11-20T10:00:00.123456Z"},
-         {"id": 8, "card_id": 1, "external_id": null, "sender": "me", "body": "Hey", "sent_at": "2026-11-20T11:05:00+01:00"}]
+        [{"id": 7, "card_id": 1, "external_id": null, "sender": "them", "body": "Hi!", "sent_at": "2026-11-20T10:00:00.123456Z",
+          "sent_by_autopilot": false},
+         {"id": 8, "card_id": 1, "external_id": null, "sender": "me", "body": "Hey", "sent_at": "2026-11-20T11:05:00+01:00",
+          "sent_by_autopilot": false}]
         """)
         server.respond(cardJSON(stage: "chatting", nextAction: "null", dueDate: "\"2026-12-01\""))
 
@@ -137,7 +142,7 @@ struct APIClientTests {
         server.respond(cardJSON(stage: "date_set", nextAction: "\"Book table\"", dueDate: "\"2026-12-05\""))
         let edited = Card(
             id: 1, app: "tinder", name: "Ada", stage: .dateSet, notes: "Climbs", nextAction: "Book table", dueDate: day(2026, 12, 5),
-            stageChangedAt: Date(timeIntervalSince1970: 1_795_168_800))
+            stageChangedAt: Date(timeIntervalSince1970: 1_795_168_800), createdAt: Date(timeIntervalSince1970: 1_795_078_800))
 
         let saved = try await server.client().update(edited)
 

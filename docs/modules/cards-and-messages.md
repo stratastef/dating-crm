@@ -11,6 +11,8 @@ A card is one match. Routes are in `app/cards.py`; tables are `cards` and `messa
 | `POST /cards/{id}/messages` | Add a message. Body: `sender` (`me` or `them`), `body`, optional `sent_at` (default now), `external_id`. |
 | `GET /cards/{id}/messages` | List the card's messages by `sent_at`. |
 
+- **A message** is `{"id", "card_id", "external_id", "sender", "body", "sent_at", "handover", "sent_by_autopilot"}`. `handover` is the handover checks a message from the match hit (null when not checked). `sent_by_autopilot` is true for a message autopilot sent alone, so the chat marks it with the Autopilot marker; it is false for the user's own messages, drafts they sent included. The `send_draft` job sets it for an unattended send (see "Drafts"). Messages stored before migration `t59_sent_by_autopilot` are all false.
+
 - **Card summary.** Every card the API returns (these routes, `GET /people`, and later list routes) carries what a row in the app shows, so the app makes no other call:
   - `stalled` and `stage_changed_at` (below);
   - `last_message`: the newest message by `sent_at`, whoever sent it, as `{"sender", "body", "sent_at"}` with the first 100 characters of the body; null when the card has no messages;

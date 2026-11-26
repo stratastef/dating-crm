@@ -67,6 +67,13 @@ struct PipelineView: View {
             }
             .refreshable { await load() }
             .task { await load() }
+            // `DCRM_CARD=7` opens that card on launch, for scripted simulator checks (see `Session.init`).
+            .task {
+                if let id = ProcessInfo.processInfo.environment["DCRM_CARD"].flatMap(Int.init),
+                   let card = try? await client.card(id: id) {
+                    path = [card]
+                }
+            }
             // A tapped push replaces whatever is open with its card.
             .task(id: push.openedCardID) {
                 if let card = await push.takeOpenedCard(from: client) {

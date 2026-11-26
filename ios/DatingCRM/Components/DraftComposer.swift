@@ -1,0 +1,202 @@
+import SwiftUI
+import UIKit
+
+/// The card's draft, docked at the bottom of its chat like a composer, on Liquid Glass (ADR 0003, ADR 0009). It
+/// docks the first draft of the card's draft list (`Card.drafts`, newest first) in one of three states:
+/// - pending: editable under the AI draft marker, with Send where the app can send it and Copy where it cannot;
+/// - copied: "Copied, not sent yet", with Clear and Copy again;
+/// - failed: why, still editable, with Copy and Retry.
+///
+/// With no draft it offers Write draft in Matched and Chatting, and shows nothing from Number swapped on. Without
+/// a style profile, Write draft sets `needsVoice` and the card opens the voice questionnaire.
+struct DraftComposer: View {
+    let client: APIClient
+    let card: Card
+    @Binding var toast: Toast?
+    @Binding var needsVoice: Bool
+    /// Reloads the card after the server changed its drafts.
+    let reload: () async -> Void
+    /// After a Send: reloads until the sent message is in the chat.
+    let sent: () async -> Void
+
+    @State private var text = ""
+    @State private var busy = false
+    @State private var error: String?
+    /// A cleared draft hides at once; the server hears of it once the toast's Undo is over.
+    @State private var clearing: (draftID: Int, held: Held)?
+
+    private var draft: Draft? { card.drafts?.first { $0.id != clearing?.draftID } }
+
+    private var datingApp: String { card.app.capitalized }
+
+    var body: some View {
+        if let draft {
+            dock(draft)
+                .onChange(of: draft.id, initial: true) { text = draft.text }
+        } else if card.stage.chatsInApp {
+            box {
+                if let error {
+                    ErrorRow(text: error) { await write() }
+                }
+                Button(busy ? "Writing…" : "Write draft") { Task { await write() } }
+                    .buttonStyle(.primaryCapsule)
+                    .disabled(busy)
+            }
+        }
+    }
+
+    private func dock(_ draft: Draft) -> some View {
+        let copied = draft.status == "copied"
+        let failed = draft.status == "failed"
+        // It denies being AI and the user has not changed it: neither sent nor copied until they do.
+        let waitsForEdit = draft.deniesAI && text == draft.text
+        return box {
+            if copied {
+                Text("Copied, not sent yet").font(.headline)
+                Inset { Text(draft.text) }
+                if draft.deniesAI {
+                    warning("It says you're not an AI. Clear it and write another.")
+                }
+            } else {
+                if failed {
+                    // The app's error may have come after the message reached the match.
+                    warning("Sending failed. It may still have reached \(datingApp), so check the chat before you send it again.")
+                }
+                Inset {
+                    AIMarker(.draft)
+                    TextField("Draft", text: $text, axis: .vertical)
+                        .lineLimit(1...6)
+                }
+                if waitsForEdit {
+                    warning("It says you're not an AI. Edit it before you send it.")
+                }
+            }
+            if let error {
+                ErrorRow(text: error) { await reload() }
+            }
+            AdaptiveStack(spacing: 8) {
+                if copied {
+                    Button("Clear") { clear(draft) }
+                        .buttonStyle(.secondaryCapsule)
+                    if !draft.deniesAI {
+                        Button("Copy again") {
+                            UIPasteboard.general.string = draft.text
+                            toast = Toast(text: "Copied. Paste it in \(datingApp).")
+                        }
+                        .buttonStyle(.primaryCapsule)
+                    }
+                } else {
+                    if failed {
+                        Button("Copy") { Task { await act(draft, send: false) } }
+                            .buttonStyle(.secondaryCapsule)
+                    }
+                    // Send now, Hold and "Send at" (send timing) go here, next to Send.
+                    // A failed send the app cannot retry now offers Copy only.
+                    if !waitsForEdit, draft.sendable || !failed {
+                        Button(failed ? "Retry" : draft.sendable ? "Send" : "Copy") {
+                            Task { await act(draft, send: draft.sendable) }
+                        }
+                        .buttonStyle(.primaryCapsule)
+                        .disabled(text.isEmpty)
+                    }
+                }
+            }
+            .disabled(busy)
+        }
+    }
+
+    /// The composer's surface. Glass on the background, not the content: glass would make the black Send capsule
+    /// grey. The fill keeps `.primary` text at 4.5:1 over any bubble.
+    private func box<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10, content: content)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
+            .background {
+                RoundedRectangle(cornerRadius: 28)
+                    .fill(Color(uiColor: .systemBackground).opacity(0.72))
+                    .glassEffect(.regular, in: .rect(cornerRadius: 28))
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 6)
+    }
+
+    private func warning(_ text: String) -> some View {
+        Text("\(Image(systemName: "exclamationmark.triangle")) \(text)")
+    }
+
+    private func write() async {
+        busy = true
+        defer { busy = false }
+        do {
+            _ = try await client.writeDraft(cardID: card.id)
+            error = nil
+            await reload()
+        } catch let refused as APIError where refused.status == 409 {
+            error = nil
+            needsVoice = true  // no style profile yet: the questionnaire, not an error
+        } catch {
+            self.error = "No draft was written. Tap to try again."
+        }
+    }
+
+    /// Send (or Retry) or Copy. Either first saves an edit.
+    private func act(_ draft: Draft, send: Bool) async {
+        busy = true
+        defer { busy = false }
+        do {
+            var current = draft
+            if text != draft.text {
+                current = try await client.saveEdit(draftID: draft.id, text: text)
+                if current.deniesAI {
+                    await reload()  // the edit still denies it: the reason shows again
+                    return
+                }
+            }
+            if send {
+                try await client.sendDraft(draftID: current.id)
+                toast = .sending(to: card.name) { Task { await undoSend(current) } }
+                Task { await sent() }
+            } else {
+                UIPasteboard.general.string = current.text
+                _ = try await client.copy(draftID: current.id)
+                toast = Toast(text: "Copied. Paste it in \(datingApp).")
+                await reload()  // it docks again as copied
+            }
+            error = nil
+        } catch let refused as APIError where refused.status == 409 && send {
+            error = "Not sent: \(datingApp) cannot send it now. Copy it instead."
+            await reload()  // the draft comes back with Copy
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    /// The toast's Undo: the server takes the draft back while it still holds it, and it docks again as it was.
+    private func undoSend(_ draft: Draft) async {
+        do {
+            _ = try await client.undoSend(draftID: draft.id)
+        } catch let late as APIError where late.status == 409 {
+            toast = Toast(text: "Too late to undo the message to \(card.name).")
+        } catch {
+            self.error = error.localizedDescription
+        }
+        await reload()
+    }
+
+    /// Clear with Undo: the draft hides now and is dismissed on the server once Undo is over.
+    private func clear(_ draft: Draft) {
+        let held = Held {
+            do {
+                try await client.dismiss(draftID: draft.id)
+            } catch {
+                self.error = "The draft was not cleared. Check your connection, then clear it again."
+            }
+            await reload()
+            clearing = nil
+        }
+        clearing = (draft.id, held)
+        toast = Toast(text: "Cleared the draft for \(card.name)") {
+            if held.undo() { clearing = nil }
+        }
+    }
+}

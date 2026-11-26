@@ -73,6 +73,27 @@ def test_an_autopilot_send_is_not_delayed(app, client, card_id, tinder):  # noqa
     assert sent(tinder) == [REPLY]
 
 
+def test_a_message_autopilot_sent_alone_is_marked_and_one_the_user_sent_is_not(
+    app, client, card_id, tinder  # noqa: F811
+):
+    client.put("/settings/ai-disclosure", json={"enabled": False})
+    autonomy(client, "autopilot")
+    incoming(client, card_id)
+    work(app)
+    # Another match: the Tinder stub gives every send the same message ID, and a card stores an ID once.
+    other = client.post("/cards", json={"app": "tinder", "name": "Dee", "external_id": "dee"}).json()["id"]
+    draft = client.post(f"/cards/{other}/drafts").json()
+    client.post(f"/drafts/{draft['id']}/send")
+    work(app)
+
+    def mine(card: int) -> list[tuple[str, bool]]:
+        messages = client.get(f"/cards/{card}/messages").json()
+        return [(message["body"], message["sent_by_autopilot"]) for message in messages if message["sender"] == "me"]
+
+    assert mine(card_id) == [(REPLY, True)]
+    assert mine(other) == [(REPLY, False)]
+
+
 # (a) Nothing is sent unattended unless chat autonomy is Autopilot or Full autopilot and nothing is paused.
 
 
