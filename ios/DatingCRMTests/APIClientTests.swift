@@ -78,7 +78,7 @@ struct APIClientTests {
          {"group": "handled_by_autopilot", "cards": [
            {"id": 2, "app": "tinder", "name": "Bea", "stage": "matched", "notes": "", "stalled": false, "hot": false,
             "pipeline_group": "handled_by_autopilot", "reason": null, "handover_trigger": null,
-            "autopilot_activity": "drafting_reply"}]}]
+            "autopilot_activity": "drafting_reply", "topic": "museums"}]}]
         """)
 
         let groups = try await server.client().pipeline()
@@ -89,6 +89,7 @@ struct APIClientTests {
         #expect((ada.pipelineGroup, ada.reason, ada.handoverTrigger) == ("waiting_for_you", "handover", "logistics"))
         let bea = try #require(groups.last?.cards.first)
         #expect((bea.pipelineGroup, bea.reason, bea.autopilotActivity) == ("handled_by_autopilot", nil, "drafting_reply"))
+        #expect(bea.topic == "museums")
         let request = try #require(server.requests.first)
         #expect(request.httpMethod == "GET")
         #expect(request.url?.absoluteString == "https://crm.test/pipeline")

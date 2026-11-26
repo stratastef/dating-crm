@@ -70,6 +70,8 @@ struct Card: Codable, Identifiable, Hashable {
     var handoverTrigger: String?
     /// When the card is Handled by autopilot: `writing_opener`, `drafting_reply` or `sent_waiting`.
     var autopilotActivity: String?
+    /// What the chat is about in a few words, such as "museums"; empty until the card's first draft.
+    var topic: String?
 
     /// True when the card is in Dated and has no rating yet: the app then asks for one.
     var needsDateRating: Bool { stage == .dated && dateRating == nil }

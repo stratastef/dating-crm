@@ -17,7 +17,8 @@ A card is one match. Routes are in `app/cards.py`; tables are `cards` and `messa
   - `hot`: `is_hot_lead()` (see "Review queue"), the same answer the review queue gives;
   - `pending_draft`: the newest pending draft, as the review queue shows it, with `sendable`; null when there is none;
   - `lead_photo_url`: the first photo attached with `POST /cards/{id}/photos`; null when unknown;
-  - `pipeline_group`, `reason`, `handover_trigger` and `autopilot_activity`: where the Pipeline lists the card and why (see "Pipeline").
+  - `pipeline_group`, `reason`, `handover_trigger` and `autopilot_activity`: where the Pipeline lists the card and why (see "Pipeline");
+  - `topic`: what the chat is about in a few words, such as `museums`. The call that writes a draft gives it (see "Drafts") and it is stored on the card (`cards.topic`); a later draft replaces it. Empty until the card's first draft.
 
   `summarize(db, user_id, rows)` in `app/cards.py` builds it from card rows selected with `_COLUMNS`, keeping their order. A route that returns cards selects the rows and returns `summarize(...)`; a new summary field is added there and to `Card`.
 - `stage` is one of `matched`, `chatting`, `number_swapped`, `date_set`, `dated`, `seeing_them`, `archived`. Anything else is `422`. `stage_changed_at` on the card is the time of the last stage change; there is no stage history table.

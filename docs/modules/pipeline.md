@@ -22,7 +22,7 @@ An Archived card is `archived`, whatever else is true of it: archiving is how th
    7. `rate_date`: a Dated card has no rating.
    8. `your_turn`: a Matched or Chatting card autopilot is not handling, whose last message is from the match.
    9. `opener_due`: a Matched card autopilot is not handling, with no messages.
-2. **`handled_by_autopilot`**: a Matched or Chatting card autopilot is handling (below). `autopilot_activity` is `drafting_reply` (the match wrote last and a `chat_reply` job is queued or running) or `sent_waiting` (the user or autopilot wrote last). The time to show is `last_message.sent_at`.
+2. **`handled_by_autopilot`**: a Matched or Chatting card autopilot is handling (below). `autopilot_activity` is `drafting_reply` (the match wrote last and a `chat_reply` job is queued or running) or `sent_waiting` (the user or autopilot wrote last). The time to show is `last_message.sent_at`, and the row ends with the card's `topic` (see "Cards and messages").
 3. **`waiting_for_them`**: every other Matched or Chatting card.
 4. **`texting_off_app`**: Number swapped, Date set, Dated and Seeing them.
 
