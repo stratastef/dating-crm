@@ -110,7 +110,7 @@ This starts Postgres, the API on <http://localhost:8000> and the worker. The API
 
 `GET /health` returns `200 {"status": "ok"}` when Postgres is reachable, and `503` when it is not.
 
-If port 5432 or 8000 is taken, set `DB_PORT` or `API_PORT`, for example `DB_PORT=5433 docker compose up`.
+If port 5432 or 8000 is taken, set `DB_PORT` or `API_PORT`, for example `DB_PORT=5433 docker compose up`. To reach the API from a phone on your network, set `API_HOST=0.0.0.0`.
 
 ## Run the tests
 

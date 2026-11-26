@@ -113,7 +113,9 @@ def call(
     completion = complete(system, prompt, max_tokens, images, **({"model": model} if model else {}))
     # A model missing from the table is charged at the default model's price, so its cost is never zero.
     # shortcut: cache reads and writes are not priced apart, add them when a caller turns on prompt caching.
-    input_price, output_price = PRICES.get(completion.model, PRICES[DEFAULT_MODEL])
+    # OpenRouter's `:free` models (set through ANTHROPIC_BASE_URL for demos) cost nothing.
+    free = (Decimal(0), Decimal(0)) if completion.model.endswith(":free") else None
+    input_price, output_price = free or PRICES.get(completion.model, PRICES[DEFAULT_MODEL])
     cost = (completion.input_tokens * input_price + completion.output_tokens * output_price) / 1_000_000
     record(db, user_id, purpose, completion.model, cost, completion.input_tokens, completion.output_tokens)
     return completion
