@@ -4,7 +4,7 @@ The first screen (ADR 0005): what the user has to do, by time. All in `app/today
 
 | Route | Does |
 | --- | --- |
-| `GET /today` | `{"review", "overdue", "today", "coming_up"}`: the review summary and the three groups. |
+| `GET /today` | `{"review", "setup", "overdue", "today", "coming_up"}`: the review summary, the setup summary and the three groups. |
 
 - **Review summary.** `review` is `{"count", "hot"}`: how many items wait in the review queue and how many of them are hot leads. It is counted from `GET /queue` itself, so Today, the Review tab badge and Review never disagree. Today shows review items only as this one row, so no item appears twice.
 - **Items.** Each item is `{"kind", "card", "starts_at", "due_date", "days_late"}`. `card` is the card with its card summary (see "Cards and messages"). Kinds:
@@ -18,13 +18,13 @@ The first screen (ADR 0005): what the user has to do, by time. All in `app/today
   - `coming_up`: confirmed dates and next actions on the next seven days, by day, dates first on each day.
 - Archived cards are never on Today, even with a next action or a confirmed date.
 - **Time zone.** The app sends the phone's time zone on each launch with `PATCH /settings {"time_zone": "Europe/Berlin"}`; an unknown name is `422`. It is `UTC` until the app first sends one. `user_zone(db, user_id)` in `app/settings.py` returns it as a `ZoneInfo`: use it for anything that follows the user's day or hour. The clock is `app.today.now`; tests replace it (fixture `clock` in `tests/test_today.py`).
-- The setup summary ("Finish setup") is not on Today yet.
+- **Setup summary.** `setup` is `{"steps_left": n}`: how many setup steps are not done. It is `null` once the user dismissed "Finish setup" or no step is left (see "Setup").
 
 ## iOS
 
 `TodayView` opens on the review count, large in the accent color, over a `MeshGradient` color field that runs under the status bar and scrolls away with the content. The field is full at 3 or more waiting items, softer at 1 or 2, and gone at 0. The count rolls (`contentTransition(.numericText())`); with Reduce Motion or Low Power Mode on (`motionReduced`), it fades and the field is hidden. Tapping the count opens Review.
 
-Below it come the three groups, each with a count in its header; Overdue's header is in the accent color. A row is the card's face, the name ("Date with Ada" for a date), what to do, and the time: the date's time, the due day ("2 days late" in the accent color), how long a Stalled chat has been quiet, or the day of the date to rate. A row opens its card; a date to rate opens the rating sheet. With all three groups empty, Today says "Nothing for today" in New York. Pull to refresh; the screen reloads each time it appears. Each load sets the Review tab's badge to the review count.
+Under the count, "Finish setup" says how many setup steps are left while `setup` is not null; it opens setup on those steps, and its `xmark` hides it, with Undo in a toast (see "Setup"). Below it come the three groups, each with a count in its header; Overdue's header is in the accent color. A row is the card's face, the name ("Date with Ada" for a date), what to do, and the time: the date's time, the due day ("2 days late" in the accent color), how long a Stalled chat has been quiet, or the day of the date to rate. A row opens its card; a date to rate opens the rating sheet. With all three groups empty, Today says "Nothing for today" in New York. Pull to refresh; the screen reloads each time it appears. Each load sets the Review tab's badge to the review count.
 
 `APIClient.today()` is `GET /today`; `APIClient.setTimeZone(_:)` is the launch call above. Today sends it once, before its first load.
 

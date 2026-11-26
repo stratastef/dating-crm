@@ -118,12 +118,31 @@ struct Message: Codable, Identifiable, Hashable {
 /// Today: the review summary, then what the user has to do by day, in the time zone the app sent.
 struct Today: Codable, Equatable {
     var review: ReviewSummary
+    /// "Finish setup": nil once the user dismissed it or no step is left.
+    var setup: SetupSummary?
     var overdue: [TodayItem]
     var today: [TodayItem]
     var comingUp: [TodayItem]
 
     /// Nothing in any of the three groups: "Nothing for today".
     var isEmpty: Bool { overdue.isEmpty && today.isEmpty && comingUp.isEmpty }
+}
+
+/// How many setup steps are not done yet, for Today's "Finish setup" row.
+struct SetupSummary: Codable, Equatable {
+    var stepsLeft: Int
+}
+
+/// One setup step, in the order setup runs them, and whether it is done.
+struct SetupStep: Codable, Equatable {
+    enum Step: String, Codable {
+        case datingApps = "dating_apps"
+        case calendar, voice, preferences
+        case swipeLayoutAndAutonomy = "swipe_layout_and_autonomy"
+    }
+
+    var step: Step
+    var done: Bool
 }
 
 /// How many items wait in Review, and how many of them are hot leads.

@@ -49,6 +49,16 @@ struct APIClient {
         try await data("PATCH", "settings", body: Self.encoder.encode(["time_zone": identifier]))
     }
 
+    /// Each setup step, in order, and whether it is done.
+    func setup() async throws -> [SetupStep] {
+        try await send("GET", "setup")
+    }
+
+    /// Hides "Finish setup" on Today, or shows it again. The steps stay under You either way.
+    func setSetupDismissed(_ dismissed: Bool) async throws {
+        try await data("PATCH", "settings", body: Self.encoder.encode(["setup_dismissed": dismissed]))
+    }
+
     func cards() async throws -> [Card] {
         try await send("GET", "cards")
     }

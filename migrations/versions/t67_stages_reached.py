@@ -1,14 +1,14 @@
 """dashboard funnel: record when each card first reached Chatting, Date set and Dated
 
 Revision ID: t67_stages_reached
-Revises: t53_chat_topic
+Revises: t70_setup_dismissed
 """
 
 import sqlalchemy as sa
 from alembic import op
 
 revision = "t67_stages_reached"
-down_revision = "t53_chat_topic"
+down_revision = "t70_setup_dismissed"
 branch_labels = None
 depends_on = None
 
