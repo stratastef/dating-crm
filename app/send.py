@@ -37,7 +37,7 @@ def unattended_block(db: Connection, user_id: int, draft_id: int) -> str | None:
     ).one_or_none()
     if not draft:
         return "draft not found"
-    block = autopilot_block(db, user_id, draft.app, "chat")  # the kill switch, the AI budget and the autonomy level
+    block = autopilot_block(db, user_id, draft.app, "chat")  # a pause, the AI budget and the autonomy level
     if block:
         return block
     if draft.guardrail != []:  # a hit, Jev unavailable (`["unavailable"]`) or never checked (null)
@@ -99,7 +99,7 @@ def _card(db: Connection, user_id: int, draft_id: int) -> Row | None:
 def refusal(
     db: Connection, user_id: int, app: str, match_id: str | None, guardrail: list[str] | None = None
 ) -> str | None:
-    """Why a message cannot be sent to this match now, or None if it can. The kill switch is not asked: it
+    """Why a message cannot be sent to this match now, or None if it can. A pause is not asked: it
     pauses autopilot, and `unattended_block()` holds it for a send no user asked for. A tap still sends.
 
     `guardrail` is the draft's guardrail result. The user's tap may send a draft with any other hit, because

@@ -50,7 +50,7 @@ def swipes(tinder) -> list[str]:
 def test_with_swipe_autonomy_on_the_worker_likes_and_passes_alone_and_logs_each_with_its_trigger(
     signed_in, tinder, autopilot
 ):
-    signed_in.put("/autonomy/swipe", json={"level": "guardrails"})
+    signed_in.put("/autonomy/swipe", json={"level": "autopilot"})
 
     assert autopilot()["status"] == "done"
 
@@ -85,22 +85,22 @@ def test_the_recurring_run_is_queued_for_every_user_and_skipped_while_swipe_auto
     assert tinder.requests == []
 
 
-def test_the_kill_switch_stops_swipe_autopilot(signed_in, tinder, autopilot):
-    signed_in.put("/autonomy/swipe", json={"level": "full"})
+def test_a_pause_stops_swipe_autopilot(signed_in, tinder, autopilot):
+    signed_in.put("/autonomy/swipe", json={"level": "full_autopilot"})
     signed_in.post("/autopilot/pause")
 
     assert autopilot()["last_error"] == "autopilot paused for all apps: paused by user"
     assert tinder.requests == []
 
     signed_in.post("/autopilot/resume")
-    signed_in.post("/autopilot/pause", params={"app": "tinder"})  # the kill switch for one app
+    signed_in.post("/autopilot/pause", params={"app": "tinder"})  # a pause of one app
 
     assert autopilot()["status"] == "done"
     assert tinder.requests == [] and audit(signed_in) == []
 
 
 def test_a_ban_signal_pauses_the_app_and_swipe_autopilot_stays_stopped(app, signed_in, tinder, autopilot):
-    signed_in.put("/autonomy/swipe", json={"level": "full"})
+    signed_in.put("/autonomy/swipe", json={"level": "full_autopilot"})
     tinder.status = 403
     autopilot()
     assert signed_in.get("/autopilot/pause").json() == {"all": False, "apps": ["tinder"]}
@@ -114,7 +114,7 @@ def test_a_ban_signal_pauses_the_app_and_swipe_autopilot_stays_stopped(app, sign
 
 
 def test_the_ai_budget_cap_stops_swipe_autopilot(signed_in, tinder, autopilot, llm):
-    signed_in.put("/autonomy/swipe", json={"level": "full"})
+    signed_in.put("/autonomy/swipe", json={"level": "full_autopilot"})
     signed_in.put("/budget", json={"cap_usd": 0})
 
     assert autopilot()["last_error"] == "autopilot paused for all apps: AI budget reached"
@@ -122,7 +122,7 @@ def test_the_ai_budget_cap_stops_swipe_autopilot(signed_in, tinder, autopilot, l
 
 
 def test_swipe_autopilot_sends_plain_likes_and_passes_and_never_spends_a_paid_item(signed_in, tinder, autopilot):
-    signed_in.put("/autonomy/swipe", json={"level": "full"})
+    signed_in.put("/autonomy/swipe", json={"level": "full_autopilot"})
 
     autopilot()
 
@@ -137,7 +137,7 @@ def test_swipes_are_bounded_per_run_and_per_day_by_a_user_setting_with_a_low_def
     assert signed_in.put("/swipes/limits", json={"swipes_per_run": 5, "swipes_per_day": 1000}).status_code == 422
     limits = {"swipes_per_run": 1, "swipes_per_day": 2}
     assert signed_in.put("/swipes/limits", json=limits).json() == limits
-    signed_in.put("/autonomy/swipe", json={"level": "full"})
+    signed_in.put("/autonomy/swipe", json={"level": "full_autopilot"})
 
     autopilot()
     assert swipes(tinder) == [f"GET /pass/{DANA}"]  # one per run
@@ -149,7 +149,7 @@ def test_swipes_are_bounded_per_run_and_per_day_by_a_user_setting_with_a_low_def
 
 
 def test_without_a_dealbreaker_check_no_profile_is_swiped_unattended(signed_in, tinder, autopilot, monkeypatch):
-    signed_in.put("/autonomy/swipe", json={"level": "full"})
+    signed_in.put("/autonomy/swipe", json={"level": "full_autopilot"})
 
     def jev_is_down(sentence, check, subject=""):
         raise JevUnavailable("down")
@@ -168,7 +168,7 @@ def test_a_dealbreaker_added_after_screening_turns_the_stored_like_into_a_pass(s
     signed_in.post("/swipes/tinder/suggestions")  # copilot screened Eve as a like
     signed_in.put("/preferences", json={"dealbreakers": ["smokes", "climbs"]})
     jev.yes["dealbreaker"] = ["smoke", "climber"]
-    signed_in.put("/autonomy/swipe", json={"level": "full"})
+    signed_in.put("/autonomy/swipe", json={"level": "full_autopilot"})
 
     autopilot()
 
@@ -178,7 +178,7 @@ def test_a_dealbreaker_added_after_screening_turns_the_stored_like_into_a_pass(s
 def test_a_person_held_only_as_a_swipe_candidate_is_found_and_purged_with_the_audit_entries_about_them(
     signed_in, tinder, autopilot, client_for
 ):
-    signed_in.put("/autonomy/swipe", json={"level": "full"})
+    signed_in.put("/autonomy/swipe", json={"level": "full_autopilot"})
     autopilot()
     other = client_for("other@example.com")
 

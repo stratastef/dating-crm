@@ -92,8 +92,8 @@ You > Settings opens `SettingsView` (`Screens/SettingsView.swift`). Every switch
 
 | Section | Does | Routes |
 | --- | --- | --- |
-| Kill switch | "Pause all autopilot", and one switch per dating app the user has a card on or that is paused. A pause stops only what the server does alone. | `GET /autopilot/pause`, `POST /autopilot/pause`, `POST /autopilot/resume`, each with `?app=` for one app |
-| Autonomy | One picker per job (chat, profile, swipe): Off, Copilot, Guardrails, Full. | `GET /autonomy`, `PUT /autonomy/{job}` |
+| Pause | "Pause all autopilot", and one switch per dating app the user has a card on or that is paused. A pause stops only what the server does alone. | `GET /autopilot/pause`, `POST /autopilot/pause`, `POST /autopilot/resume`, each with `?app=` for one app |
+| Autonomy | One picker per job (chat, profile, swipe): Off, Copilot, Autopilot, Full autopilot. | `GET /autonomy`, `PUT /autonomy/{job}` |
 | AI budget | This month's spend, a note when the cap is reached, and the cap to set. | `GET /budget`, `PUT /budget` |
 | Privacy | The protected-trait opt-in and the AI disclosure. | `GET` and `PUT /settings/protected-trait-guesses`, `/settings/ai-disclosure` |
 | Find and purge | Search by name or handle, tick the cards and swiped profiles of the person, type `purge`, then delete. The button works only once someone is ticked and the word is typed (`PurgeConfirmation`). | `GET /people`, `GET /people/candidates`, `POST /people/purge` |
