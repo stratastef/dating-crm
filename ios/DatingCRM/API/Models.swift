@@ -84,6 +84,43 @@ struct Message: Codable, Identifiable, Hashable {
     var sentAt: Date
 }
 
+/// Today: the review summary, then what the user has to do by day, in the time zone the app sent.
+struct Today: Codable, Equatable {
+    var review: ReviewSummary
+    var overdue: [TodayItem]
+    var today: [TodayItem]
+    var comingUp: [TodayItem]
+
+    /// Nothing in any of the three groups: "Nothing for today".
+    var isEmpty: Bool { overdue.isEmpty && today.isEmpty && comingUp.isEmpty }
+}
+
+/// How many items wait in Review, and how many of them are hot leads.
+struct ReviewSummary: Codable, Equatable {
+    var count = 0
+    var hot = 0
+}
+
+struct TodayItem: Codable, Identifiable, Hashable {
+    enum Kind: String, Codable {
+        case date
+        case nextAction = "next_action"
+        case stalled
+        case rateDate = "rate_date"
+    }
+
+    var kind: Kind
+    var card: Card
+    /// `date`: when the confirmed date starts.
+    var startsAt: Date?
+    /// `nextAction`: local midnight of its due day.
+    var dueDate: Date?
+    /// Under Overdue: whole days past the due day.
+    var daysLate: Int?
+
+    var id: String { "\(kind.rawValue)-\(card.id)" }
+}
+
 /// One week on the dashboard. `week` is local midnight of the Monday it starts on.
 struct DashboardWeek: Codable, Identifiable, Equatable {
     var week: Date

@@ -38,6 +38,16 @@ struct APIClient {
         try await data("POST", "sign-out")
     }
 
+    /// The review summary and what the user has to do: Overdue, Today and Coming up.
+    func today() async throws -> Today {
+        try await send("GET", "today")
+    }
+
+    /// Stores the phone's time zone (an IANA name), which "today" and "overdue" follow. Sent on each launch.
+    func setTimeZone(_ identifier: String) async throws {
+        try await data("PATCH", "settings", body: Self.encoder.encode(["time_zone": identifier]))
+    }
+
     func cards() async throws -> [Card] {
         try await send("GET", "cards")
     }
