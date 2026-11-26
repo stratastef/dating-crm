@@ -21,6 +21,8 @@ struct SignInView: View {
     @State private var error: String?
     @State private var isWorking = false
     @State private var showsDeveloperSignIn = false
+    /// Refused sign-ins, each played as fail. Done, on success, plays at the app's root: this view is gone by then.
+    @State private var refusals = 0
 
     /// How long the user waits before asking for a new code.
     private let resendWait: TimeInterval = 30
@@ -39,6 +41,7 @@ struct SignInView: View {
         .scrollDismissesKeyboard(.interactively)
         .tint(.primary)
         .sheet(isPresented: $showsDeveloperSignIn) { DeveloperSignInView(session: session) }
+        .sensoryFeedback(.fail, trigger: refusals)
     }
 
     private var phoneStep: some View {
@@ -185,6 +188,7 @@ struct SignInView: View {
         do {
             try await session.signIn(phone: number, code: code)
         } catch {
+            refusals += 1
             self.error = message(for: error, [
                 401: "That code is wrong. Check the text and try again.",
                 410: "That code has expired. Send a new code.",

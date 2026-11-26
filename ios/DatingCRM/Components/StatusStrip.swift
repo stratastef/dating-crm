@@ -11,6 +11,8 @@ struct StatusStrip: ViewModifier {
 
     @State private var message: StatusMessage?
     @State private var reconnecting = false
+    @State private var loaded = false
+    @State private var haptic: Haptic?
 
     func body(content: Content) -> some View {
         Group {
@@ -28,6 +30,7 @@ struct StatusStrip: ViewModifier {
             // A budget reached or a connector broken on the server shows within a minute.
             repeat { await load() } while (try? await Task.sleep(for: .seconds(60))) != nil
         }
+        .haptic(haptic)
         .sheet(isPresented: $reconnecting, onDismiss: { Task { await load() } }) {
             NavigationStack {
                 ConnectedAppsView(client: client)
@@ -50,6 +53,7 @@ struct StatusStrip: ViewModifier {
                 switch message.kind {
                 case .paused:
                     action("Resume") {
+                        haptic = Haptic(.press)  // a pause turned off
                         _ = try? await client.setPaused(false, app: message.app)
                         await load()
                     }
@@ -94,6 +98,17 @@ struct StatusStrip: ViewModifier {
 
     /// A failed load keeps the last strip: the screens show their own errors.
     private func load() async {
-        if let messages = try? await client.status() { message = messages.first }
+        guard let messages = try? await client.status() else { return }
+        // Not on the first load: a strip that was already there at launch is no news.
+        if loaded && Self.fails(from: message, to: messages.first) { haptic = Haptic(.fail) }
+        message = messages.first
+        loaded = true
+    }
+
+    /// Fail plays when the strip starts to say the AI budget is reached or a connector signed out. A pause is the
+    /// user's own doing.
+    static func fails(from old: StatusMessage?, to new: StatusMessage?) -> Bool {
+        guard let new, new.kind != .paused else { return false }
+        return new.kind != old?.kind || new.app != old?.app
     }
 }

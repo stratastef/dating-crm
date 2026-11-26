@@ -13,6 +13,7 @@ struct SetupView: View {
     /// The last step's autonomy levels, nil until loaded.
     @State private var autonomy: [String: AutonomyLevel]?
     @State private var autonomyError: String?
+    @State private var autonomyPicks = 0
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
@@ -54,10 +55,12 @@ struct SetupView: View {
                 }
                 if let autonomy {
                     AutonomySections(levels: autonomy) { job, level in
+                        autonomyPicks += 1
                         Task { await saveAutonomy(job, level) }
                     }
                 }
             }
+            .sensoryFeedback(.tick, trigger: autonomyPicks)
             .navigationTitle("Swipe and autonomy")
             .task { await loadAutonomy() }
         }

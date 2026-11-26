@@ -28,29 +28,34 @@ struct DraftComposer: View {
     @State private var error: String?
     /// A cleared draft hides at once; the server hears of it once the toast's Undo is over.
     @State private var clearing: (draftID: Int, held: Held)?
+    @State private var haptic: Haptic?
 
     private var draft: Draft? { card.drafts?.first { $0.id != clearing?.draftID } }
 
     private var datingApp: String { card.app.capitalized }
 
     var body: some View {
-        if let planned = card.plannedSend {  // it answers already: no second reply
-            plannedDock(planned)
-        } else if let scheduled = card.scheduledSend {
-            scheduledDock(scheduled)
-        } else if let draft {
-            dock(draft)
-                .onChange(of: draft.id, initial: true) { text = draft.text }
-        } else if card.stage.chatsInApp {
-            box {
-                if let error {
-                    ErrorRow(text: error) { await write() }
+        // One view around the docks, so the haptic still plays when an action changes which dock shows.
+        VStack(spacing: 0) {
+            if let planned = card.plannedSend {  // it answers already: no second reply
+                plannedDock(planned)
+            } else if let scheduled = card.scheduledSend {
+                scheduledDock(scheduled)
+            } else if let draft {
+                dock(draft)
+                    .onChange(of: draft.id, initial: true) { text = draft.text }
+            } else if card.stage.chatsInApp {
+                box {
+                    if let error {
+                        ErrorRow(text: error) { await write() }
+                    }
+                    Button(busy ? "Writing…" : "Write draft") { Task { await write() } }
+                        .buttonStyle(.primaryCapsule)
+                        .disabled(busy)
                 }
-                Button(busy ? "Writing…" : "Write draft") { Task { await write() } }
-                    .buttonStyle(.primaryCapsule)
-                    .disabled(busy)
             }
         }
+        .haptic(haptic)
     }
 
     private func dock(_ draft: Draft) -> some View {
@@ -95,6 +100,7 @@ struct DraftComposer: View {
                         .buttonStyle(.secondaryCapsule)
                     if !draft.deniesAI {
                         Button("Copy again") {
+                            haptic = Haptic(.tap)
                             UIPasteboard.general.string = draft.text
                             toast = Toast(text: "Copied. Paste it in \(datingApp).")
                         }
@@ -226,6 +232,7 @@ struct DraftComposer: View {
     private func act(_ draft: Draft, send: Bool, at: Date? = nil) async {
         busy = true
         defer { busy = false }
+        haptic = Haptic(send ? .press : .tap)
         do {
             var current = draft
             if text != draft.text {
@@ -251,9 +258,11 @@ struct DraftComposer: View {
             }
             error = nil
         } catch let refused as APIError where refused.status == 409 && send {
+            haptic = Haptic(.fail)
             error = "Not sent: \(datingApp) cannot send it now. Copy it instead."
             await reload()  // the draft comes back with Copy
         } catch {
+            if send { haptic = Haptic(.fail) }
             self.error = error.localizedDescription
         }
     }
@@ -274,15 +283,18 @@ struct DraftComposer: View {
     private func sendNow(_ planned: Draft) async {
         busy = true
         defer { busy = false }
+        haptic = Haptic(.press)
         do {
             try await client.sendNow(draftID: planned.id)
             error = nil
             toast = Toast(text: "Sending to \(card.name)…")
             Task { await sent() }
         } catch let refused as APIError where refused.status == 409 {
+            haptic = Haptic(.fail)
             error = "Not sent now: it is already going out, or \(datingApp) cannot send it."
             await reload()
         } catch {
+            haptic = Haptic(.fail)
             self.error = error.localizedDescription
         }
     }
@@ -291,6 +303,7 @@ struct DraftComposer: View {
     private func hold(_ planned: Draft) async {
         busy = true
         defer { busy = false }
+        haptic = Haptic(.tap)
         do {
             _ = try await client.hold(draftID: planned.id)
             error = nil
@@ -305,6 +318,7 @@ struct DraftComposer: View {
 
     /// Clear with Undo: the draft hides now and is dismissed on the server once Undo is over.
     private func clear(_ draft: Draft) {
+        haptic = Haptic(.tap)
         let held = Held {
             do {
                 try await client.dismiss(draftID: draft.id)

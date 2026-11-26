@@ -25,6 +25,22 @@ struct StatusStripTests {
         #expect(request.url?.absoluteString == "https://crm.test/status")
     }
 
+    // Fail plays when a budget or connector message appears while the app is open; a pause is the user's own doing.
+
+    @Test func failPlaysWhenTheStripStartsToSayTheBudgetIsReachedOrAConnectorSignedOut() {
+        let budget = StatusMessage(kind: .budgetReached, app: nil, resetsAt: nil)
+        let tinder = StatusMessage(kind: .connectorAlert, app: "tinder", resetsAt: nil)
+        let hinge = StatusMessage(kind: .connectorAlert, app: "hinge", resetsAt: nil)
+        let paused = StatusMessage(kind: .paused, app: nil, resetsAt: nil)
+
+        #expect(StatusStrip.fails(from: nil, to: budget))
+        #expect(StatusStrip.fails(from: paused, to: tinder))
+        #expect(StatusStrip.fails(from: tinder, to: hinge))
+        #expect(!StatusStrip.fails(from: tinder, to: tinder))
+        #expect(!StatusStrip.fails(from: nil, to: paused))
+        #expect(!StatusStrip.fails(from: budget, to: nil))
+    }
+
     @Test func nothingStoppingAutopilotIsAnEmptyStrip() async throws {
         server.respond("[]")
 
