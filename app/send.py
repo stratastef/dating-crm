@@ -250,7 +250,16 @@ def send_draft(db: Connection, user_id: int, payload: dict) -> None:
         sent = call(db, user_id, CONNECTORS[draft.app](), "send", draft.external_id, draft.body)
     except CapabilityFailed:
         return finish("failed")  # no retry: the message may have reached the app before the error
-    upsert_message(db, user_id, draft.card_id, sent["id"], "me", draft.body, sent["sent_at"])
+    upsert_message(
+        db,
+        user_id,
+        draft.card_id,
+        sent["id"],
+        "me",
+        draft.body,
+        sent["sent_at"],
+        sent_by_autopilot=bool(payload.get("unattended")),
+    )
     if DISCLOSURE in draft.body:
         # Whoever sent it, the match has now been told: chat autopilot does not add the sentence again.
         db.execute(
