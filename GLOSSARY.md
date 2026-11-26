@@ -58,6 +58,10 @@ _Avoid_: Delay, schedule (alone)
 A draft autopilot will send alone at its send time. The user sees it with its reason and can send it now or hold it, which moves it to Review.
 _Avoid_: Queued message
 
+**Scheduled send**:
+A draft of the user's that goes out at a send time they chose (Send at), as given, with no five-second Undo. They can cancel it until it goes out, which makes it a pending draft again.
+_Avoid_: Planned send (that is autopilot's)
+
 **Live**:
 A match who sent a message in the last five minutes.
 

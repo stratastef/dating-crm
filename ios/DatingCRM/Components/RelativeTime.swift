@@ -39,11 +39,20 @@ enum RelativeTime {
 
     /// When a planned send goes out: "around 20:15" today, "tomorrow around 07:05", else its day too.
     static func around(_ date: Date, now: Date = .now, calendar: Calendar = .current) -> String {
+        clock("around", date, now: now, calendar: calendar)
+    }
+
+    /// When the user's scheduled send goes out: "at 20:15" today, "tomorrow at 07:05", else its day too.
+    static func at(_ date: Date, now: Date = .now, calendar: Calendar = .current) -> String {
+        clock("at", date, now: now, calendar: calendar)
+    }
+
+    private static func clock(_ word: String, _ date: Date, now: Date, calendar: Calendar) -> String {
         let time = date.formatted(style(calendar).hour().minute())
         return switch daysFrom(now, to: date, calendar: calendar) {
-        case 0: "around \(time)"
-        case 1: "tomorrow around \(time)"
-        default: "\(day(date, now: now, calendar: calendar)) around \(time)"
+        case 0: "\(word) \(time)"
+        case 1: "tomorrow \(word) \(time)"
+        default: "\(day(date, now: now, calendar: calendar)) \(word) \(time)"
         }
     }
 

@@ -32,9 +32,14 @@ struct QueueView: View {
                             toast = Toast(text: "Dismissed the draft for \(item.cardName)") { review.undo(item) }
                         } copied: {
                             toast = Toast(text: "Copied. Paste it in \(item.datingApp).")
-                        } sent: {
+                        } sent: { at in
                             review.remove(item)
-                            toast = .sending(to: item.cardName) { Task { await review.undoSend(item) } }
+                            let undo: () -> Void = { Task { await review.undoSend(item) } }
+                            if let at {  // Send at: no Undo wait, so no ring; Undo takes the scheduled send back
+                                toast = Toast(text: "Goes to \(item.cardName) \(RelativeTime.at(at))", undo: undo)
+                            } else {
+                                toast = .sending(to: item.cardName, undo: undo)
+                            }
                         }
                     } else if item.kind == "copied_draft", let draft = item.draft {
                         CopiedDraftItem(item: item, draft: draft) {
@@ -136,14 +141,16 @@ private struct Quote: View {
 }
 
 /// A pending draft, with the action named for its effect (ADR 0003): Send where the app can send it, Copy where
-/// it cannot. A failed send shows the same way, with Retry and Copy.
+/// it cannot. Its suggested send time shows in the draft, with Send at next to Send. A failed send shows the same
+/// way, with Retry and Copy.
 private struct DraftItem: View {
     let client: APIClient
     let review: ReviewQueue
     let item: QueueItem
     let dismiss: () -> Void
     let copied: () -> Void
-    let sent: () -> Void
+    /// After Send (nil) or Send at (the time).
+    let sent: (Date?) -> Void
 
     @State private var draft: Draft
     @State private var text: String
@@ -151,7 +158,7 @@ private struct DraftItem: View {
 
     init(
         client: APIClient, review: ReviewQueue, item: QueueItem, draft: Draft,
-        dismiss: @escaping () -> Void, copied: @escaping () -> Void, sent: @escaping () -> Void
+        dismiss: @escaping () -> Void, copied: @escaping () -> Void, sent: @escaping (Date?) -> Void
     ) {
         self.client = client
         self.review = review
@@ -167,6 +174,9 @@ private struct DraftItem: View {
     private var waitsForEdit: Bool { draft.deniesAI && text == draft.text }
 
     private var failed: Bool { item.kind == "failed_send" }
+
+    /// When Send at would send it: a pending draft the app can send, with its suggested time still ahead.
+    private var sendAt: Date? { failed || waitsForEdit || !draft.sendable ? nil : draft.suggestedSendAt }
 
     var body: some View {
         PhotoCard(name: item.cardName, photo: item.card?.leadPhotoUrl) {
@@ -185,6 +195,9 @@ private struct DraftItem: View {
                 AIMarker(.draft)
                 TextField("Draft", text: $text, axis: .vertical)
                     .lineLimit(2...)
+                if !failed {
+                    SuggestedSendTime(draft: draft)
+                }
             }
             if waitsForEdit {
                 Text("\(Image(systemName: "exclamationmark.triangle")) It says you're not an AI. Edit it before you send it.")
@@ -193,26 +206,49 @@ private struct DraftItem: View {
                 // The app's error may have come after the message reached the match.
                 Text("\(Image(systemName: "exclamationmark.triangle")) Sending failed. It may still have reached \(item.datingApp), so check the chat before you send it again.")
             }
-            AdaptiveStack(spacing: 8) {
-                if failed {
-                    Button("Copy") { act(send: false) }
-                        .buttonStyle(.secondaryCapsule)
+            Group {
+                if let sendAt {
+                    // Three capsules side by side where they fit (the default text size); else Send at goes above.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) { secondary; sendAtButton(sendAt); primary }
+                        VStack(spacing: 8) {
+                            sendAtButton(sendAt)
+                            AdaptiveStack(spacing: 8) { secondary; primary }
+                        }
+                    }
                 } else {
-                    Button("Dismiss", action: dismiss)
-                        .buttonStyle(.secondaryCapsule)
-                }
-                // A failed send the app cannot retry now offers Copy only.
-                if !waitsForEdit, draft.sendable || !failed {
-                    Button(failed ? "Retry" : draft.sendable ? "Send" : "Copy") { act(send: draft.sendable) }
-                        .buttonStyle(.primaryCapsule)
-                        .disabled(text.isEmpty)
+                    AdaptiveStack(spacing: 8) { secondary; primary }
                 }
             }
             .disabled(busy)
         }
     }
 
-    private func act(send: Bool) {
+    @ViewBuilder private var secondary: some View {
+        if failed {
+            Button("Copy") { act(send: false) }
+                .buttonStyle(.secondaryCapsule)
+        } else {
+            Button("Dismiss", action: dismiss)
+                .buttonStyle(.secondaryCapsule)
+        }
+    }
+
+    @ViewBuilder private var primary: some View {
+        // A failed send the app cannot retry now offers Copy only.
+        if !waitsForEdit, draft.sendable || !failed {
+            Button(failed ? "Retry" : draft.sendable ? "Send" : "Copy") { act(send: draft.sendable) }
+                .buttonStyle(.primaryCapsule)
+                .disabled(text.isEmpty)
+        }
+    }
+
+    private func sendAtButton(_ at: Date) -> some View {
+        SendAtButton(at: at) { act(send: true, at: at) }
+            .disabled(text.isEmpty)
+    }
+
+    private func act(send: Bool, at: Date? = nil) {
         busy = true
         Task {
             defer { busy = false }
@@ -222,8 +258,8 @@ private struct DraftItem: View {
                     if draft.deniesAI { return }  // the edit still denies it: the reason shows again
                 }
                 if send {
-                    try await client.sendDraft(draftID: draft.id)
-                    sent()
+                    try await client.sendDraft(draftID: draft.id, at: at)
+                    sent(at)
                 } else {
                     UIPasteboard.general.string = draft.text
                     _ = try await client.copy(draftID: draft.id)
@@ -251,6 +287,7 @@ private struct CopiedDraftItem: View {
             Text("Copied for \(item.datingApp), not sent yet")
             Inset {
                 Text(draft.text)
+                SuggestedSendTime(draft: draft)  // when to paste it
             }
             if draft.deniesAI {
                 Text("\(Image(systemName: "exclamationmark.triangle")) It says you're not an AI. Clear it and write another.")

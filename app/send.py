@@ -4,6 +4,7 @@
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, HTTPException
+from pydantic import AwareDatetime, BaseModel
 from sqlalchemy import Connection, Row, text
 
 from app import calendar, handover
@@ -62,6 +63,7 @@ def queue_send(
     trigger: str,
     unattended: bool = False,
     run_at: datetime | None = None,
+    scheduled: bool = False,
 ) -> Row | None:
     """Approve a pending draft, or a failed one again (Retry), and queue the job that sends it, in the caller's
     transaction.
@@ -69,7 +71,8 @@ def queue_send(
     Returns the draft, now `approved`, or None if the user has no such draft or it is not `pending` or `failed`,
     so a draft is queued at most once. `trigger` is what caused the send; it goes to the audit log.
 
-    The job runs at `run_at`, or at once. Until it starts, `cancel_send()` takes the send back.
+    The job runs at `run_at`, or at once. Until it starts, `cancel_send()` takes the send back. `scheduled=True`
+    marks a scheduled send, one the user timed: `run_at` becomes the draft's send time.
 
     `unattended=True` is for a send no user asked for. It returns None and leaves the draft `pending`, so in
     the review queue, when `unattended_block()` gives a reason; the job asks again before it sends.
@@ -79,14 +82,15 @@ def queue_send(
     draft = db.execute(
         text(
             f"""
-            UPDATE drafts SET status = 'approved', updated_at = now()
+            UPDATE drafts SET status = 'approved', updated_at = now(),
+                send_at = CASE WHEN :scheduled THEN CAST(:run_at AS timestamptz) ELSE send_at END
             WHERE id = :id AND user_id = :user_id AND status IN ('pending', 'failed') RETURNING {_COLUMNS}
             """
         ),
-        {"id": draft_id, "user_id": user_id},
+        {"id": draft_id, "user_id": user_id, "scheduled": scheduled, "run_at": run_at},
     ).one_or_none()
     if draft:
-        payload = {"draft_id": draft_id, "trigger": trigger, "unattended": unattended}
+        payload = {"draft_id": draft_id, "trigger": trigger, "unattended": unattended, "scheduled": scheduled}
         enqueue(db, user_id, "send_draft", payload, run_at=run_at)
     return draft
 
@@ -169,10 +173,14 @@ def refusal(
     return unavailable(db, user_id, CONNECTORS[app](), "send")
 
 
+class Send(BaseModel):
+    send_at: AwareDatetime | None = None  # a time the user chose; none sends it now
+
+
 @router.post("/drafts/{draft_id}/send", response_model=Draft, status_code=202)
-def tap_send(draft_id: int, user: CurrentUser, db: Db):
-    """The user's Send: queue the draft for the worker to send once `UNDO_WINDOW` has passed. `409` says why
-    when it cannot be sent."""
+def tap_send(draft_id: int, user: CurrentUser, db: Db, send: Send | None = None):
+    """The user's Send: queue the draft for the worker to send once `UNDO_WINDOW` has passed, or Send at: at the
+    `send_at` they chose, as given (no undo wait, no bounds). `409` says why when it cannot be sent."""
     card = _card(db, user.id, draft_id)
     if not card:
         raise HTTPException(status_code=404, detail="draft not found")
@@ -180,7 +188,11 @@ def tap_send(draft_id: int, user: CurrentUser, db: Db):
     if why:
         raise HTTPException(status_code=409, detail=why)
     trigger = f"copilot: user tapped send on draft {draft_id}"
-    draft = queue_send(db, user.id, draft_id, trigger, run_at=datetime.now(UTC) + UNDO_WINDOW)
+    send_at = send and send.send_at
+    if send_at:
+        draft = queue_send(db, user.id, draft_id, trigger, run_at=send_at, scheduled=True)
+    else:
+        draft = queue_send(db, user.id, draft_id, trigger, run_at=datetime.now(UTC) + UNDO_WINDOW)
     if not draft:
         raise HTTPException(status_code=409, detail=f"the draft is already {card.status}")
     return present(db, user.id, [draft])[0]
@@ -188,10 +200,11 @@ def tap_send(draft_id: int, user: CurrentUser, db: Db):
 
 @router.post("/drafts/{draft_id}/undo-send", response_model=Draft)
 @router.post("/drafts/{draft_id}/hold", response_model=Draft)
+@router.post("/drafts/{draft_id}/unschedule", response_model=Draft)
 def undo_send(draft_id: int, user: CurrentUser, db: Db):
-    """Take back a queued send while its job has not started: the user's Undo of their Send, or Hold on a planned
-    send. The draft is `pending` again, its edit kept, so it waits in the review queue. `409` once the worker has
-    started sending it."""
+    """Take back a queued send while its job has not started: the user's Undo of their Send, Unschedule of their
+    scheduled send, or Hold on a planned send. The draft is `pending` again, its edit kept, so it waits in the
+    review queue. `409` once the worker has started sending it."""
     card = _card(db, user.id, draft_id)
     if not card:
         raise HTTPException(status_code=404, detail="draft not found")

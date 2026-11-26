@@ -2,8 +2,9 @@
 
 import json
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
@@ -352,3 +353,78 @@ def test_send_needs_the_users_own_draft_on_a_card_linked_to_a_match(app, client,
     assert client.post(f"/drafts/{by_hand['id']}/send").status_code == 409
     work(app)
     assert tinder.sent == []
+
+
+# Send at a chosen time: the user's own draft goes out when they say, and Unschedule takes it back.
+
+
+def work_at(app, at: datetime) -> None:
+    """Run every job that is due at `at`."""
+    while run_once(app.state.engine, now=at):
+        pass
+
+
+def test_a_send_at_a_chosen_time_goes_out_at_that_time_not_before(app, client, draft, tinder):
+    chosen = datetime.now(UTC) + timedelta(hours=1)
+
+    tapped = client.post(f"/drafts/{draft['id']}/send", json={"send_at": chosen.isoformat()})
+
+    assert tapped.status_code == 202
+    assert tapped.json()["status"] == "approved"
+    work_at(app, chosen - timedelta(minutes=1))
+    assert tinder.sent == []
+    work_at(app, chosen)
+    assert tinder.sent == [(f"/user/matches/{CLEO}", {"message": "both. badly."})]
+
+
+def test_the_five_second_undo_wait_applies_only_to_sends_without_a_time(app, client, draft, tinder):
+    client.post(f"/drafts/{draft['id']}/send", json={"send_at": datetime.now(UTC).isoformat()})
+
+    work_now(app)
+
+    assert len(tinder.sent) == 1
+
+
+def test_the_users_chosen_send_time_is_used_as_given_even_in_the_night_window_past_twelve_hours(
+    app, client, draft, tinder
+):
+    zone = ZoneInfo("Europe/Berlin")
+    client.patch("/settings", json={"time_zone": "Europe/Berlin"})  # night window 01:00 to 07:00
+    chosen = datetime.combine(datetime.now(zone).date() + timedelta(days=2), time(3, 0), zone)
+
+    tapped = client.post(f"/drafts/{draft['id']}/send", json={"send_at": chosen.isoformat()})
+
+    assert datetime.fromisoformat(tapped.json()["send_at"]) == chosen
+    work_at(app, chosen)
+    assert len(tinder.sent) == 1
+
+
+def test_unschedule_cancels_a_scheduled_send_and_the_draft_is_pending_again(app, client, draft, tinder):
+    chosen = datetime.now(UTC) + timedelta(hours=1)
+    client.post(f"/drafts/{draft['id']}/send", json={"send_at": chosen.isoformat()})
+
+    unscheduled = client.post(f"/drafts/{draft['id']}/unschedule")
+
+    assert unscheduled.status_code == 200
+    assert unscheduled.json()["status"] == "pending"
+    work_at(app, chosen)
+    assert tinder.sent == []
+    assert kinds(client) == ["draft"]
+    assert client.post(f"/drafts/{draft['id']}/unschedule").status_code == 409
+
+
+def test_a_scheduled_send_shows_on_the_card_which_then_waits_for_them_not_for_you(app, client, draft, tinder):
+    chosen = datetime.now(UTC) + timedelta(hours=1)
+
+    client.post(f"/drafts/{draft['id']}/send", json={"send_at": chosen.isoformat()})
+
+    card = client.get(f"/cards/{draft['card_id']}").json()
+    scheduled = card["scheduled_send"]
+    assert (scheduled["id"], scheduled["status"], datetime.fromisoformat(scheduled["send_at"])) == (
+        draft["id"],
+        "approved",
+        chosen,
+    )
+    assert (card["pipeline_group"], card["reason"], card["planned_send"]) == ("waiting_for_them", None, None)
+    client.post(f"/drafts/{draft['id']}/send")  # refused: it is scheduled already
+    assert client.get(f"/cards/{draft['card_id']}").json()["scheduled_send"]["id"] == draft["id"]

@@ -19,12 +19,20 @@ router = APIRouter()
 
 _COLUMNS = "id, card_id, kind, status, original, edited, guardrail, hot_lead, send_at, timing_reason, created_at"
 
+
+def _queued_send(flag: str) -> str:
+    """SQL condition: the draft is `approved` and its `send_draft` job is queued with `flag` true in its payload."""
+    return (
+        "drafts.status = 'approved' AND EXISTS (SELECT 1 FROM jobs WHERE jobs.user_id = drafts.user_id"
+        " AND jobs.kind = 'send_draft' AND jobs.status = 'queued' AND (jobs.payload->>'draft_id')::int = drafts.id"
+        f" AND (jobs.payload->>'{flag}')::boolean)"
+    )
+
+
 # A planned send: a draft autopilot queued to send alone at its `send_at` (`queue_send(unattended=True)`).
-PLANNED = (
-    "drafts.status = 'approved' AND EXISTS (SELECT 1 FROM jobs WHERE jobs.user_id = drafts.user_id"
-    " AND jobs.kind = 'send_draft' AND jobs.status = 'queued' AND (jobs.payload->>'draft_id')::int = drafts.id"
-    " AND (jobs.payload->>'unattended')::boolean)"
-)
+PLANNED = _queued_send("unattended")
+# A scheduled send: a draft the user queued to send at the `send_at` they chose (`queue_send(scheduled=True)`).
+SCHEDULED = _queued_send("scheduled")
 
 
 class Draft(BaseModel):

@@ -15,7 +15,7 @@ from app.auth import CurrentUser, Db
 from app.autopilot import autopilot_allowed
 from app.card_lookup import own_card
 from app.drafts import _COLUMNS as _DRAFT_COLUMNS
-from app.drafts import PLANNED, Draft, present
+from app.drafts import PLANNED, SCHEDULED, Draft, present
 from app.jobs import enqueue, handler
 from app.review import is_hot_lead
 from app.voice import queue_profile
@@ -99,6 +99,8 @@ class Card(BaseModel):
     drafts: list[Draft]  # the card's draft list: its pending, copied and failed drafts, newest first
     # Autopilot's planned send: the draft it sends alone at its `send_at`, with its `timing_reason`; null when none.
     planned_send: Draft | None
+    # The user's scheduled send: their draft that goes out at the `send_at` they chose; null when none.
+    scheduled_send: Draft | None
     lead_photo_url: str | None  # the first photo attached to the card; null when unknown
     # Where the Pipeline lists the card, and why: see `app/pipeline.py`.
     pipeline_group: str  # a `Group`: `waiting_for_you`, `handled_by_autopilot`, ...
@@ -139,9 +141,9 @@ def summarize(db: Connection, user_id: int, cards: Sequence[Row]) -> list[Card]:
     waiting = db.execute(
         text(
             f"""
-            SELECT {_DRAFT_COLUMNS} FROM drafts
+            SELECT {_DRAFT_COLUMNS}, {SCHEDULED} AS scheduled FROM drafts
             WHERE user_id = :user_id AND card_id = ANY(:ids)
-              AND (status IN ('pending', 'copied', 'failed') OR {PLANNED})
+              AND (status IN ('pending', 'copied', 'failed') OR {PLANNED} OR {SCHEDULED})
             ORDER BY created_at DESC, id DESC
             """
         ),
@@ -149,8 +151,11 @@ def summarize(db: Connection, user_id: int, cards: Sequence[Row]) -> list[Card]:
     ).all()
     drafts: dict[int, list[Draft]] = {}
     planned: dict[int, Draft] = {}
-    for draft in present(db, user_id, waiting):
-        if draft.status == "approved":
+    scheduled: dict[int, Draft] = {}
+    for row, draft in zip(waiting, present(db, user_id, waiting), strict=True):
+        if row.scheduled:
+            scheduled[draft.card_id] = draft
+        elif draft.status == "approved":
             planned[draft.card_id] = draft
         else:
             drafts.setdefault(draft.card_id, []).append(draft)
@@ -173,6 +178,7 @@ def summarize(db: Connection, user_id: int, cards: Sequence[Row]) -> list[Card]:
             "pending_draft": next((draft for draft in drafts.get(card.id, []) if draft.status == "pending"), None),
             "drafts": drafts.get(card.id, []),
             "planned_send": planned.get(card.id),
+            "scheduled_send": scheduled.get(card.id),
             "lead_photo_url": lead_photos.get(card.id),
         }
         for card in cards

@@ -3,13 +3,15 @@ import UIKit
 
 /// The card's draft, docked at the bottom of its chat like a composer, on Liquid Glass (ADR 0003, ADR 0009). It
 /// docks autopilot's planned send (`Card.plannedSend`) first: a ring draining until it goes out, its time and
-/// reason, its text, Hold and Send now. Otherwise it docks the first draft of the card's draft list
-/// (`Card.drafts`, newest first) in one of three states:
-/// - pending: editable under the AI draft marker, with Send where the app can send it and Copy where it cannot;
-/// - copied: "Copied, not sent yet", with Clear and Copy again;
+/// reason, its text, Hold and Send now. Then the user's scheduled send (`Card.scheduledSend`): when it goes out,
+/// with Cancel. Otherwise it docks the first draft of the card's draft list (`Card.drafts`, newest first) in one
+/// of three states:
+/// - pending: editable under the AI draft marker, with when it is best sent (ADR 0008), and Send at and Send where
+///   the app can send it, Copy where it cannot;
+/// - copied: "Copied, not sent yet", with when it is best sent, Clear and Copy again;
 /// - failed: why, still editable, with Copy and Retry.
 ///
-/// With neither it offers Write draft in Matched and Chatting, and shows nothing from Number swapped on. Without
+/// With none of these it offers Write draft in Matched and Chatting, and shows nothing from Number swapped on. Without
 /// a style profile, Write draft sets `needsVoice` and the card opens the voice questionnaire.
 struct DraftComposer: View {
     let client: APIClient
@@ -34,6 +36,8 @@ struct DraftComposer: View {
     var body: some View {
         if let planned = card.plannedSend {  // it answers already: no second reply
             plannedDock(planned)
+        } else if let scheduled = card.scheduledSend {
+            scheduledDock(scheduled)
         } else if let draft {
             dock(draft)
                 .onChange(of: draft.id, initial: true) { text = draft.text }
@@ -54,10 +58,14 @@ struct DraftComposer: View {
         let failed = draft.status == "failed"
         // It denies being AI and the user has not changed it: neither sent nor copied until they do.
         let waitsForEdit = draft.deniesAI && text == draft.text
+        let sendAt = failed || waitsForEdit || !draft.sendable ? nil : draft.suggestedSendAt
         return box {
             if copied {
                 Text("Copied, not sent yet").font(.headline)
-                Inset { Text(draft.text) }
+                Inset {
+                    Text(draft.text)
+                    SuggestedSendTime(draft: draft)  // when to paste it
+                }
                 if draft.deniesAI {
                     warning("It says you're not an AI. Clear it and write another.")
                 }
@@ -70,6 +78,9 @@ struct DraftComposer: View {
                     AIMarker(.draft)
                     TextField("Draft", text: $text, axis: .vertical)
                         .lineLimit(1...6)
+                    if !failed {
+                        SuggestedSendTime(draft: draft)
+                    }
                 }
                 if waitsForEdit {
                     warning("It says you're not an AI. Edit it before you send it.")
@@ -94,7 +105,10 @@ struct DraftComposer: View {
                         Button("Copy") { Task { await act(draft, send: false) } }
                             .buttonStyle(.secondaryCapsule)
                     }
-                    // "Send at" (send timing) goes here, next to Send.
+                    if let sendAt {
+                        SendAtButton(at: sendAt) { Task { await act(draft, send: true, at: sendAt) } }
+                            .disabled(text.isEmpty)
+                    }
                     // A failed send the app cannot retry now offers Copy only.
                     if !waitsForEdit, draft.sendable || !failed {
                         Button(failed ? "Retry" : draft.sendable ? "Send" : "Copy") {
@@ -179,8 +193,37 @@ struct DraftComposer: View {
         }
     }
 
-    /// Send (or Retry) or Copy. Either first saves an edit.
-    private func act(_ draft: Draft, send: Bool) async {
+    /// The user's scheduled send: when it goes out and its text, with Cancel, which docks it again as pending.
+    private func scheduledDock(_ draft: Draft) -> some View {
+        box {
+            Text(draft.sendAt.map { "Goes out \(RelativeTime.at($0))" } ?? "Goes out soon").font(.headline)
+            Inset { Text(draft.text) }
+            if let error {
+                ErrorRow(text: error) { await reload() }
+            }
+            Button("Cancel") { Task { await unschedule(draft) } }
+                .buttonStyle(.secondaryCapsule)
+                .accessibilityLabel("Cancel this send")
+                .disabled(busy)
+        }
+    }
+
+    private func unschedule(_ draft: Draft) async {
+        busy = true
+        defer { busy = false }
+        do {
+            _ = try await client.unschedule(draftID: draft.id)
+            error = nil
+        } catch let late as APIError where late.status == 409 {
+            toast = Toast(text: "Too late to cancel the message to \(card.name).")
+        } catch {
+            self.error = error.localizedDescription
+        }
+        await reload()
+    }
+
+    /// Send (or Retry), Send at, or Copy. Each first saves an edit.
+    private func act(_ draft: Draft, send: Bool, at: Date? = nil) async {
         busy = true
         defer { busy = false }
         do {
@@ -192,7 +235,11 @@ struct DraftComposer: View {
                     return
                 }
             }
-            if send {
+            if let at, send {
+                try await client.sendDraft(draftID: current.id, at: at)
+                toast = Toast(text: "Goes to \(card.name) \(RelativeTime.at(at))")  // no Undo wait: Cancel is docked
+                await reload()  // it docks as the scheduled send
+            } else if send {
                 try await client.sendDraft(draftID: current.id)
                 toast = .sending(to: card.name) { Task { await undoSend(current) } }
                 Task { await sent() }

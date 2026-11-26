@@ -1,6 +1,6 @@
 # Send timing
 
-All in `app/timing.py` (ADR 0008). Every draft has a **send time** (`drafts.send_at`) and a one-line `timing_reason`. For autopilot it is when the **planned send** goes out; for the user's own drafts it is when the draft is best sent.
+All in `app/timing.py` (ADR 0008). Every draft has a **send time** (`drafts.send_at`) and a one-line `timing_reason`. For autopilot it is when the **planned send** goes out; for the user's own (copilot) drafts it is when the draft is best sent, from the same formula and bounds, until the user picks Send at (a **scheduled send**, see "Drafts"), which uses their time as given.
 
 - **The formula:** `formula(db, user_id, card_id, now) -> timedelta`, the wait from `now`:
   - **pace:** the median of the match's last 5 reply gaps (from one of the user's messages to their answer), held to 1 minute–6 hours; 45 minutes when no gap is known;
@@ -19,5 +19,4 @@ All in `app/timing.py` (ADR 0008). Every draft has a **send time** (`drafts.send
 - **A new message on the card**, from either side (`insert_message()`), calls `drop_planned_sends()` in `app/send.py`: each planned send on the card is taken back with `cancel_send()`, `dismissed`, and its calendar holds are released. If the match wrote, chat autopilot then plans a new reply; if the user wrote (an opener of their own, say), nothing replaces it. One the worker is already sending goes out.
 - **Where it shows:** the card summary's `planned_send` (a `Draft`, with `send_at` and `timing_reason`), and the Pipeline: a card with a planned send is Handled by autopilot with `autopilot_activity` `planned`.
 - **Send now and Hold** act on a planned send (see "Drafts"). `POST /drafts/{id}/send-now` takes it back with `cancel_send()` and queues it again with `queue_send()` to run at once, as the user's send (not unattended), so nothing goes out at the old send time. `POST /drafts/{id}/hold` is `undo-send`: `cancel_send()` alone, so the draft is `pending`, in Review. Its calendar holds stay: it still offers the same slots.
-- **For later tickets:** Copilot suggested times (#74): every draft from `draft_for()` already has `send_at` and `timing_reason`.
 - **Limits:** the weights are a first guess, not fitted to outcomes. The send time is planned when the draft is written: a copilot draft read hours later shows a time that has passed. Not run against the real Claude.

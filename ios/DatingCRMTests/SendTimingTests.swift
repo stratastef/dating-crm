@@ -84,6 +84,14 @@ struct SendTimingTests {
             == "replies around 20:15 · talking museums")
     }
 
+    @Test func aRowWithTheUsersScheduledSendSaysWhenItGoesOut() {
+        var card = Card(id: 1, app: "tinder", name: "Ada", stage: .chatting, notes: "")
+        card.pipelineGroup = "waiting_for_them"
+        card.scheduledSend = Draft(id: 5, kind: .reply, original: "both. badly.", sendAt: at(day: 26, 7, 5))
+
+        #expect(card.pipelineStatus(now: at(day: 25, 22), calendar: calendar) == "Your reply goes out tomorrow at 07:05")
+    }
+
     // Send now and Hold.
 
     @Test func asksTheServerToSendAPlannedSendNow() async throws {

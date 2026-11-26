@@ -185,7 +185,8 @@ extension Card {
                     .compactMap { $0 }.joined(separator: " · ")
             }
         case "waiting_for_them":
-            lastMessage.map { "You wrote \(RelativeTime.ago($0.sentAt, now: now, calendar: calendar))" }
+            scheduledSend?.sendAt.map { "Your reply goes out \(RelativeTime.at($0, now: now, calendar: calendar))" }
+                ?? lastMessage.map { "You wrote \(RelativeTime.ago($0.sentAt, now: now, calendar: calendar))" }
         case "texting_off_app":
             nextAction.map { action in dueDate.map { "\(action) · \(RelativeTime.day($0, now: now, calendar: calendar))" } ?? action }
                 ?? dateRating.map { "Date rated \($0)/5" } ?? "No next action"
