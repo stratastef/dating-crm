@@ -164,7 +164,7 @@ struct SwipeCandidate: Codable, Identifiable, Hashable {
     var source: String
 }
 
-/// The kill switch: what autopilot is paused for. `all` pauses every app; `apps` are paused on their own.
+/// Pause: what autopilot is paused for. `all` pauses every app; `apps` are paused on their own.
 struct Pauses: Codable, Equatable {
     var all = false
     var apps: [String] = []
@@ -172,10 +172,11 @@ struct Pauses: Codable, Equatable {
 
 /// How much the app may do alone for one job (`chat`, `profile`, `swipe`). Raw values match the server's.
 enum AutonomyLevel: String, Codable, CaseIterable, Identifiable {
-    case off, copilot, guardrails, full
+    case off, copilot, autopilot
+    case fullAutopilot = "full_autopilot"
 
     var id: Self { self }
-    var title: String { rawValue.capitalized }
+    var title: String { self == .fullAutopilot ? "Full autopilot" : rawValue.capitalized }
 }
 
 /// The AI budget of the current month, in USD. `paused`: the spend is at the cap, so autopilot is paused.

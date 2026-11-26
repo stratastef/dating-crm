@@ -62,7 +62,7 @@ struct APIClient {
     }
 
     /// Approves a draft: the server queues it and its worker sends it through the dating app. `409` means the
-    /// server refused: sending is off for the app, or the draft was already sent. The kill switch does not
+    /// server refused: sending is off for the app, or the draft was already sent. A pause does not
     /// stop it.
     func sendDraft(draftID: Int) async throws {
         try await data("POST", "drafts/\(draftID)/send")
@@ -182,7 +182,7 @@ struct APIClient {
 
     // Settings. Each call returns the state the server now holds.
 
-    /// What the kill switch pauses.
+    /// What is paused.
     func pauses() async throws -> Pauses {
         try await send("GET", "autopilot/pause")
     }

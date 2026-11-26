@@ -31,7 +31,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/tenancy.py` | `user_id_column()` for tenant tables |
 | `app/vault.py` | `store_token()`, `read_token()`, `delete_token()` for encrypted dating-app session tokens |
 | `app/audit.py` | `record_action()` and `GET /audit-log` |
-| `app/autopilot.py` | Autonomy per job and the kill switch: `autopilot_allowed()`, `pause()`, `resume()` |
+| `app/autopilot.py` | Autonomy per job and Pause: `autopilot_allowed()`, `pause()`, `resume()` |
 | `app/connectors.py` | `Connector` contract, `call()`, `is_copilot_only()`, `alerts()` |
 | `app/push.py` | `send_push()` and `POST /devices` |
 | `app/calendar.py` | Google Calendar: routes under `/calendar`, `free_slots()`, `hold_slot()`, `release_holds()`, `confirm_date()` |
@@ -73,7 +73,7 @@ Read the doc for a module before you change it or call it. Review rules live in 
 - [Session token vault](docs/modules/session-token-vault.md)
 - [Audit log](docs/modules/audit-log.md)
 - [Find and purge](docs/modules/find-and-purge.md)
-- [Autonomy and kill switch](docs/modules/autonomy-and-kill-switch.md)
+- [Autonomy and Pause](docs/modules/autonomy-and-pause.md)
 - [Connectors](docs/modules/connectors.md)
 - [Push notifications](docs/modules/push-notifications.md)
 - [Google Calendar holds](docs/modules/google-calendar-holds.md)

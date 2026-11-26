@@ -1,7 +1,7 @@
-"""Chat autopilot: the `chat_reply` job answers a match's message without the user, in guardrails or full mode.
+"""Chat autopilot: the `chat_reply` job answers a match's message without the user, at Autopilot or Full autopilot.
 
 It composes existing pieces: `draft_for()` writes the reply, Jev checks it, `queue_send(unattended=True)`
-sends it or leaves it in the review queue, and in full mode the calendar supplies and holds the times offered.
+sends it or leaves it in the review queue, and at Full autopilot the calendar supplies and holds the times offered.
 """
 
 from collections.abc import Sequence
@@ -84,10 +84,10 @@ def chat_reply(db: Connection, user_id: int, payload: dict) -> None:
     # Every message the user has not answered counts, not only the newest: "when are you free?" then "??".
     waiting = unanswered(db, user_id, card_id)
     logistics = any("logistics" in (message.handover or []) for message in waiting)
-    if logistics and level != "full":
-        return  # guardrails mode: date logistics are the user's (the card is paused for handover anyway)
+    if logistics and level != "full_autopilot":
+        return  # Autopilot: date logistics are the user's (the card is paused for handover anyway)
 
-    # Full mode, and the match wrote about meeting: see what they say to the times held for them.
+    # Full autopilot, and the match wrote about meeting: see what they say to the times held for them.
     holds, answer = [], "none"
     if logistics:
         holds = db.execute(
@@ -114,7 +114,7 @@ def chat_reply(db: Connection, user_id: int, payload: dict) -> None:
     if logistics and "logistics" not in for_user:
         try:
             if isinstance(answer, int):
-                # A booked date is where full mode ends: the reply below stays in the review queue.
+                # A booked date is where Full autopilot ends: the reply below stays in the review queue.
                 calendar.confirm_date(
                     db, user_id, card_id, trigger=f"{TRIGGER} (full): match agreed", start=holds[answer].start
                 )

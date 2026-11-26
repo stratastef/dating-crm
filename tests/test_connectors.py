@@ -185,7 +185,7 @@ class RefusingConnector(FakeConnector):
 
 
 def test_a_ban_signal_pauses_that_apps_autopilot_and_the_alert_names_the_reason(db, user_id):
-    set_autonomy(db, user_id, "chat", "full")
+    set_autonomy(db, user_id, "chat", "full_autopilot")
 
     with pytest.raises(CapabilityFailed):
         call(db, user_id, RefusingConnector(http_error(403)), "read_matches")
@@ -198,7 +198,7 @@ def test_a_ban_signal_pauses_that_apps_autopilot_and_the_alert_names_the_reason(
 
 @pytest.mark.parametrize("error", [http_error(500), http_error(429), httpx.ConnectTimeout("timed out"), RuntimeError("bug")])
 def test_a_transient_error_neither_pauses_the_app_nor_makes_it_copilot_only(db, user_id, error, apns):
-    set_autonomy(db, user_id, "chat", "full")
+    set_autonomy(db, user_id, "chat", "full_autopilot")
 
     with pytest.raises(CapabilityFailed):
         call(db, user_id, RefusingConnector(error), "read_matches")

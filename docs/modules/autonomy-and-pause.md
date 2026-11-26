@@ -1,11 +1,11 @@
-# Autonomy and kill switch
+# Autonomy and Pause
 
-All in `app/autopilot.py`. Each job (`chat`, `profile`, `swipe`) has a level: `off`, `copilot`, `guardrails` or `full`. Chat and profile default to `copilot`, swipe to `off`. A pause stops autopilot for one app or for all apps.
+All in `app/autopilot.py`. Each job (`chat`, `profile`, `swipe`) has an autonomy level: `off`, `copilot`, `autopilot` or `full_autopilot` (Off, Copilot, Autopilot, Full autopilot). Any other value is refused with 422. Chat and profile default to `copilot`, swipe to `off`. A pause stops autopilot for one app or for all apps.
 
 | Route | Does |
 | --- | --- |
 | `GET /autonomy` | Level per job |
-| `PUT /autonomy/{job}` with `{"level": "full"}` | Sets one level |
+| `PUT /autonomy/{job}` with `{"level": "full_autopilot"}` | Sets one level |
 | `GET /autopilot/pause` | `{"all": false, "apps": ["tinder"]}` |
 | `POST /autopilot/pause?app=tinder`, `POST /autopilot/resume?app=tinder` | Pauses or resumes one app. Without `app`: all apps. |
 

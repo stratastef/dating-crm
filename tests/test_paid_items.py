@@ -21,7 +21,7 @@ def paid_items(client) -> list[dict]:
 
 
 def test_autopilot_proposes_a_super_like_in_the_review_queue_and_spends_nothing(signed_in, tinder, autopilot, llm):
-    signed_in.put("/autonomy/swipe", json={"level": "full"})
+    signed_in.put("/autonomy/swipe", json={"level": "full_autopilot"})
     llm.replies = ["super like\nShe climbs and wants kids."]  # Eve; Dana is Jev's pass and Fay a plain like
 
     assert autopilot()["status"] == "done"
@@ -87,7 +87,7 @@ def test_a_declined_super_like_is_never_spent_and_autopilot_then_likes_for_free(
     assert response.status_code == 200 and response.json()["status"] == "declined"
     assert paid_items(signed_in) == []
     assert answer(signed_in, proposed, "approve").status_code == 409
-    signed_in.put("/autonomy/swipe", json={"level": "full"})
+    signed_in.put("/autonomy/swipe", json={"level": "full_autopilot"})
     autopilot()
     assert f"GET /like/{EVE}" in tinder.calls()
     assert not any(call.startswith("POST") for call in tinder.calls())
