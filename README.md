@@ -13,6 +13,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/db.py` | `database_url()`, read from `DATABASE_URL` |
 | `app/auth.py` | `CurrentUser` and `Db` route dependencies, `create_user()`, `issue_token()` |
 | `app/sign_in.py` | Sign-in by phone number and sign-in code: `POST /sign-in/code`, `POST /sign-in`, `POST /sign-out` |
+| `app/invite_codes.py` | Invite codes: `python -m app.invite_codes [count]` prints new ones; `code_hash()` |
 | `app/sms.py` | `send()`, the only way to text a phone |
 | `app/cards.py` | Match cards and their messages: routes under `/cards` |
 | `app/card_lookup.py` | Shared reads of one card: `own_card()`, `find_card()`, `conversation()`, `chat_lines()`, `unanswered()` |
@@ -131,7 +132,7 @@ Fixtures in `tests/conftest.py`:
 
 ## Authentication and tenancy
 
-Each signed-in device has its own opaque API token, which the app gets by signing in with a phone number and a sign-in code (see [Sign-in](docs/modules/sign-in.md)). The client sends `Authorization: Bearer <token>`. Only the SHA-256 of the token is stored. Create a user and print a token once, for the developer sign-in:
+Each signed-in device has its own opaque API token, which the app gets by signing in with a phone number and a sign-in code (see [Sign-in](docs/modules/sign-in.md)). A new account also needs an invite code: `uv run python -m app.invite_codes 3` prints three. The client sends `Authorization: Bearer <token>`. Only the SHA-256 of the token is stored. Create a user and print a token once, for the developer sign-in:
 
 ```sh
 uv run python -m app.auth you@example.com
