@@ -23,7 +23,7 @@ struct MainTabView: View {
             }
             .badge(reviewCount)
             Tab("Pipeline", systemImage: "person.2", value: .pipeline) {
-                BoardView(client: client, push: push)
+                PipelineView(client: client, push: push)
             }
             Tab("Swipe", systemImage: "rectangle.stack", value: .swipe) {
                 NavigationStack { SwipeView(client: client) }

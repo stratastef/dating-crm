@@ -97,6 +97,11 @@ class Card(BaseModel):
     hot: bool  # a hot lead: `is_hot_lead()` in `app/review.py`, as on the review queue
     pending_draft: Draft | None  # the newest pending draft, the one the review queue shows; null when none
     lead_photo_url: str | None  # the first photo attached to the card; null when unknown
+    # Where the Pipeline lists the card, and why: see `app/pipeline.py`.
+    pipeline_group: str  # a `Group`: `waiting_for_you`, `handled_by_autopilot`, ...
+    reason: str | None  # a `Reason` when the card is Waiting for you, else null
+    handover_trigger: str | None  # with reason `handover`: the handover check that hit, such as `logistics`
+    autopilot_activity: str | None  # an `Activity` when the card is Handled by autopilot, else null
 
     @computed_field
     @property
@@ -150,18 +155,20 @@ def summarize(db: Connection, user_id: int, cards: Sequence[Row]) -> list[Card]:
     )
     # shortcut: one hot-lead query per card, like the review queue. Fold `is_hot_lead()` into one query over
     # all the ids if a Pipeline of a few hundred cards gets slow.
-    return [
-        Card.model_validate(
-            {
-                **card._mapping,
-                "last_message": last_messages.get(card.id),
-                "hot": is_hot_lead(db, user_id, card.id),
-                "pending_draft": pending_drafts.get(card.id),
-                "lead_photo_url": lead_photos.get(card.id),
-            }
-        )
+    summaries = [
+        {
+            **card._mapping,
+            "last_message": last_messages.get(card.id),
+            "hot": is_hot_lead(db, user_id, card.id),
+            "pending_draft": pending_drafts.get(card.id),
+            "lead_photo_url": lead_photos.get(card.id),
+        }
         for card in cards
     ]
+    from app.pipeline import place  # imported here: app.pipeline imports this module for `GET /pipeline`
+
+    place(db, user_id, summaries)
+    return [Card.model_validate(summary) for summary in summaries]
 
 
 class NewCard(BaseModel):
