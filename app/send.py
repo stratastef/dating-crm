@@ -12,7 +12,7 @@ from app.auth import CurrentUser, Db
 from app.autopilot import autopilot_block
 from app.cards import upsert_message
 from app.connectors import CapabilityFailed, call, unavailable
-from app.drafts import _COLUMNS, Draft, present
+from app.drafts import _COLUMNS, PLANNED, Draft, present
 from app.jobs import enqueue, handler
 from app.sync import CONNECTORS
 
@@ -119,6 +119,24 @@ def cancel_send(db: Connection, user_id: int, draft_id: int) -> Row | None:
             {"id": draft_id, "user_id": user_id},
         )
     return draft
+
+
+def drop_planned_sends(db: Connection, user_id: int, card_id: int) -> None:
+    """The match wrote again: autopilot's planned sends to them answer an old message. Each is taken back and
+    dismissed, and the slots it offered are free again. Chat autopilot then plans a new reply."""
+    planned = db.execute(
+        text(f"SELECT id FROM drafts WHERE card_id = :card_id AND user_id = :user_id AND {PLANNED}"),
+        {"card_id": card_id, "user_id": user_id},
+    ).scalars().all()
+    for draft_id in planned:
+        if cancel_send(db, user_id, draft_id):  # None once the worker is sending it
+            db.execute(
+                text("UPDATE drafts SET status = 'dismissed' WHERE id = :id AND user_id = :user_id"),
+                {"id": draft_id, "user_id": user_id},
+            )
+            calendar.release_holds(
+                db, user_id, card_id, trigger=f"chat autopilot: dropped draft {draft_id}", draft_id=draft_id
+            )
 
 
 def _card(db: Connection, user_id: int, draft_id: int) -> Row | None:

@@ -161,7 +161,8 @@ def chat_reply(db: Connection, user_id: int, payload: dict) -> None:
         },
     )
     trigger = f"{TRIGGER} ({level}): reply to message {newest.id}"
-    if not queue_send(db, user_id, draft.id, trigger, unattended=True):
+    # A planned send: it goes out at its send time, when `send_draft` asks the same gate again.
+    if not queue_send(db, user_id, draft.id, trigger, unattended=True, run_at=draft.send_at):
         review.notify_if_hot(db, user_id, card_id, card.name)  # the draft joined the review queue
 
 
