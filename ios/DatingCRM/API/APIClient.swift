@@ -122,6 +122,16 @@ struct APIClient {
         try await send("PUT", "preferences", body: Self.encoder.encode(preferences))
     }
 
+    /// The voice questionnaire's questions, as the server words them, and the user's answers.
+    func voice() async throws -> Voice {
+        try await send("GET", "voice")
+    }
+
+    /// Replaces all the questionnaire answers. The server then rewrites the style profile.
+    func saveAnswers(_ answers: [String: String]) async throws -> Voice {
+        try await send("PUT", "voice/questionnaire", body: Self.encoder.encode(["answers": answers]))
+    }
+
     /// Good dates per hour for every week with recorded time or a good date, oldest first.
     func dashboard() async throws -> [DashboardWeek] {
         try await send("GET", "dashboard")
