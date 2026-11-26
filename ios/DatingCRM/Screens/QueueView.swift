@@ -135,18 +135,6 @@ private struct Quote: View {
     }
 }
 
-/// Text on a solid surface inside a plate, where grey metadata stays readable.
-private struct Inset<Content: View>: View {
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) { content }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .background(Color(uiColor: .systemBackground), in: .rect(cornerRadius: 16))
-    }
-}
-
 /// A pending draft, with the action named for its effect (ADR 0003): Send where the app can send it, Copy where
 /// it cannot. A failed send shows the same way, with Retry and Copy.
 private struct DraftItem: View {
@@ -292,7 +280,7 @@ private struct HandoverItem: View {
         PhotoCard(name: item.cardName, photo: item.card?.leadPhotoUrl) {
             ItemHeader(item: item)
             // The symbol inline, not a Label's icon column, which takes a third of the width at accessibility sizes.
-            Text("\(Image(systemName: "hand.raised")) \(Self.reason(item.triggers ?? []))")
+            Text("\(Image(systemName: "hand.raised")) \(HandoverBanner.reason(item.triggers ?? []))")
             if let message = item.message {
                 Quote(message: message)
             }
@@ -321,23 +309,6 @@ private struct HandoverItem: View {
             }
             .disabled(busy)
         }
-    }
-
-    /// Why autopilot stopped, from the server's trigger codes (`HANDOVER` in `app/jev.py`).
-    static func reason(_ triggers: [String]) -> String {
-        let reasons = triggers.map { trigger in
-            switch trigger {
-            case "asks_if_ai": "they asked if you're an AI"
-            case "logistics": "they want to make plans"
-            case "place_or_exclusivity": "they asked where to meet or about being exclusive"
-            case "personal_info": "they shared or asked for personal info"
-            case "sensitive": "they brought up something sensitive"
-            case "unavailable": "the message could not be checked"
-            default: "a handover trigger fired"
-            }
-        }
-        guard !reasons.isEmpty else { return "Autopilot paused this chat" }
-        return "Autopilot stopped: \(reasons.formatted())"
     }
 
     /// Either way the handover no longer waits in Review.

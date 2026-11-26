@@ -91,7 +91,7 @@ After sign-in the app asks for permission to notify, gets a device token from Ap
 
 The Review tab shows `QueueView`: the review queue from `GET /queue`, hot leads first, each item led by the match's photo (or monogram) with its text on a glass plate. The match's name opens the card. A draft shows whether it is an opener or a reply, the dating app and the message it answers; it can be edited in place, then approved or dismissed (approve saves the edit first; dismiss offers Undo for 5 seconds before the server hears of it). A handover item says which trigger fired, quotes the message, and offers Copy on each suggested reply, "Hand back" and "Take over". A proposed paid item (Super Like, Rose, Boost) shows the candidate's photo, the item, its cost when the dating app reported one, the reason, a link to the profile, and "Approve" and "Decline"; the server spends it only on approve, and the item says so when the dating app did not spend it. Items of a kind the app does not know are skipped. See `docs/modules/ios-app-shell.md`, "Review".
 
-A card that is paused for handover shows the same section on top of `CardDetailView` (`Screens/HandoverSection.swift`): "Take over" while the handover is pending, "Hand back to autopilot" once the user took over.
+A card that is paused for handover shows a banner at the end of its chat in `CardDetailView` (`Components/HandoverBanner.swift`): the trigger, the quoted message, the suggested replies, "Hand back" and "Take over" while the handover is pending, "Hand back" once the user took over. See `docs/modules/ios-app-shell.md`, "Card detail".
 
 ## Settings
 

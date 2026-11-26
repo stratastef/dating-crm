@@ -164,7 +164,7 @@ struct ReviewQueueTests {
 
         #expect(items == [
             QueueItem(kind: "copied_draft", hot: false, cardID: 1, cardName: "Ada",
-                      draft: Draft(id: 5, kind: .reply, original: "saturday?", edited: nil, sendable: true)),
+                      draft: Draft(id: 5, kind: .reply, original: "saturday?", edited: nil, sendable: true, status: "copied")),
         ])
     }
 

@@ -11,6 +11,10 @@ enum Stage: String, Codable, CaseIterable, Identifiable {
 
     var id: Self { self }
 
+    /// Matched and Chatting: the chat is in the dating app, so the card opens on Chat and offers Write draft.
+    /// From Number swapped on, the user texts off the app and the card opens on Details.
+    var chatsInApp: Bool { self == .matched || self == .chatting }
+
     var title: String {
         switch self {
         case .matched: "Matched"
@@ -50,6 +54,8 @@ struct Card: Codable, Identifiable, Hashable {
 
     // The card summary: what a row shows, sent with every card so the app makes no other call.
     var stageChangedAt: Date?
+    /// When the card was made: when the match synced, or when the user added it.
+    var createdAt: Date?
     /// No message from either side for the user's set number of days. A flag, not a stage.
     var stalled = false
     /// The newest message, from either side; nil when there are none.
@@ -58,6 +64,8 @@ struct Card: Codable, Identifiable, Hashable {
     var hot = false
     /// The draft waiting in Review; nil when there is none.
     var pendingDraft: Draft?
+    /// The card's draft list: its pending, copied and failed drafts, newest first. The card docks the first.
+    var drafts: [Draft]?
     /// nil when unknown: the row shows the monogram.
     var leadPhotoUrl: URL?
 
@@ -113,6 +121,10 @@ struct Message: Codable, Identifiable, Hashable {
     var sender: Sender
     var body: String
     var sentAt: Date
+    /// The handover checks a message from the match hit, such as `logistics`; nil when it was not checked.
+    var handover: [String]? = nil
+    /// Autopilot sent it alone: the chat marks it. False for the user's own messages, sent drafts included.
+    var sentByAutopilot = false
 }
 
 /// Today: the review summary, then what the user has to do by day, in the time zone the app sent.
@@ -218,6 +230,8 @@ struct Draft: Codable, Identifiable, Hashable {
     var guardrail: [String]? = nil
     /// The app can send it now (ADR 0003): Send. Otherwise the user copies it into the dating app: Copy.
     var sendable = false
+    /// `pending`, `copied` or `failed` on the card's draft list; also `approved`, `sending`, `sent`, `dismissed`.
+    var status = "pending"
 
     /// What to show and copy: the user's edit when there is one.
     var text: String { edited ?? original }

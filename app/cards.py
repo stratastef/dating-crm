@@ -244,14 +244,25 @@ def _queue_reply(db: Connection, user_id: int, card_id: int) -> None:
 
 
 def upsert_message(
-    db: Connection, user_id: int, card_id: int, external_id: str | None, sender: str, body: str, sent_at: datetime | str
+    db: Connection,
+    user_id: int,
+    card_id: int,
+    external_id: str | None,
+    sender: str,
+    body: str,
+    sent_at: datetime | str,
+    *,
+    sent_by_autopilot: bool = False,
 ) -> None:
     """Add a synced message unless the card already has it. Without an `external_id` it is always added.
 
     A new message has the same effects as one added through `POST /cards/{id}/messages`, and it also moves a
-    Matched card to Chatting.
+    Matched card to Chatting. `sent_by_autopilot` marks a message autopilot sent alone (`app/send.py`).
     """
-    if insert_message(db, user_id, card_id, external_id, sender, body, sent_at, skip_duplicate=True):
+    stored = insert_message(
+        db, user_id, card_id, external_id, sender, body, sent_at, skip_duplicate=True, sent_by_autopilot=sent_by_autopilot
+    )
+    if stored:
         db.execute(
             text(
                 "UPDATE cards SET stage = 'chatting', stage_changed_at = now()"
@@ -337,7 +348,7 @@ def read_card(card_id: int, user: CurrentUser, db: Db):
     return summarize(db, user.id, [own_card(db, user.id, card_id, _COLUMNS)])[0]
 
 
-_MESSAGE_COLUMNS = "id, card_id, external_id, sender, body, sent_at, handover"
+_MESSAGE_COLUMNS = "id, card_id, external_id, sender, body, sent_at, handover, sent_by_autopilot"
 
 
 class Message(BaseModel):
@@ -349,6 +360,8 @@ class Message(BaseModel):
     sent_at: datetime
     # The handover checks an incoming message hit (see `app/jev.py`); null when it was not checked.
     handover: list[str] | None
+    # Autopilot sent it alone; false for the user's own messages, including drafts they sent.
+    sent_by_autopilot: bool
 
 
 class NewMessage(BaseModel):
@@ -368,6 +381,7 @@ def insert_message(
     sent_at: datetime | str | None = None,
     *,
     skip_duplicate: bool = False,
+    sent_by_autopilot: bool = False,
 ) -> dict | None:
     """Store one message on the user's card and run everything a new message sets off. Every message is
     stored through this function, so those effects are in one place:
@@ -378,14 +392,15 @@ def insert_message(
 
     Returns the stored message, or None when the user has no such card. `sent_at` defaults to now. A message
     whose `external_id` the card already has raises `IntegrityError`; with `skip_duplicate` it is left alone
-    and None is returned.
+    and None is returned. `sent_by_autopilot` marks a message autopilot sent alone.
     """
     # Selecting from the user's cards means a card they do not own inserts nothing.
     row = db.execute(
         text(
             f"""
-            INSERT INTO messages (user_id, card_id, external_id, sender, body, sent_at)
-            SELECT user_id, id, :external_id, :sender, :body, COALESCE(CAST(:sent_at AS timestamptz), now())
+            INSERT INTO messages (user_id, card_id, external_id, sender, body, sent_at, sent_by_autopilot)
+            SELECT user_id, id, :external_id, :sender, :body, COALESCE(CAST(:sent_at AS timestamptz), now()),
+                :sent_by_autopilot
             FROM cards WHERE id = :card_id AND user_id = :user_id
             {"ON CONFLICT (card_id, external_id) DO NOTHING" if skip_duplicate else ""}
             RETURNING {_MESSAGE_COLUMNS}
@@ -398,6 +413,7 @@ def insert_message(
             "sender": sender,
             "body": body,
             "sent_at": sent_at,
+            "sent_by_autopilot": sent_by_autopilot,
         },
     ).one_or_none()
     if not row:

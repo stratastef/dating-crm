@@ -4,6 +4,8 @@ import SwiftUI
 struct Avatar: View {
     let name: String
     let photo: URL?
+    /// 48 pt in rows; smaller in a navigation bar.
+    var size: CGFloat = 48
 
     var body: some View {
         // With no photo, while it loads and if it fails, the monogram shows.
@@ -11,12 +13,12 @@ struct Avatar: View {
             image.resizable().scaledToFill()
         } placeholder: {
             Text(name.prefix(1).uppercased())
-                .font(.system(size: 21, weight: .semibold, design: .serif))
+                .font(.system(size: size * 0.44, weight: .semibold, design: .serif))
                 .foregroundStyle(.accent)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(.accentSoft)
         }
-        .frame(width: 48, height: 48)
+        .frame(width: size, height: size)
         .clipShape(.circle)
         // In a list row, the separator starts past the avatar, under the text 14 pt after it.
         .alignmentGuide(.listRowSeparatorLeading) { $0[.trailing] + 14 }
