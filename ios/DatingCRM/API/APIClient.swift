@@ -216,6 +216,15 @@ struct APIClient {
         try await send("PUT", "budget", body: Self.encoder.encode(["cap_usd": usd]))
     }
 
+    /// How many profiles swipe autopilot may swipe on, per run and per day.
+    func swipeLimits() async throws -> SwipeLimits {
+        try await send("GET", "swipes/limits")
+    }
+
+    func setSwipeLimits(_ limits: SwipeLimits) async throws -> SwipeLimits {
+        try await send("PUT", "swipes/limits", body: Self.encoder.encode(limits))
+    }
+
     /// Whether the match read may guess ethnicity, religion, health, sexuality and politics. Off by default.
     func protectedTraitGuesses() async throws -> Bool {
         try await enabled("GET", "settings/protected-trait-guesses")

@@ -201,6 +201,16 @@ enum AutonomyLevel: String, Codable, CaseIterable, Identifiable {
 
     var id: Self { self }
     var title: String { self == .fullAutopilot ? "Full autopilot" : rawValue.capitalized }
+
+    /// What the level lets the app do, in plain words (GLOSSARY.md, Autonomy).
+    var summary: String {
+        switch self {
+        case .off: "The app does nothing here unless you ask."
+        case .copilot: "The app drafts and suggests. You decide and send."
+        case .autopilot: "The app acts alone within your limits. Date plans and every handover come to you."
+        case .fullAutopilot: "The app also plans and books dates alone. Handovers still come to you."
+        }
+    }
 }
 
 /// The AI budget of the current month, in USD. `paused`: the spend is at the cap, so autopilot is paused.
@@ -208,6 +218,22 @@ struct Budget: Codable, Equatable {
     var spendUsd: Double
     var capUsd: Double
     var paused: Bool
+
+    /// "$8.20 of $30": cents only when there are any.
+    var spentOfCap: String { "\(Self.dollars(spendUsd)) of \(Self.dollars(capUsd))" }
+
+    private static func dollars(_ usd: Double) -> String {
+        // en_US: "$30", not "US$30" outside the US. The app is not localized.
+        usd.formatted(
+            .currency(code: "USD").locale(Locale(identifier: "en_US"))
+                .precision(.fractionLength(usd == usd.rounded() ? 0 : 2)))
+    }
+}
+
+/// How many profiles swipe autopilot may swipe on, per app: per run of the job (1 to 10) and per day (1 to 100).
+struct SwipeLimits: Codable, Equatable {
+    var swipesPerRun: Int
+    var swipesPerDay: Int
 }
 
 /// A purge cannot be undone, so the user types the word before the button works.
