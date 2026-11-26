@@ -14,17 +14,17 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/auth.py` | `CurrentUser` and `Db` route dependencies, `create_user()`, `issue_token()` |
 | `app/sign_in.py` | Sign-in by phone number and sign-in code: `POST /sign-in/code`, `POST /sign-in`, `POST /sign-out` |
 | `app/invite_codes.py` | Invite codes: `python -m app.invite_codes [count]` prints new ones; `code_hash()` |
-| `app/sms.py` | `send()`, the only way to text a phone, through Twilio when `SMS_PROVIDER=twilio`, else to the server log |
+| `app/sms.py` | `send()`, the only way to text a phone: through Twilio when `SMS_PROVIDER=twilio`, to the server log when `log` (local development), else it fails closed |
 | `app/cards.py` | Match cards and their messages: routes under `/cards` |
 | `app/card_lookup.py` | Shared reads of one card: `own_card()`, `find_card()`, `conversation()`, `chat_lines()`, `unanswered()` |
-| `app/llm.py` | `call()`, the only way to call Claude; records each call's cost |
+| `app/llm.py` | `call()`, the only way to call Claude; records each call's cost. `month_start()`: the calendar month (UTC) the AI budget and the dashboard count |
 | `app/jev.py` | Jev checks: `ask()`, the only way to call Jev, and the guardrail, handover, match-read, hot-lead and dealbreaker checks built on it |
 | `app/budget.py` | The monthly AI budget: `GET` and `PUT /budget` |
 | `app/drafts.py` | Copilot drafts for a card and the user's edits: `POST /cards/{id}/drafts`, `PATCH /drafts/{id}` |
 | `app/screenshots.py` | Screenshot copilot: `POST /screenshots` reads a shared screenshot into a card and a draft |
 | `app/reads.py` | The match read: inferences about a match, the user's corrections, card photos and the protected-trait opt-in |
 | `app/send.py` | Sending a draft: `POST /drafts/{id}/send`, `/undo-send`, `/send-now` and `/hold`, `queue_send()`, `cancel_send()`, `drop_planned_sends()` and the `send_draft` job |
-| `app/timing.py` | Send timing: `formula()`, `send_time()` (the hard bounds) and `outside_night()` (the night window) |
+| `app/timing.py` | Send timing: `formula()`, `send_time()` (the hard bounds), `night_rule()` (the night window, at planning and at send time), `opener_time()` and `outside_night()` |
 | `app/voice.py` | Questionnaire, style profile and similar past chats: routes under `/voice` |
 | `app/bios.py` | Bio and prompt rewrites per dating app: routes under `/bios` |
 | `app/photos.py` | The user's own photos, their ranking and light edits: routes under `/photos` |
@@ -33,6 +33,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/feedback.py` | Feedback loop: `swipe_lines()` for the swipe pre-screen prompt, and `GET /feedback/export` |
 | `app/settings.py` | User settings: `GET` and `PATCH /settings`, `user_zone()` |
 | `app/today.py` | Today: `GET /today`, the review summary and what the user has to do by time |
+| `app/pipeline.py` | The Pipeline: `GET /pipeline`, and `place()`, which puts every card summary in its group with its reason and autopilot activity |
 | `app/status.py` | The status strip: `GET /status`, what stops autopilot now, in the order the phone shows it |
 | `app/setup.py` | Setup: `GET /setup`, each step done or not, and Today's setup summary |
 | `app/tenancy.py` | `user_id_column()` for tenant tables |

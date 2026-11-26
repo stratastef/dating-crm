@@ -4,9 +4,10 @@ import SwiftUI
 /// profile (photos, bios and prompts, voice), notifications, privacy, the activity log, find and purge, and Sign out.
 struct YouView: View {
     let client: APIClient
-    let signOut: () async -> Void
+    let signOut: () async throws -> Void
 
     @State private var confirmsSignOut = false
+    @State private var signOutError: String?
     // Until it loads, or if it fails, the row reads "Dashboard"; the Dashboard screen shows the error.
     @State private var dashboard: Dashboard?
 
@@ -43,10 +44,13 @@ struct YouView: View {
             Section {
                 Button("Sign out") { confirmsSignOut = true }
                     .confirmationDialog("Sign out of Dating CRM?", isPresented: $confirmsSignOut, titleVisibility: .visible) {
-                        Button("Sign out", role: .destructive) { Task { await signOut() } }
+                        Button("Sign out", role: .destructive) { Task { await attemptSignOut() } }
                     } message: {
                         Text("This phone stops getting your notifications. Your other devices stay signed in.")
                     }
+                if let signOutError {
+                    ErrorRow(text: signOutError) { await attemptSignOut() }
+                }
             } header: {
                 Text("Account").foregroundStyle(Color.primary)
             }
@@ -70,6 +74,14 @@ struct YouView: View {
             case "purge": PurgeView(client: client)
             default: EmptyView()
             }
+        }
+    }
+
+    private func attemptSignOut() async {
+        do {
+            try await signOut()
+        } catch {
+            signOutError = "You're still signed in: the server could not be reached, so this phone still gets your notifications. Tap to try again."
         }
     }
 

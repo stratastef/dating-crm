@@ -13,6 +13,12 @@ Openers go out at a random time 30 minutes to 6 hours after the match, outside t
 
 The user sees each planned send with its time and reason, and can send it now or hold it. Their own drafts get a suggested send time they can schedule.
 
+## Amended 2026-11-25 (owner's decision)
+
+- A live match at night: when the match wrote in the last 5 minutes, an autopilot reply goes out at the live pace even inside the night window. Otherwise the night window holds. Openers never go out inside it.
+- The 12-hour ceiling and the night window: when moving a time past the window's end would put it more than 12 hours out, it goes a few random minutes before the window starts instead, if that is still after the floor; only failing that, to the window's end.
+- The same rule is asked again when a planned send goes out, so a night window or time zone changed after planning still holds.
+
 ## Considered options
 
 - Instant replies (v1): look automated.

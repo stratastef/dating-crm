@@ -9,8 +9,7 @@ from sqlalchemy import Connection, text
 
 from app import calendar, paid_items
 from app.auth import CurrentUser, Db
-from app.drafts import _COLUMNS as _DRAFT_COLUMNS
-from app.drafts import Draft, present
+from app.drafts import DRAFT_COLUMNS, Draft, present
 from app.push import send_push
 
 router = APIRouter()
@@ -94,7 +93,7 @@ def queue(user: CurrentUser, db: Db):
     drafts = db.execute(
         text(
             f"""
-            SELECT {", ".join(f"drafts.{column}" for column in _DRAFT_COLUMNS.split(", "))},
+            SELECT {", ".join(f"drafts.{column}" for column in DRAFT_COLUMNS.split(", "))},
                    drafts.copied_at, drafts.updated_at,
                    cards.name AS card_name, answered.body AS message_body, answered.sent_at AS message_sent_at
             FROM drafts JOIN cards ON cards.id = drafts.card_id
@@ -170,10 +169,10 @@ def queue(user: CurrentUser, db: Db):
 
 def _summaries(db: Connection, user_id: int, card_ids: list[int]) -> dict[int, dict]:
     """The card summaries of the user's cards, by card id."""
-    from app.cards import _COLUMNS, summarize  # imported here: app.cards imports this module for `is_hot_lead`
+    from app.cards import CARD_COLUMNS, summarize  # imported here: app.cards imports this module for `is_hot_lead`
 
     rows = db.execute(
-        text(f"SELECT {_COLUMNS} FROM cards WHERE user_id = :user_id AND id = ANY(:ids)"),
+        text(f"SELECT {CARD_COLUMNS} FROM cards WHERE user_id = :user_id AND id = ANY(:ids)"),
         {"user_id": user_id, "ids": card_ids},
     ).all()
     return {card.id: card.model_dump() for card in summarize(db, user_id, rows)}
@@ -192,7 +191,7 @@ def _decide(db: Connection, user_id: int, draft_id: int, status: str, allowed: t
             UPDATE drafts SET status = :status, updated_at = now(),
                 copied_at = CASE WHEN :status = 'copied' THEN now() ELSE copied_at END
             WHERE id = :id AND user_id = :user_id AND status = ANY(:allowed)
-            RETURNING {_DRAFT_COLUMNS}
+            RETURNING {DRAFT_COLUMNS}
             """
         ),
         {"id": draft_id, "user_id": user_id, "status": status, "allowed": list(allowed)},

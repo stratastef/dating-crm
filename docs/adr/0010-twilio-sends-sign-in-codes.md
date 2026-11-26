@@ -30,7 +30,7 @@ Twilio Verify was rejected. It creates and checks its own codes, so it would rep
 ## Consequences
 
 - The main guard against SMS pumping is ours. A number gets a text only if it has an account or comes with an unused invite code. Code requests are also limited per number and per IP (`docs/modules/sign-in.md`). Twilio's SMS Pumping Protection is optional outside the US and Canada.
-- Fail closed. If `SMS_PROVIDER` is set and a Twilio setting is missing, or Twilio refuses the text or cannot be reached, the code request answers `503 sms_not_sent` and no code for that number works. When `SMS_PROVIDER` is not set, the code is written to the server log, for local development only. Never leave it unset on a server testers use.
+- Fail closed. If `SMS_PROVIDER` is not `twilio` or `log`, a Twilio setting is missing, or Twilio refuses the text or cannot be reached, the code request answers `503 sms_not_sent` and no code for that number works. Only `SMS_PROVIDER=log` writes the code to the server log, for local development; `compose.yaml` sets it unless the environment gives another value. (Amended 2026-11-25: an unset `SMS_PROVIDER` used to mean the log.)
 - If Twilio accepts a text that the carrier later fails to deliver, we never hear about it. The user taps "Send a new code". Undelivered texts show in the Twilio Console under Monitor, Logs, Messages.
 - Twilio, a US company, receives each tester's phone number and the text with its code. The code is useless after 10 minutes. Twilio's data processing addendum is part of its terms.
 

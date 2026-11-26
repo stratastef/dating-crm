@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The match read on a card: each inference with its evidence and confidence word (Sure, Likely, Guess), and a tap
-/// to correct it.
+/// The match read on a card: each inference with the AI marker, its evidence and confidence word (Sure, Likely, Guess),
+/// and a tap to correct it.
 struct ReadSection: View {
     let client: APIClient
     let cardID: Int
@@ -23,6 +23,7 @@ struct ReadSection: View {
                     correcting = inference
                 } label: {
                     VStack(alignment: .leading, spacing: 3) {
+                        AIMarker(.suggests)  // every inference is the AI's read, as on every other AI-made thing
                         AdaptiveStack(spacing: 6) {
                             Text(inference.title).font(.subheadline.weight(.semibold))
                             Text(inference.corrected == nil ? inference.confidenceWord : "Corrected by you")

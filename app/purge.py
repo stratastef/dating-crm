@@ -9,7 +9,7 @@ from sqlalchemy import text
 from app import calendar, swipes, tombstones
 from app.audit import record_action
 from app.auth import CurrentUser, Db
-from app.cards import _COLUMNS, Card, summarize
+from app.cards import CARD_COLUMNS, Card, summarize
 
 router = APIRouter()
 
@@ -20,7 +20,7 @@ def find_people(user: CurrentUser, db: Db, q: str = Query(min_length=1)):
     rows = db.execute(
         text(
             f"""
-            SELECT {_COLUMNS} FROM cards
+            SELECT {CARD_COLUMNS} FROM cards
             WHERE user_id = :user_id
               AND (strpos(lower(name), lower(:q)) > 0 OR strpos(lower(coalesce(external_id, '')), lower(:q)) > 0)
             ORDER BY id
@@ -40,7 +40,7 @@ def find_candidates(user: CurrentUser, db: Db, q: str = Query(min_length=1)):
     return db.execute(
         text(
             f"""
-            SELECT {swipes._COLUMNS} FROM swipe_candidates
+            SELECT {swipes.CANDIDATE_COLUMNS} FROM swipe_candidates
             WHERE user_id = :user_id
               AND (strpos(lower(name), lower(:q)) > 0 OR strpos(lower(profile_id), lower(:q)) > 0)
             ORDER BY id

@@ -1,7 +1,8 @@
 """Read sync: the recurring `sync_matches` job copies each app's matches and messages into cards.
 Submitting a session token also runs it at once."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -39,6 +40,8 @@ def submit_token(app: str, session: SessionToken, user: CurrentUser, db: Db) -> 
     where = {"user_id": user.id, "app": app}
     db.execute(text("DELETE FROM connector_alerts WHERE user_id = :user_id AND app = :app"), where)
     db.execute(text("DELETE FROM copilot_only_apps WHERE user_id = :user_id AND app = :app"), where)
+    # The next sync of the app is its first since this connect: the matches it finds get no autopilot opener.
+    db.execute(text("INSERT INTO first_syncs (user_id, app) VALUES (:user_id, :app) ON CONFLICT DO NOTHING"), where)
     enqueue(db, user.id, "sync_matches", {"app": app})
 
 
@@ -56,7 +59,22 @@ def choose_copilot_only(app: str, user: CurrentUser, db: Db) -> None:
     )
 
 
-@router.get("/connectors")
+class ConnectorAlert(BaseModel):
+    id: int
+    app: str
+    capability: str
+    reason: str
+    error: str
+    created_at: datetime
+
+
+class ConnectedApp(BaseModel):
+    app: str
+    state: Literal["no_connector", "copilot_only", "broken", "connected", "not_connected"]
+    alert: ConnectorAlert | None  # the newest alert, only while `broken`
+
+
+@router.get("/connectors", response_model=list[ConnectedApp])
 def connected_apps(user: CurrentUser, db: Db) -> list[dict]:
     """Each app in `DATING_APPS` with its connector `state` and, when `broken`, its newest `alert`.
 
@@ -106,8 +124,16 @@ def sync_matches(db: Connection, user_id: int, payload: dict) -> None:
 
 def _sync_app(db: Connection, user_id: int, app: str) -> None:
     connector = CONNECTORS[app]()
-    for match in call(db, user_id, connector, "read_matches"):
-        card_id = upsert_card(db, user_id, app, match["id"], match["name"], match["has_messages"])
+    matches = call(db, user_id, connector, "read_matches")
+    # Taken only once the matches are read: a sync that read nothing leaves the next one the first.
+    first = db.execute(
+        text("DELETE FROM first_syncs WHERE user_id = :user_id AND app = :app RETURNING app"),
+        {"user_id": user_id, "app": app},
+    ).first()
+    for match in matches:
+        # A match already there when the app was connected gets no opener alone: the user decides (owner, 2026-11-25).
+        opener = not match["has_messages"] and not first
+        card_id = upsert_card(db, user_id, app, match["id"], match["name"], opener=opener)
         if card_id is None or not match["has_messages"]:  # None: the user purged this match
             continue
         # One request per match is the costly part, so skip it when the newest message is already stored.

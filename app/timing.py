@@ -1,8 +1,9 @@
 """Send timing (ADR 0008): when a draft goes out.
 
 `formula()` plans the wait from the conversation. The model that writes the draft may move it by up to half
-either way, and `send_time()` then holds it to hard bounds no model output can cross. An opener has no
-conversation to time it: `opener_time()` picks it. `outside_night()` is the night-window rule alone.
+either way, and `send_time()` then holds it to hard bounds no model output can cross, the night window last
+(`night_rule()`, asked again when a planned send goes out). An opener has no conversation to time it:
+`opener_time()` picks it, and `outside_night()` keeps it out of the night window.
 """
 
 import random
@@ -21,6 +22,7 @@ CEILING = timedelta(hours=12)  # the longest wait, before the night window moves
 MAX_ADJUSTMENT = 0.5  # the model may move the formula's wait by up to half either way
 OPENER_WINDOW = (timedelta(minutes=30), timedelta(hours=6))  # an opener goes out this long after the match synced
 OPENER_GAP = timedelta(minutes=10)  # the least time between two of a user's openers
+OPENER_REASON = "a while after you matched"  # every opener's timing reason: its time is random, not from a chat
 
 # The formula's weights.
 _FIRST_PACE = timedelta(minutes=45)  # no reply gap of theirs is known yet
@@ -70,14 +72,29 @@ def formula(db: Connection, user_id: int, card_id: int, now: datetime) -> timede
 def send_time(db: Connection, user_id: int, card_id: int, wait: timedelta, adjustment: float, now: datetime) -> datetime:
     """When the draft goes out: the formula's `wait` from `now`, moved by the model's `adjustment` (a fraction of
     it, clamped to half either way), then held to the hard bounds: at least 2 minutes when the match is live,
-    otherwise 10; at most 12 hours; and never inside the user's night window."""
+    otherwise 10; at most 12 hours; then the night window (`night_rule()`)."""
     adjustment = min(max(adjustment, -MAX_ADJUSTMENT), MAX_ADJUSTMENT)
-    last = db.execute(
-        text("SELECT max(sent_at) FROM messages WHERE card_id = :card_id AND user_id = :user_id AND sender = 'them'"),
-        {"card_id": card_id, "user_id": user_id},
-    ).scalar_one()
-    floor = LIVE_FLOOR if last and now - last <= LIVE else FLOOR
-    return outside_night(db, user_id, now + min(max(wait * (1 + adjustment), floor), CEILING))
+    floor = LIVE_FLOOR if _live(db, user_id, card_id, now) else FLOOR
+    return night_rule(db, user_id, card_id, now + min(max(wait * (1 + adjustment), floor), CEILING), now)
+
+
+def night_rule(db: Connection, user_id: int, card_id: int, at: datetime, now: datetime) -> datetime:
+    """When a reply planned at `now` to go out at `at` goes out, given the user's night window. Planning asks it
+    (`send_time()`), and so does the send itself (`app/send.py`), as the window or time zone may have changed.
+
+    A live match gets the reply at `at`, night or not. Otherwise a time inside the window moves to the window's end
+    plus a few random minutes. When that is more than 12 hours from `now`, it moves to a few random minutes before
+    the window starts instead, if that is still at least 10 minutes from `now`; if not, to the end after all.
+    """
+    night = None if _live(db, user_id, card_id, now) else _night(db, user_id, at)
+    if not night:
+        return at
+    start, end = night
+    after = end + _few_minutes()
+    if after - now <= CEILING:
+        return after
+    before = start - _few_minutes()
+    return before if before - now >= FLOOR else after
 
 
 def opener_time(db: Connection, user_id: int, synced: datetime) -> datetime:
@@ -102,6 +119,21 @@ def opener_time(db: Connection, user_id: int, synced: datetime) -> datetime:
 
 def outside_night(db: Connection, user_id: int, at: datetime) -> datetime:
     """`at`, or, when it falls inside the user's night window, the window's end plus a few random minutes."""
+    night = _night(db, user_id, at)
+    return night[1] + _few_minutes() if night else at
+
+
+def _live(db: Connection, user_id: int, card_id: int, now: datetime) -> bool:
+    """Whether the match is live at `now`: their last message is at most 5 minutes old."""
+    last = db.execute(
+        text("SELECT max(sent_at) FROM messages WHERE card_id = :card_id AND user_id = :user_id AND sender = 'them'"),
+        {"card_id": card_id, "user_id": user_id},
+    ).scalar_one()
+    return last is not None and now - last <= LIVE
+
+
+def _night(db: Connection, user_id: int, at: datetime) -> tuple[datetime, datetime] | None:
+    """The start and end of the user's night window that `at` falls inside, or None when it falls outside."""
     start, end = db.execute(
         text("SELECT night_window_start, night_window_end FROM users WHERE id = :id"), {"id": user_id}
     ).one()
@@ -110,6 +142,11 @@ def outside_night(db: Connection, user_id: int, at: datetime) -> datetime:
     # A window whose start is after its end wraps past midnight; equal hours make no window.
     inside = start <= local.hour < end if start <= end else local.hour >= start or local.hour < end
     if not inside:
-        return at
-    day = local.date() if local.hour < end else local.date() + timedelta(days=1)
-    return datetime.combine(day, time(end), zone) + timedelta(minutes=random.randint(1, 15))
+        return None
+    ends = local.date() if local.hour < end else local.date() + timedelta(days=1)
+    starts = ends if start < end else ends - timedelta(days=1)
+    return datetime.combine(starts, time(start), zone), datetime.combine(ends, time(end), zone)
+
+
+def _few_minutes() -> timedelta:
+    return timedelta(minutes=random.randint(1, 15))
