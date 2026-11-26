@@ -1,6 +1,6 @@
 # Chat autopilot
 
-All in `app/chat_autopilot.py`, plus the gate in `app/send.py`. With chat autonomy at `autopilot` or `full_autopilot`, each new message from a match (`POST /cards/{id}/messages` and `upsert_message`) queues a `chat_reply` job for its card. The job writes a reply with `draft_for()` and sends it through `queue_send(db, user_id, draft_id, trigger, unattended=True)`.
+All in `app/chat_autopilot.py`, plus the gate in `app/send.py`. With chat autonomy at `autopilot` or `full_autopilot`, each new message from a match (`POST /cards/{id}/messages` and `upsert_message`) queues a `chat_reply` job for its card. The job writes a reply with `draft_for()` and sends it through `queue_send(db, user_id, draft_id, trigger, unattended=True)`, at once: only the user's own Send waits for Undo.
 
 - **The gate:** `unattended_block(db, user_id, draft_id)` in `app/send.py` holds every rule for a message that goes out without the user. It is asked when the send is queued and again by the `send_draft` job just before the app is called, so a change in between counts. A blocked draft stays `pending`, which puts it in the review queue. It blocks when:
   - `autopilot_block()` gives a reason: a pause by the user or for a ban, the AI budget, or chat autonomy below `autopilot`;

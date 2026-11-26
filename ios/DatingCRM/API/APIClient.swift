@@ -102,11 +102,17 @@ struct APIClient {
         try await send("PATCH", "inferences/\(inferenceID)", body: Self.encoder.encode(["corrected": text]))
     }
 
-    /// Send: the server queues the draft and its worker sends it through the dating app. `409` means the
-    /// server refused: sending is off for the app, the draft denies being AI, or it was already sent. A pause
-    /// does not stop it.
+    /// Send, or Retry a failed send: the server holds the draft 5 seconds for Undo, then its worker sends it
+    /// through the dating app. `409` means the server refused: sending is off for the app, the draft denies being
+    /// AI, or it was already sent. A pause does not stop it.
     func sendDraft(draftID: Int) async throws {
         try await data("POST", "drafts/\(draftID)/send")
+    }
+
+    /// Undo of a Send the server still holds: the draft is pending again, with its edit. `409` means the worker
+    /// already started sending it.
+    func undoSend(draftID: Int) async throws -> Draft {
+        try await send("POST", "drafts/\(draftID)/undo-send")
     }
 
     /// Everything that waits for the user's review, hot leads first.

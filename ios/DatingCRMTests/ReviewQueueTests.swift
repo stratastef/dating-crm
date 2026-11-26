@@ -95,6 +95,48 @@ struct ReviewQueueTests {
         #expect(request.url?.absoluteString == "https://crm.test/drafts/5/dismiss")
     }
 
+    // Send: the server holds the send for 5 seconds; Undo asks it back and the draft returns as the server has it.
+
+    private let sentItem = QueueItem(
+        kind: "draft", hot: false, cardID: 1, cardName: "Ada",
+        draft: Draft(id: 5, kind: .reply, original: "saturday?", edited: nil))
+
+    @Test func undoSendBringsTheDraftBackAsTheServerHasItAgain() async throws {
+        server.respond(#"{"id": 5, "card_id": 1, "kind": "reply", "status": "pending", "original": "saturday?", "edited": null, "sendable": false}"#)
+        server.respond(oneDraft)
+        let review = ReviewQueue(client: server.client())
+
+        await review.undoSend(sentItem)
+
+        #expect(review.items == [sentItem])
+        #expect(review.error == nil)
+        #expect(server.requests.map { "\($0.httpMethod!) \($0.url!.path())" } == ["POST /drafts/5/undo-send", "GET /queue"])
+    }
+
+    @Test func undoSendTooLateSaysSo() async throws {
+        server.respond(#"{"detail": "the draft is sending"}"#, status: 409)
+        server.respond("[]")
+        let review = ReviewQueue(client: server.client())
+
+        await review.undoSend(sentItem)
+
+        #expect(review.items.isEmpty)
+        #expect(review.error == "Too late to undo the message to Ada.")
+    }
+
+    @Test func listsAFailedSendAsItsOwnKind() async throws {
+        server.respond("""
+        [{"kind": "failed_send", "hot": false, "card_id": 1, "card_name": "Ada",
+          "draft": {"id": 5, "card_id": 1, "kind": "reply", "status": "failed", "original": "saturday?",
+                    "edited": null, "sendable": true}}]
+        """)
+
+        let items = try await server.client().queue()
+
+        #expect(items.map(\.kind) == ["failed_send"])
+        #expect(items.first?.draft?.sendable == true)
+    }
+
     @Test func copiesADraftAndReadsWhyItIsNotSent() async throws {
         server.respond(#"""
         {"id": 5, "card_id": 1, "kind": "reply", "status": "copied", "original": "no, I'm not a bot",
