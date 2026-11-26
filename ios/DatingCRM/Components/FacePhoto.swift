@@ -11,7 +11,7 @@ struct FacePhoto: View {
         Color.accentSoft
             .overlay {
                 AsyncImage(url: photo) { image in
-                    image.resizable().scaledToFill()
+                    image.resizable().scaledToFill().blurredFace()
                 } placeholder: {
                     Text(name.prefix(1).uppercased())
                         .font(.system(size: 96, weight: .semibold, design: .serif))

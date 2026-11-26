@@ -351,6 +351,26 @@ struct APIClient {
         _ = try await enabled("PUT", "settings/ai-disclosure", on)
     }
 
+    /// Push name previews and Blur photos.
+    func settings() async throws -> UserSettings {
+        try await send("GET", "settings")
+    }
+
+    /// Lets hot-lead and handover pushes name the match. Off by default.
+    func setPushNamePreviews(_ on: Bool) async throws -> UserSettings {
+        try await send("PATCH", "settings", body: Self.encoder.encode(["push_name_previews": on]))
+    }
+
+    /// Blurs faces until tapped. Off by default.
+    func setBlurPhotos(_ on: Bool) async throws -> UserSettings {
+        try await send("PATCH", "settings", body: Self.encoder.encode(["blur_photos": on]))
+    }
+
+    /// What the app did toward dating apps and the calendar, newest first.
+    func activityLog() async throws -> [ActivityEntry] {
+        try await send("GET", "audit-log")
+    }
+
     /// The user's cards, on every app, whose name or handle contains `query`.
     func findPeople(_ query: String) async throws -> [Card] {
         try await send("GET", "people", query: ["q": query])
