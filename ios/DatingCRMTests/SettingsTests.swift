@@ -124,7 +124,7 @@ struct SettingsTests {
     // Find and purge.
 
     @Test func findsAPersonsCardsAndSwipeCandidatesByName() async throws {
-        server.respond(#"[{"id": 3, "app": "tinder", "name": "Zelda Fitz", "stage": "chatting", "notes": ""}]"#)
+        server.respond(#"[{"id": 3, "app": "tinder", "name": "Zelda Fitz", "stage": "chatting", "notes": "", "stalled": false, "hot": false}]"#)
         server.respond("[\(SwipeTests.eve)]")
 
         let cards = try await server.client().findPeople("zelda fitz")

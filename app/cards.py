@@ -1,19 +1,23 @@
 """Match cards: one card per match, moving through the pipeline stages."""
 
+from collections.abc import Sequence
 from datetime import date, datetime, timedelta
 from typing import Literal
 
 import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, computed_field, field_validator
-from sqlalchemy import Connection, text
+from sqlalchemy import Connection, Row, text
 from sqlalchemy.exc import IntegrityError
 
 from app import calendar, handover, tombstones
 from app.auth import CurrentUser, Db
 from app.autopilot import autopilot_allowed
 from app.card_lookup import own_card
+from app.drafts import _COLUMNS as _DRAFT_COLUMNS
+from app.drafts import Draft
 from app.jobs import enqueue, handler
+from app.review import is_hot_lead
 from app.voice import queue_profile
 
 router = APIRouter()
@@ -56,7 +60,18 @@ def is_good_date(rating: int | None) -> bool:
     return rating is not None and rating >= 4
 
 
+class LastMessage(BaseModel):
+    sender: str  # `me` or `them`
+    body: str  # the first 100 characters
+    sent_at: datetime
+
+
 class Card(BaseModel):
+    """A card with its card summary: everything a row in the app shows, so the app makes no other call.
+
+    Every card response is built by `summarize()`.
+    """
+
     id: int
     app: str
     external_id: str | None
@@ -77,6 +92,11 @@ class Card(BaseModel):
     led_to_date: bool
     # A message that carried the AI disclosure was sent to this match (see `app/send.py`).
     ai_disclosed: bool
+    # The card summary. The newest message by `sent_at`, from either side; null when there are none.
+    last_message: LastMessage | None
+    hot: bool  # a hot lead: `is_hot_lead()` in `app/review.py`, as on the review queue
+    pending_draft: Draft | None  # the newest pending draft, the one the review queue shows; null when none
+    lead_photo_url: str | None  # the first photo attached to the card; null when unknown
 
     @computed_field
     @property
@@ -88,6 +108,60 @@ class Card(BaseModel):
     @property
     def good_date(self) -> bool:
         return is_good_date(self.date_rating)
+
+
+def summarize(db: Connection, user_id: int, cards: Sequence[Row]) -> list[Card]:
+    """The user's card rows, selected with `_COLUMNS`, with their card summaries, in the same order."""
+    params = {"user_id": user_id, "ids": [card.id for card in cards]}
+    last_messages = {
+        row.card_id: dict(row._mapping)
+        for row in db.execute(
+            text(
+                """
+                SELECT DISTINCT ON (card_id) card_id, sender, left(body, 100) AS body, sent_at FROM messages
+                WHERE user_id = :user_id AND card_id = ANY(:ids)
+                ORDER BY card_id, sent_at DESC, id DESC
+                """
+            ),
+            params,
+        )
+    }
+    pending_drafts = {
+        row.card_id: dict(row._mapping)
+        for row in db.execute(
+            text(
+                f"""
+                SELECT DISTINCT ON (card_id) {_DRAFT_COLUMNS} FROM drafts
+                WHERE user_id = :user_id AND card_id = ANY(:ids) AND status = 'pending'
+                ORDER BY card_id, created_at DESC, id DESC
+                """
+            ),
+            params,
+        )
+    }
+    lead_photos = dict(
+        db.execute(
+            text(
+                "SELECT DISTINCT ON (card_id) card_id, url FROM card_photos"
+                " WHERE user_id = :user_id AND card_id = ANY(:ids) ORDER BY card_id, id"
+            ),
+            params,
+        ).all()
+    )
+    # shortcut: one hot-lead query per card, like the review queue. Fold `is_hot_lead()` into one query over
+    # all the ids if a Pipeline of a few hundred cards gets slow.
+    return [
+        Card.model_validate(
+            {
+                **card._mapping,
+                "last_message": last_messages.get(card.id),
+                "hot": is_hot_lead(db, user_id, card.id),
+                "pending_draft": pending_drafts.get(card.id),
+                "lead_photo_url": lead_photos.get(card.id),
+            }
+        )
+        for card in cards
+    ]
 
 
 class NewCard(BaseModel):
@@ -105,7 +179,7 @@ def create_card(card: NewCard, user: CurrentUser, db: Db):
     if card.external_id and tombstones.is_buried(db, user.id, "match", card.app, card.external_id):
         raise HTTPException(status_code=409, detail="this person asked for their data to be deleted")
     try:
-        return db.execute(
+        row = db.execute(
             text(
                 f"""
                 INSERT INTO cards (user_id, app, external_id, name, stage, notes, next_action, due_date)
@@ -117,6 +191,7 @@ def create_card(card: NewCard, user: CurrentUser, db: Db):
         ).one()
     except IntegrityError:
         raise HTTPException(status_code=409, detail="a card with this app and external_id already exists")
+    return summarize(db, user.id, [row])[0]
 
 
 def upsert_card(db: Connection, user_id: int, app: str, external_id: str, name: str) -> int | None:
@@ -195,7 +270,7 @@ class CardChanges(BaseModel):
 
 @router.get("/cards", response_model=list[Card])
 def list_cards(user: CurrentUser, db: Db, stage: Stage | None = None, app: str | None = None):
-    return db.execute(
+    rows = db.execute(
         text(
             f"""
             SELECT {_COLUMNS} FROM cards
@@ -207,6 +282,7 @@ def list_cards(user: CurrentUser, db: Db, stage: Stage | None = None, app: str |
         ),
         {"user_id": user.id, "stage": stage, "app": app},
     ).all()
+    return summarize(db, user.id, rows)
 
 
 @router.patch("/cards/{card_id}", response_model=Card)
@@ -242,12 +318,12 @@ def update_card(card_id: int, changes: CardChanges, user: CurrentUser, db: Db):
         except httpx.HTTPError:
             # Raising rolls the stage change back, so the card and the calendar stay in step.
             raise HTTPException(status_code=502, detail="Google Calendar could not be reached; try again")
-    return row
+    return summarize(db, user.id, [row])[0]
 
 
 @router.get("/cards/{card_id}", response_model=Card)
 def read_card(card_id: int, user: CurrentUser, db: Db):
-    return own_card(db, user.id, card_id, _COLUMNS)
+    return summarize(db, user.id, [own_card(db, user.id, card_id, _COLUMNS)])[0]
 
 
 _MESSAGE_COLUMNS = "id, card_id, external_id, sender, body, sent_at, handover"
@@ -345,7 +421,7 @@ def add_message(card_id: int, message: NewMessage, user: CurrentUser, db: Db):
 
 @router.get("/cards/{card_id}/messages", response_model=list[Message])
 def list_messages(card_id: int, user: CurrentUser, db: Db):
-    read_card(card_id, user, db)  # 404 unless the card is the caller's
+    own_card(db, user.id, card_id)  # 404 unless the card is the caller's
     return db.execute(
         text(
             f"""

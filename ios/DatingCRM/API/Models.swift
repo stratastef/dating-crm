@@ -48,8 +48,31 @@ struct Card: Codable, Identifiable, Hashable {
     /// The replies suggested for the handover.
     var handoverSuggestions: [String]?
 
+    // The card summary: what a row shows, sent with every card so the app makes no other call.
+    var stageChangedAt: Date?
+    /// No message from either side for the user's set number of days. A flag, not a stage.
+    var stalled = false
+    /// The newest message, from either side; nil when there are none.
+    var lastMessage: LastMessage?
+    /// A hot lead, as the review queue has it.
+    var hot = false
+    /// The draft waiting in Review; nil when there is none.
+    var pendingDraft: Draft?
+    /// nil when unknown: the row shows the monogram.
+    var leadPhotoUrl: URL?
+
     /// True when the card is in Dated and has no rating yet: the app then asks for one.
     var needsDateRating: Bool { stage == .dated && dateRating == nil }
+
+    /// The row's time: the last message, or the last stage change when there are no messages.
+    var lastActivity: Date? { lastMessage?.sentAt ?? stageChangedAt }
+}
+
+/// A card's newest message, as its summary carries it. `body` is the first 100 characters.
+struct LastMessage: Codable, Hashable {
+    var sender: Message.Sender
+    var body: String
+    var sentAt: Date
 }
 
 struct Message: Codable, Identifiable, Hashable {

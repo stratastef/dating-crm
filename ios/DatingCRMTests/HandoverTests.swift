@@ -8,7 +8,7 @@ struct HandoverTests {
     @Test func readsACardsHandoverStateAndSuggestedReplies() async throws {
         server.respond("""
         {"id": 1, "app": "tinder", "name": "Ada", "stage": "chatting", "notes": "", "next_action": null,
-         "due_date": null, "handover": "taken_over", "handover_suggestions": ["saturday works"]}
+         "due_date": null, "handover": "taken_over", "handover_suggestions": ["saturday works"], "stalled": false, "hot": false}
         """)
 
         let card = try await server.client().card(id: 1)

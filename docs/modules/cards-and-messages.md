@@ -11,6 +11,14 @@ A card is one match. Routes are in `app/cards.py`; tables are `cards` and `messa
 | `POST /cards/{id}/messages` | Add a message. Body: `sender` (`me` or `them`), `body`, optional `sent_at` (default now), `external_id`. |
 | `GET /cards/{id}/messages` | List the card's messages by `sent_at`. |
 
+- **Card summary.** Every card the API returns (these routes, `GET /people`, and later list routes) carries what a row in the app shows, so the app makes no other call:
+  - `stalled` and `stage_changed_at` (below);
+  - `last_message`: the newest message by `sent_at`, whoever sent it, as `{"sender", "body", "sent_at"}` with the first 100 characters of the body; null when the card has no messages;
+  - `hot`: `is_hot_lead()` (see "Review queue"), the same answer the review queue gives;
+  - `pending_draft`: the newest pending draft, as the review queue shows it; null when there is none;
+  - `lead_photo_url`: the first photo attached with `POST /cards/{id}/photos`; null when unknown.
+
+  `summarize(db, user_id, rows)` in `app/cards.py` builds it from card rows selected with `_COLUMNS`, keeping their order. A route that returns cards selects the rows and returns `summarize(...)`; a new summary field is added there and to `Card`.
 - `stage` is one of `matched`, `chatting`, `number_swapped`, `date_set`, `dated`, `seeing_them`, `archived`. Anything else is `422`. `stage_changed_at` on the card is the time of the last stage change; there is no stage history table.
 - Stalled is a flag on the card, not a stage. The hourly `mark_stalled` job sets `stalled: true` on a card in `chatting`, `number_swapped` or `date_set` whose last message, from either side, is older than the user's `stalled_after_days` (a card with no messages counts from `stage_changed_at`). A stalled card has `suggested_actions: ["revive", "archive"]`; otherwise the list is empty. A new message from `them` clears the flag, and so does moving the card out of those three stages; archive is `PATCH /cards/{id}` with `stage: archived`.
 - `GET /settings` and `PATCH /settings` read and change the user's settings. `stalled_after_days` is a whole number of days, at least 1, default 3.
