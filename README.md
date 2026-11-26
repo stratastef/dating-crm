@@ -41,7 +41,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/handover.py` | Handover: pauses a card on a handover trigger, suggested replies, take-over and hand-back, `is_paused()` |
 | `app/chat_autopilot.py` | Chat autopilot: the `chat_reply` job, `GET` and `PUT /settings/ai-disclosure` |
 | `app/tinder.py` | `TinderConnector`: reads matches and messages from Tinder's unofficial web API |
-| `app/sync.py` | `PUT /connectors/{app}/token` and the `sync_matches` job |
+| `app/sync.py` | `PUT /connectors/{app}/token`, Connected apps (`GET /connectors`, `PUT /connectors/{app}/copilot-only`) and the `sync_matches` job |
 | `app/purge.py` | Find and purge: `GET /people`, `GET /people/candidates`, `POST /people/purge` |
 | `app/tombstones.py` | `bury()` and `is_buried()`: a purged person is not stored again |
 | `app/paid_items.py` | Paid items (Super Like, Rose, Boost): `propose()`, approve and decline routes, and `spend()`, the only code that spends one |
