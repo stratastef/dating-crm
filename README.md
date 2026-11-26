@@ -23,7 +23,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/drafts.py` | Copilot drafts for a card and the user's edits: `POST /cards/{id}/drafts`, `PATCH /drafts/{id}` |
 | `app/screenshots.py` | Screenshot copilot: `POST /screenshots` reads a shared screenshot into a card and a draft |
 | `app/reads.py` | The match read: inferences about a match, the user's corrections, card photos and the protected-trait opt-in |
-| `app/send.py` | Sending a draft: `POST /drafts/{id}/send` and `/undo-send`, `queue_send()`, `cancel_send()`, `drop_planned_sends()` and the `send_draft` job |
+| `app/send.py` | Sending a draft: `POST /drafts/{id}/send`, `/undo-send`, `/send-now` and `/hold`, `queue_send()`, `cancel_send()`, `drop_planned_sends()` and the `send_draft` job |
 | `app/timing.py` | Send timing: `formula()`, `send_time()` (the hard bounds) and `outside_night()` (the night window) |
 | `app/voice.py` | Questionnaire, style profile and similar past chats: routes under `/voice` |
 | `app/bios.py` | Bio and prompt rewrites per dating app: routes under `/bios` |

@@ -244,6 +244,9 @@ private struct PipelineStatus: View {
                 .accessibilityHint("Opens the rating")
             } else {
                 AdaptiveStack {
+                    if card.autopilotActivity == "planned", let planned = card.plannedSend {
+                        PlannedRing(draft: planned)
+                    }
                     if let marker { AIMarker(marker) }
                     Text(text).font(.subheadline)
                 }
