@@ -33,6 +33,10 @@ uv run python -m app.sign_in you@example.com +491701234567
 
 The owner's v1 account can then sign in by SMS. `uv run python -m app.auth you@example.com` still creates an account and prints a token for the developer sign-in.
 
+## iOS
+
+`SignInView` (`ios/DatingCRM/Screens/SignInView.swift`): the phone number, then the sign-in code, with "Send a new code" after 30 seconds and each refusal in plain words under the field. A two-second press on the title opens the developer sign-in (server URL and API token). `Session.requestCode(phone:)` and `Session.signIn(phone:code:)` use the server in `ServerURL` (Info.plist); `Session.e164(_:)` turns a typed number into E.164. `Session.signOut()` calls `POST /sign-out`, then forgets the session. The token stays in the shared Keychain group and the URL in the App Group's defaults, so the share extension needs no change. Screenshots: `docs/design/screenshots/redesign/t48-sign-in-*`.
+
 ## Tests
 
 - The autouse `sms` fixture replaces `app.sms.send`. `sms.sent` lists each `(phone, body)`; `sms.code(phone)` is the code in the last text to that number.
