@@ -289,6 +289,21 @@ struct APIClient {
         try await data("PUT", "connectors/\(app)/copilot-only")
     }
 
+    // Google Calendar.
+
+    /// Whether the server holds a Google Calendar refresh token, so offered time slots get holds.
+    func calendarConnected() async throws -> Bool {
+        let calendar: [String: Bool] = try await send("GET", "calendar")
+        return calendar["connected"] ?? false
+    }
+
+    /// Google's consent page, to open in a web authentication session. Google returns to the server, which sends
+    /// the session on to `datingcrm://calendar`. `503`: the server has no Google OAuth client set up.
+    func calendarConsentURL() async throws -> URL {
+        let consent: Consent = try await send("GET", "calendar/connect")
+        return consent.url
+    }
+
     /// Whether the match read may guess ethnicity, religion, health, sexuality and politics. Off by default.
     func protectedTraitGuesses() async throws -> Bool {
         try await enabled("GET", "settings/protected-trait-guesses")
@@ -396,6 +411,10 @@ struct APIClient {
 
 private struct SignedIn: Decodable {
     let token: String
+}
+
+private struct Consent: Decodable {
+    let url: URL
 }
 
 private struct SwipeDecided: Decodable {
