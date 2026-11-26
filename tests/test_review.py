@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from tests.test_drafts import write_profile
+from tests.test_drafts import drafted, write_profile
 from tests.test_swipe_autopilot import signed_in  # noqa: F401  (fixture)
 from tests.test_swipes import tinder  # noqa: F401  (fixture)
 
@@ -58,7 +58,7 @@ def test_the_queue_lists_pending_drafts_with_hot_leads_first(app, client_for, ll
     write_profile(app, alice, llm, "Short, lowercase, teasing.")
     cold = card_with_reply(alice, "Kim", minutes_ago=90)
     hot = card_with_reply(alice, "Ada", minutes_ago=5)
-    llm.reply = "see you saturday"
+    llm.reply = drafted("see you saturday")
     cold_draft = alice.post(f"/cards/{cold}/drafts").json()
     hot_draft = alice.post(f"/cards/{hot}/drafts").json()
 

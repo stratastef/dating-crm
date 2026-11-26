@@ -1,7 +1,7 @@
 import json
 
 from app.jev import JevUnavailable
-from tests.test_drafts import write_profile
+from tests.test_drafts import drafted, write_profile
 
 
 def inference(kind, value, **changes):
@@ -203,7 +203,7 @@ def test_a_draft_that_plays_on_an_insecurity_hits_the_guardrail(app, client, llm
     card_id = new_card(client)
     jev.yes["plays_on_insecurity"] = ["nobody else"]
 
-    llm.reply = "nobody else will put up with you"
+    llm.reply = drafted("nobody else will put up with you")
     draft = client.post(f"/cards/{card_id}/drafts").json()
 
     assert draft["guardrail"] == ["plays_on_insecurity"]
@@ -244,7 +244,7 @@ def test_a_draft_takes_its_tone_from_the_read_and_from_the_users_correction_of_i
     card_id = new_card(client)
     tone = read(client, llm, card_id, [inference("tone", "bold"), inference("interests", "climbing")]).json()[0]
 
-    llm.reply = "race you up the wall"
+    llm.reply = drafted("race you up the wall")
     client.post(f"/cards/{card_id}/drafts")
     assert "tone: bold" in llm.prompts[-1] and "interests: climbing" in llm.prompts[-1]
     assert "tone" in llm.systems[-1]
@@ -265,7 +265,7 @@ def test_a_draft_never_sees_an_inference_the_read_dropped(app, client, llm):
         [inference("values", "ashamed of her job", targets_insecurity=True), inference("religion", "Catholic")],
     )
 
-    llm.reply = "hi"
+    llm.reply = drafted("hi")
     client.post(f"/cards/{card_id}/drafts")
 
     assert "ashamed" not in llm.prompts[-1] and "Catholic" not in llm.prompts[-1]

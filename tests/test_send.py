@@ -12,6 +12,7 @@ from app.connectors import call
 from app.jobs import run_once
 from app.tinder import TinderConnector
 from app.vault import store_token
+from tests.test_drafts import drafted
 
 FIXTURES = Path(__file__).parent / "fixtures" / "tinder"
 TOKEN = "tinder-session-secret"
@@ -68,7 +69,7 @@ def draft(app, client, llm, user_id) -> dict:
     work(app)
     card_id = client.post("/cards", json={"app": "tinder", "name": "Cleo", "external_id": CLEO}).json()["id"]
     client.post(f"/cards/{card_id}/messages", json={"sender": "them", "body": "do you climb indoors or outdoors"})
-    llm.reply = "both. badly."
+    llm.reply = drafted("both. badly.")
     return client.post(f"/cards/{card_id}/drafts").json()
 
 

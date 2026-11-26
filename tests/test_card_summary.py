@@ -1,6 +1,6 @@
 """The card summary: what every card response carries so a row needs no other call (spec #44)."""
 
-from tests.test_drafts import write_profile
+from tests.test_drafts import drafted, write_profile
 from tests.test_review import card_with_reply
 
 
@@ -66,3 +66,35 @@ def test_a_card_added_by_hand_is_in_the_pipeline_and_search_by_name_finds_it_wit
 
     assert (listed["name"], listed["stage"], listed["last_message"], listed["hot"]) == ("Ada Lovelace", "chatting", None, False)
     assert found == [listed]
+
+
+def test_a_cards_topic_comes_from_its_latest_draft(app, client, llm):
+    write_profile(app, client, llm, "Short, lowercase, teasing.")
+    card_id = card_with_reply(client, "Ada", minutes_ago=5)
+
+    llm.reply = drafted("the tate or the british museum", topic="museums")
+    client.post(f"/cards/{card_id}/drafts")
+    assert card(client, card_id)["topic"] == "museums"
+
+    llm.reply = drafted("lisbon in may?", topic="her trip to lisbon")
+    client.post(f"/cards/{card_id}/drafts")
+    assert card(client, card_id)["topic"] == "her trip to lisbon"
+
+
+def test_writing_a_draft_makes_no_extra_model_call_for_the_topic(app, client, llm):
+    write_profile(app, client, llm, "Short, lowercase, teasing.")
+    card_id = card_with_reply(client, "Ada", minutes_ago=5)
+    calls = len(llm.prompts)
+
+    llm.reply = drafted("the tate or the british museum", topic="museums")
+    client.post(f"/cards/{card_id}/drafts")
+
+    assert len(llm.prompts) == calls + 1
+    assert card(client, card_id)["topic"] == "museums"
+
+
+def test_a_card_with_no_draft_yet_has_an_empty_topic(app, client, llm):
+    card_id = card_with_reply(client, "Ada", minutes_ago=5)
+
+    assert card(client, card_id)["topic"] == ""
+    assert client.get("/pipeline").json()[0]["cards"][0]["topic"] == ""

@@ -28,7 +28,7 @@ Stage = Literal["matched", "chatting", "number_swapped", "date_set", "dated", "s
 _COLUMNS = (
     "id, app, external_id, name, stage, stage_changed_at, notes, next_action, due_date, created_at,"
     " stalled_at IS NOT NULL AS stalled, date_rating, date_note, handover, handover_suggestions,"
-    " led_to_date, ai_disclosed"
+    " led_to_date, ai_disclosed, topic"
 )
 
 # Only cards in these stages can be Stalled. Stalled is a flag (`cards.stalled_at`), not a stage.
@@ -102,6 +102,8 @@ class Card(BaseModel):
     reason: str | None  # a `Reason` when the card is Waiting for you, else null
     handover_trigger: str | None  # with reason `handover`: the handover check that hit, such as `logistics`
     autopilot_activity: str | None  # an `Activity` when the card is Handled by autopilot, else null
+    # What the chat is about, in a few words ("museums"): written with the card's latest draft, empty before one.
+    topic: str
 
     @computed_field
     @property

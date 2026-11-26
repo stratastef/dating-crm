@@ -4,7 +4,7 @@ import json
 
 from fastapi.testclient import TestClient
 
-from tests.test_drafts import write_profile
+from tests.test_drafts import drafted, write_profile
 from tests.test_swipes import signed_in, suggestions, tinder  # noqa: F401  (fixtures)
 from tests.test_voice import chat, run_jobs
 
@@ -42,7 +42,7 @@ def test_of_two_similar_past_chats_the_one_that_led_to_a_good_date_is_retrieved_
 def test_an_edit_of_a_draft_rewrites_the_style_profile_from_what_the_user_changed(app, client, llm):
     write_profile(app, client, llm, "Formal and long.")
     card_id = client.post("/cards", json={"app": "hinge", "name": "Sam"}).json()["id"]
-    llm.replies = ["Good evening, Samantha! How are you?", "An unedited draft."]
+    llm.replies = [drafted("Good evening, Samantha! How are you?"), drafted("An unedited draft.")]
     draft_id = client.post(f"/cards/{card_id}/drafts").json()["id"]
     client.post(f"/cards/{card_id}/drafts")
     run_jobs(app)
@@ -105,7 +105,7 @@ def test_the_labelled_data_is_exported_one_example_per_line_and_only_to_its_owne
     card_id = chat(signed_in, "Zelda Quixote", "dated", "quixote here, come climb", "saturday?")
     signed_in.patch(f"/cards/{card_id}", json={"date_rating": 4})
     write_profile(app, signed_in, llm, "Short.")
-    llm.reply = "Dear Quixote, shall we?"
+    llm.reply = drafted("Dear Quixote, shall we?")
     draft_id = signed_in.post(f"/cards/{card_id}/drafts").json()["id"]
     signed_in.patch(f"/drafts/{draft_id}", json={"edited": "quixote, again?"})
 

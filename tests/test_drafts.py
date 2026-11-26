@@ -1,18 +1,27 @@
+import json
+
 from app.jobs import run_once
 
 
+def drafted(message: str, topic: str = "") -> str:
+    """What Claude replies when it writes a draft: the message and the chat's topic."""
+    return json.dumps({"message": message, "topic": topic})
+
+
 def write_profile(app, client, llm, profile):
+    """Write the user's style profile. Claude then replies `stub draft` to a draft, unless the test sets a reply."""
     llm.reply = profile
     client.put("/voice/questionnaire", json={"answers": {"Emoji?": "Never"}})
     while run_once(app.state.engine):
         pass
+    llm.reply = drafted("stub draft")
 
 
 def test_a_card_with_no_messages_gets_an_opener_written_from_the_style_profile(app, client, llm):
     write_profile(app, client, llm, "Short, lowercase, teasing.")
     card_id = client.post("/cards", json={"app": "hinge", "name": "Sam", "notes": "Has a dog called Biscuit"}).json()["id"]
 
-    llm.reply = "is biscuit accepting visitors"
+    llm.reply = drafted("is biscuit accepting visitors")
     draft = client.post(f"/cards/{card_id}/drafts")
 
     assert draft.status_code == 201
@@ -39,7 +48,7 @@ def test_a_draft_is_written_with_the_preferences_in_force(app, client, llm):
     client.put("/preferences", json={"wishes": "someone bookish", "must_haves": ["lives nearby"], "dealbreakers": []})
     card_id = client.post("/cards", json={"app": "hinge", "name": "Sam"}).json()["id"]
 
-    llm.reply = "what are you reading"
+    llm.reply = drafted("what are you reading")
     client.post(f"/cards/{card_id}/drafts")
 
     prompt = llm.prompts[-1]
@@ -56,7 +65,7 @@ def test_a_card_with_messages_gets_a_reply_written_from_the_conversation_and_sim
     client.post(f"/cards/{card_id}/messages", json={"sender": "them", "body": "do you climb indoors or outdoors"})
     write_profile(app, client, llm, "Short, lowercase, teasing.")
 
-    llm.reply = "  both. badly.\n"
+    llm.reply = drafted("  both. badly.\n")
     draft = client.post(f"/cards/{card_id}/drafts").json()
 
     assert draft["kind"] == "reply"
@@ -73,7 +82,7 @@ def test_the_users_edit_is_stored_next_to_the_original_draft(app, client_for, ll
     bob = client_for("bob@example.com")
     write_profile(app, alice, llm, "Short, lowercase, teasing.")
     card_id = alice.post("/cards", json={"app": "hinge", "name": "Sam"}).json()["id"]
-    llm.reply = "is biscuit accepting visitors"
+    llm.reply = drafted("is biscuit accepting visitors")
     draft_id = alice.post(f"/cards/{card_id}/drafts").json()["id"]
 
     assert bob.patch(f"/drafts/{draft_id}", json={"edited": "bob was here"}).status_code == 404
@@ -101,6 +110,26 @@ def test_an_empty_reply_from_claude_is_reported_and_not_stored_as_a_draft(app, c
     write_profile(app, client, llm, "Short, lowercase, teasing.")
     card_id = client.post("/cards", json={"app": "hinge", "name": "Sam"}).json()["id"]
 
-    llm.reply = "  \n"
+    llm.reply = drafted("  \n")
 
     assert client.post(f"/cards/{card_id}/drafts").status_code == 502
+
+
+def test_a_reply_from_claude_that_is_not_a_draft_is_reported_and_never_stored_as_one(app, client, llm):
+    write_profile(app, client, llm, "Short, lowercase, teasing.")
+    card_id = client.post("/cards", json={"app": "hinge", "name": "Sam"}).json()["id"]
+
+    for reply in ("is biscuit accepting visitors", '{"message": "is biscuit', '{"topic": "dogs"}'):
+        llm.reply = reply
+        assert client.post(f"/cards/{card_id}/drafts").status_code == 502
+
+    assert client.get("/queue").json() == []
+
+
+def test_a_draft_wrapped_in_a_code_fence_is_read_from_inside_it(app, client, llm):
+    write_profile(app, client, llm, "Short, lowercase, teasing.")
+    card_id = client.post("/cards", json={"app": "hinge", "name": "Sam"}).json()["id"]
+
+    llm.reply = f"```json\n{drafted('is biscuit accepting visitors', topic='her dog')}\n```"
+
+    assert client.post(f"/cards/{card_id}/drafts").json()["original"] == "is biscuit accepting visitors"
