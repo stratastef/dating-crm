@@ -13,9 +13,9 @@ The SwiftUI client for the API in the repo root. It needs Xcode 27 and an iOS 26
 | `DatingCRM/Push.swift` | `Push` (device token, tapped card) and `AppDelegate`, which receives both from UIKit. |
 | `DatingCRM.entitlements` | The push notification entitlement. |
 | `DatingCRM/API/APIClient.swift` | Every call to the server. |
-| `DatingCRM/API/Models.swift` | `Stage`, `Card`, `Message`, `Inference`, `Preferences`, `DashboardWeek`, `ProfilePhoto`, `PhotoEdit`, `SwipeCandidate`, `Pauses`, `AutonomyLevel`, `Budget`: the JSON the server sends. |
+| `DatingCRM/API/Models.swift` | `Stage`, `Card`, `Message`, `Inference`, `Preferences`, `DashboardWeek`, `ProfilePhoto`, `PhotoEdit`, `Bio`, `SwipeCandidate`, `Pauses`, `AutonomyLevel`, `Budget`: the JSON the server sends. |
 | `DatingCRM/Components/` | The shared A3 look: colors, button styles, AI marker, badges, toast, relative times, avatar. See `docs/modules/ios-app-shell.md`. |
-| `DatingCRM/Screens/` | One file per screen. `PhotosView` uploads photos from the photo library as JPEG, ranks them and shows each offered edit as a preview to accept or reject. The server makes every preview from the uploaded pixels. |
+| `DatingCRM/Screens/` | One file per screen. `PhotosView` uploads photos from the photo library as JPEG, ranks, reorders and deletes them, labels the first "Lead photo", and shows each offered edit next to the original to accept or reject. The server makes every preview from the uploaded pixels. |
 | `DatingCRM/ScreenshotImport.swift` | Uploads a shared screenshot and holds the draft or error the share extension shows. |
 | `DatingCRMShare/` | The share extension: `ShareViewController` takes the picture from the share sheet, `ScreenshotImportView` shows the result. |
 | `ShareInfo.plist`, `DatingCRMShare.entitlements` | The share extension's Info.plist keys and entitlements. |

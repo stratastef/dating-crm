@@ -60,6 +60,32 @@ struct PhotosTests {
         ])
     }
 
+    @Test func deletesAPhoto() async throws {
+        server.respond("", status: 204)
+
+        try await server.client().deletePhoto(id: 7)
+
+        let request = try #require(server.requests.first)
+        #expect(request.httpMethod == "DELETE")
+        #expect(request.url?.absoluteString == "https://crm.test/photos/7")
+    }
+
+    @Test func setsThePhotosOrderLeadPhotoFirstAndReadsThemBackInIt() async throws {
+        server.respond("""
+        [{"id": 9, "rank": 1, "reason": null, "suggested_edit": null, "edit": null},
+         {"id": 7, "rank": 2, "reason": "Too dark.", "suggested_edit": null, "edit": null}]
+        """)
+
+        let photos = try await server.client().orderPhotos(ids: [9, 7])
+
+        #expect(photos == [ProfilePhoto(id: 9, rank: 1), ProfilePhoto(id: 7, rank: 2, reason: "Too dark.")])
+        let request = try #require(server.requests.first)
+        #expect(request.httpMethod == "PUT")
+        #expect(request.url?.absoluteString == "https://crm.test/photos/order")
+        let body = try #require(request.httpBody)
+        #expect(try JSONSerialization.jsonObject(with: body) as? NSDictionary == ["ids": [9, 7]] as NSDictionary)
+    }
+
     @Test(arguments: [true, false])
     func acceptsOrRejectsTheEditOnOffer(accept: Bool) async throws {
         server.respond(#"{"id": 7, "rank": 2, "reason": "Too dark.", "suggested_edit": null, "edit": null}"#)

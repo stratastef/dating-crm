@@ -449,8 +449,10 @@ struct Voice: Decodable, Equatable {
 /// One of the user's own photos on the server.
 struct ProfilePhoto: Codable, Identifiable, Equatable {
     let id: Int
-    /// 1 is the best photo. nil, like `reason`, until the photos are ranked.
+    /// The photo's place on the profile, 1 the lead photo: Claude's ranking or the user's order, whichever came
+    /// last. nil until either.
     var rank: Int?
+    /// Why Claude ranked the photo where it did. nil until ranked.
     var reason: String?
     /// The light edit on offer, to accept or reject. nil when there is none.
     var suggestedEdit: PhotoEdit?
@@ -475,4 +477,11 @@ struct PhotoEdit: Codable, Equatable {
         if colour != 1 { parts.append(colour > 1 ? "more colour" : "less colour") }
         return parts.joined(separator: ", ")
     }
+}
+
+/// A bio and prompt answers for one dating app: what the user accepted, or a rewrite on offer.
+struct Bio: Codable, Equatable {
+    var bio = ""
+    /// Prompt -> answer, keyed by the prompt's exact text.
+    var prompts: [String: String] = [:]
 }
