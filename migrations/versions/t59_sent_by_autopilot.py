@@ -1,14 +1,14 @@
 """a message records whether autopilot sent it alone, so the chat can mark it
 
 Revision ID: t59_sent_by_autopilot
-Revises: t67_stages_reached
+Revises: t69_privacy_settings
 """
 
 import sqlalchemy as sa
 from alembic import op
 
 revision = "t59_sent_by_autopilot"
-down_revision = "t67_stages_reached"
+down_revision = "t69_privacy_settings"
 branch_labels = None
 depends_on = None
 

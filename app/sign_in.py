@@ -8,6 +8,7 @@ the sign-in that uses it creates the account. Give an existing account a phone n
 
 import hashlib
 import hmac
+import logging
 import re
 import secrets
 import sys
@@ -24,6 +25,7 @@ from app.db import database_url
 from app.invite_codes import code_hash
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 E164 = r"^\+[1-9]\d{6,14}$"
 CODE_MINUTES = 10  # a sign-in code is valid this long
@@ -95,7 +97,13 @@ def send_code(body: CodeRequest, request: Request, db: Db) -> JSONResponse | Non
     )
     if not user_id and not invite_id:
         return _refusal(403, "invite_code_invalid" if body.invite_code else "invite_code_needed")
-    sms.send(body.phone, f"{code} is your Dating CRM code. It expires in {CODE_MINUTES} minutes.")
+    try:
+        sms.send(body.phone, f"{code} is your Dating CRM code. It expires in {CODE_MINUTES} minutes.")
+    except sms.NotSent as error:
+        log.warning("Sign-in code for %s not sent: %s", body.phone, error)
+        # Fail closed: the request still counts towards the limits, but no code of this number works any more.
+        db.execute(text("UPDATE sign_in_codes SET code_hash = NULL WHERE phone = :phone"), {"phone": body.phone})
+        return _refusal(503, "sms_not_sent")
 
 
 @router.post("/sign-in", response_model=None)

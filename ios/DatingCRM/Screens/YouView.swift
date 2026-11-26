@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The user's own things, opening with the Dashboard headline: autopilot controls, preferences, connected apps, calendar,
-/// profile (photos, bios and prompts, voice), settings, and Sign out.
+/// profile (photos, bios and prompts, voice), notifications, privacy, the activity log, find and purge, and Sign out.
 struct YouView: View {
     let client: APIClient
     let signOut: () async -> Void
@@ -33,7 +33,14 @@ struct YouView: View {
                 Text("Profile").foregroundStyle(Color.primary)
             }
             Section {
-                NavigationLink("Settings") { SettingsView(client: client) }
+                NavigationLink("Notifications") { NotificationsView(client: client) }
+                NavigationLink("Privacy") { PrivacyView(client: client) }
+                NavigationLink("Activity log") { ActivityLogView(client: client) }
+                NavigationLink("Find and purge") { PurgeView(client: client) }
+            } header: {
+                Text("Settings").foregroundStyle(Color.primary)
+            }
+            Section {
                 Button("Sign out") { confirmsSignOut = true }
                     .confirmationDialog("Sign out of Dating CRM?", isPresented: $confirmsSignOut, titleVisibility: .visible) {
                         Button("Sign out", role: .destructive) { Task { await signOut() } }
@@ -56,6 +63,10 @@ struct YouView: View {
             case "swipe-layout": swipeLayout
             case "photos": PhotosView(client: client)
             case "bios": BiosView(client: client)
+            case "notifications": NotificationsView(client: client)
+            case "privacy": PrivacyView(client: client)
+            case "activity-log": ActivityLogView(client: client)
+            case "purge": PurgeView(client: client)
             default: EmptyView()
             }
         }

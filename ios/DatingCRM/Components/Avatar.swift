@@ -10,7 +10,7 @@ struct Avatar: View {
     var body: some View {
         // With no photo, while it loads and if it fails, the monogram shows.
         AsyncImage(url: photo) { image in
-            image.resizable().scaledToFill()
+            image.resizable().scaledToFill().blurredFace()
         } placeholder: {
             Text(name.prefix(1).uppercased())
                 .font(.system(size: size * 0.44, weight: .semibold, design: .serif))

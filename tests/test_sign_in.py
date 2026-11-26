@@ -1,14 +1,18 @@
 import hashlib
+import logging
+import re
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from app.auth import create_user
 from app.push import send_push
+from app.sms import send as real_sms_send  # the autouse `sms` fixture replaces `app.sms.send`
 
 PHONE = "+15555550100"
 
@@ -41,6 +45,39 @@ def invite_code(database) -> str:
     printed = subprocess.run([sys.executable, "-m", "app.invite_codes"], check=True, capture_output=True, text=True)
     [code] = printed.stdout.split()
     return code
+
+
+class StubTwilio:
+    """Stands in for `app.sms.post`, the one function that calls Twilio. `sent` records each request's form data.
+
+    `answer` is Twilio's `(status, json)`, or an exception to raise.
+    """
+
+    def __init__(self):
+        self.sent: list[dict] = []
+        self.answer: tuple[int, dict] | Exception = (201, {"status": "queued"})
+
+    def __call__(self, url: str, auth: tuple[str, str], data: dict) -> tuple[int, dict]:
+        self.sent.append({"url": url, "auth": auth, **data})
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        return self.answer
+
+    def code(self) -> str:
+        return re.search(r"\b\d{6}\b", self.sent[-1]["Body"])[0]  # pyright: ignore[reportOptionalSubscript]
+
+
+@pytest.fixture
+def twilio(monkeypatch):
+    """The real `app.sms.send`, set up for Twilio as in production, with Twilio itself stubbed."""
+    monkeypatch.setattr("app.sms.send", real_sms_send)
+    monkeypatch.setenv("SMS_PROVIDER", "twilio")
+    monkeypatch.setenv("TWILIO_ACCOUNT_SID", "AC0123")
+    monkeypatch.setenv("TWILIO_AUTH_TOKEN", "auth-token")
+    monkeypatch.setenv("TWILIO_SENDER", "DatingCRM")
+    stub = StubTwilio()
+    monkeypatch.setattr("app.sms.post", stub)
+    return stub
 
 
 def bearer(token: str) -> dict[str, str]:
@@ -254,3 +291,65 @@ def test_the_cli_gives_an_account_a_phone_number_that_can_then_sign_in(app, clie
     subprocess.run([sys.executable, "-m", "app.sign_in", "user@example.com", PHONE], check=True)
 
     assert signed_in_device(app, sms).get("/me").json() == {"email": "user@example.com"}
+
+
+def test_a_sign_in_code_is_texted_through_twilio_from_the_dating_crm_sender(app, account, clock, twilio):
+    device = TestClient(app)
+
+    assert send_code(device) == 204
+
+    [sent] = twilio.sent
+    assert sent["url"] == "https://api.twilio.com/2010-04-01/Accounts/AC0123/Messages.json"
+    assert sent["auth"] == ("AC0123", "auth-token")
+    assert (sent["To"], sent["From"]) == (PHONE, "DatingCRM")
+    assert "is your Dating CRM code" in sent["Body"]
+    assert sign_in(device, twilio.code()).status_code == 200
+
+
+def test_a_messaging_service_picks_the_sender_for_each_country(app, account, clock, twilio, monkeypatch):
+    monkeypatch.setenv("TWILIO_SENDER", "MG0123")
+
+    assert send_code(TestClient(app)) == 204
+
+    assert twilio.sent[0]["MessagingServiceSid"] == "MG0123"
+    assert "From" not in twilio.sent[0]
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [(400, {"code": 21408, "message": "Permission to send an SMS has not been enabled"}), httpx.ConnectTimeout("timed out")],
+    ids=["refused", "unreachable"],
+)
+def test_when_twilio_fails_the_code_request_fails_and_no_sign_in_code_works(app, account, clock, twilio, answer):
+    device = TestClient(app)
+    assert send_code(device) == 204
+    earlier = twilio.code()
+    twilio.answer = answer
+
+    failed = device.post("/sign-in/code", json={"phone": PHONE})
+
+    assert (failed.status_code, failed.json()) == (503, {"detail": "sms_not_sent"})
+    assert sign_in(device, twilio.code()).status_code == 410
+    assert sign_in(device, earlier).status_code == 410
+
+
+@pytest.mark.parametrize("setting, value", [("TWILIO_AUTH_TOKEN", ""), ("SMS_PROVIDER", "seven")])
+def test_with_sms_provider_set_a_missing_twilio_setting_fails_the_code_request(app, account, clock, twilio, monkeypatch, setting, value):
+    monkeypatch.setenv(setting, value)
+
+    failed = TestClient(app).post("/sign-in/code", json={"phone": PHONE})
+
+    assert (failed.status_code, failed.json()) == (503, {"detail": "sms_not_sent"})
+    assert twilio.sent == []
+
+
+def test_without_sms_provider_the_code_goes_to_the_server_log_and_not_to_twilio(app, account, clock, twilio, monkeypatch, caplog):
+    monkeypatch.delenv("SMS_PROVIDER")
+    device = TestClient(app)
+
+    with caplog.at_level(logging.WARNING, logger="app.sms"):
+        assert send_code(device) == 204
+
+    assert twilio.sent == []
+    [logged] = re.findall(r"\b(\d{6}) is your Dating CRM code", caplog.text)
+    assert sign_in(device, logged).status_code == 200
