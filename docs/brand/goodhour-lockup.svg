@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1010 320" width="1010" height="320">
+  <title>Goodhour lockup: mark and wordmark</title>
+  <style>.ring{stroke:#000}.dot{fill:#4F46E5}.word{fill:#000}@media (prefers-color-scheme:dark){.ring{stroke:#fff}.dot{fill:#A5B4FC}.word{fill:#fff}}</style>
+  <g transform="translate(16 16) scale(0.5625)"><path class="ring" d="M396.7 164.2A168 168 0 1 1 265.2 88.3" fill="none" stroke-width="56" stroke-linecap="round"/><circle class="dot" cx="340" cy="110.5" r="40"/></g>
+  <text class="word" x="340" y="195" font-family="Newsreader, 'New York', ui-serif, Georgia, serif" font-size="150" font-weight="600" letter-spacing="-3">goodhour</text>
+</svg>
