@@ -265,6 +265,25 @@ struct APIClient {
         try await send("PUT", "swipes/limits", body: Self.encoder.encode(limits))
     }
 
+    // Connected apps.
+
+    /// Each dating app (Tinder, Hinge, Bumble) with its connector state.
+    func connectedApps() async throws -> [ConnectedApp] {
+        try await send("GET", "connectors")
+    }
+
+    /// Stores the app's session token on the server, which turns its connector on and syncs now. `404`: the
+    /// app has no connector.
+    func connect(app: String, token: String) async throws {
+        try await data("PUT", "connectors/\(app)/token", body: Self.encoder.encode(["token": token]))
+    }
+
+    /// Keeps the app copilot-only: the server deletes its session token and stops syncing, sending and
+    /// swiping there. `connect` turns it back on.
+    func chooseCopilotOnly(app: String) async throws {
+        try await data("PUT", "connectors/\(app)/copilot-only")
+    }
+
     /// Whether the match read may guess ethnicity, religion, health, sexuality and politics. Off by default.
     func protectedTraitGuesses() async throws -> Bool {
         try await enabled("GET", "settings/protected-trait-guesses")

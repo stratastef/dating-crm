@@ -267,6 +267,29 @@ struct Budget: Codable, Equatable {
     }
 }
 
+/// One dating app on Connected apps: its connector state and, while `broken`, the alert that stopped it.
+struct ConnectedApp: Codable, Identifiable, Equatable {
+    let app: String
+    let state: ConnectorState
+    let alert: ConnectorAlert?
+
+    var id: String { app }
+}
+
+/// Raw values match the server's `state`. `copilotOnly` is the user's choice; `noConnector` apps always draft and copy.
+enum ConnectorState: String, Codable {
+    case connected, broken
+    case copilotOnly = "copilot_only"
+    case notConnected = "not_connected"
+    case noConnector = "no_connector"
+}
+
+/// Why a connector stopped. `reason` is `auth failure` (the session ended) or `ban signal`.
+struct ConnectorAlert: Codable, Equatable {
+    let reason: String
+    let createdAt: Date
+}
+
 /// How many profiles swipe autopilot may swipe on, per app: per run of the job (1 to 10) and per day (1 to 100).
 struct SwipeLimits: Codable, Equatable {
     var swipesPerRun: Int
