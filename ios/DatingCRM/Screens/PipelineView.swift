@@ -171,11 +171,8 @@ extension Card {
             default: nil
             }
         case "handled_by_autopilot":
-            switch autopilotActivity {
-            case "writing_opener": "writing an opener"
-            case "drafting_reply": "drafting a reply"
-            case "sent_waiting": lastMessage.map { "sent \(RelativeTime.ago($0.sentAt, now: now, calendar: calendar)), no reply yet" }
-            default: nil
+            autopilotStatus(now: now, calendar: calendar).map { activity in
+                [activity, topic.flatMap { $0.isEmpty ? nil : "talking \($0)" }].compactMap { $0 }.joined(separator: " · ")
             }
         case "waiting_for_them":
             lastMessage.map { "You wrote \(RelativeTime.ago($0.sentAt, now: now, calendar: calendar))" }
@@ -184,6 +181,16 @@ extension Card {
                 ?? dateRating.map { "Date rated \($0)/5" } ?? "No next action"
         default:
             dateRating.map { "Date rated \($0)/5" }
+        }
+    }
+
+    /// What autopilot is doing on the card, in words; nil for an unknown activity.
+    private func autopilotStatus(now: Date, calendar: Calendar) -> String? {
+        switch autopilotActivity {
+        case "writing_opener": "writing an opener"
+        case "drafting_reply": "drafting a reply"
+        case "sent_waiting": lastMessage.map { "sent \(RelativeTime.ago($0.sentAt, now: now, calendar: calendar)), no reply yet" }
+        default: nil
         }
     }
 

@@ -15,14 +15,14 @@ An Archived card is `archived`, whatever else is true of it: archiving is how th
 1. **`waiting_for_you`**, when a reason applies. The first that applies, in this order, is `reason`:
    1. `handover`: the handover is pending. `handover_trigger` is the first check the newest flagged message from the match hit (`logistics`, `asks_if_ai`, `place_or_exclusivity`, `personal_info`, `sensitive`, or `unavailable` when Jev could not be asked); null for every other reason.
    2. `draft_in_review`: a draft is pending.
-   3. `copied_draft`: not produced yet. Copied drafts come with #56, which adds the check at the marked spot in `_reason()`.
+   3. `copied_draft`: a draft of the card is `copied` and its message has not appeared in the chat yet (see "Drafts").
    4. `failed_send`: a draft of the card is `failed`.
    5. `stalled`: the card is Stalled.
    6. `overdue`: the card has a next action and its due day is before today. Due today is not overdue. Today is the user's day in their time zone (`user_zone()`), as on Today.
    7. `rate_date`: a Dated card has no rating.
    8. `your_turn`: a Matched or Chatting card autopilot is not handling, whose last message is from the match.
    9. `opener_due`: a Matched card autopilot is not handling, with no messages.
-2. **`handled_by_autopilot`**: a Matched or Chatting card autopilot is handling (below). `autopilot_activity` is `drafting_reply` (the match wrote last and a `chat_reply` job is queued or running) or `sent_waiting` (the user or autopilot wrote last). The time to show is `last_message.sent_at`.
+2. **`handled_by_autopilot`**: a Matched or Chatting card autopilot is handling (below). `autopilot_activity` is `drafting_reply` (the match wrote last and a `chat_reply` job is queued or running) or `sent_waiting` (the user or autopilot wrote last). The time to show is `last_message.sent_at`, and the row ends with the card's `topic` (see "Cards and messages").
 3. **`waiting_for_them`**: every other Matched or Chatting card.
 4. **`texting_off_app`**: Number swapped, Date set, Dated and Seeing them.
 

@@ -7,6 +7,7 @@ runs, and what was sent is read from the Tinder stub.
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from test_drafts import drafted
 from test_send import CLEO, tinder, user_id, work  # noqa: F401  (fixtures)
 
 from app.jev import GUARDRAIL, JevUnavailable
@@ -24,7 +25,7 @@ def card_id(app, client, llm, user_id) -> int:  # noqa: F811
     llm.reply = "Short, lowercase, teasing."
     client.put("/voice/questionnaire", json={"answers": {"Emoji?": "Never"}})
     work(app)
-    llm.reply = REPLY
+    llm.reply = drafted(REPLY)
     return client.post("/cards", json={"app": "tinder", "name": "Cleo", "external_id": CLEO}).json()["id"]
 
 
@@ -218,18 +219,6 @@ def test_a_draft_that_denies_being_ai_is_never_sent_until_it_is_edited(app, clie
     assert sent(tinder) == ["both, poorly"]
 
 
-def test_approving_a_draft_that_denies_being_ai_in_the_review_queue_sends_nothing(
-    app, client, card_id, tinder, jev  # noqa: F811
-):
-    jev.yes["denies_ai"] = ["badly"]
-    draft = client.post(f"/cards/{card_id}/drafts").json()
-
-    client.post(f"/drafts/{draft['id']}/approve")
-    work(app)
-
-    assert sent(tinder) == []
-
-
 # (c) A card paused for handover or taken over is never sent to.
 
 
@@ -344,7 +333,7 @@ def test_full_mode_offers_only_free_slots_and_holds_each_one(app, client, card_i
 def test_full_mode_never_sends_a_time_claude_made_up(app, client, card_id, tinder, jev, gcal, evenings, llm):  # noqa: F811
     autonomy(client, "full_autopilot")
     jev.yes["logistics"] = ["when are you free", "friday at 9"]
-    llm.reply = "friday at 9?"
+    llm.reply = drafted("friday at 9?")
 
     incoming(client, card_id, "when are you free?")
     work(app)
@@ -373,7 +362,7 @@ def test_full_mode_books_the_date_the_match_agrees_to_and_then_stops(
     incoming(client, card_id, "when are you free?")
     work(app)
     assert len(sent(tinder)) == 1
-    llm.replies = ["2", "can't wait"]  # Claude reads the answer as the second time offered, then drafts
+    llm.replies = ["2", drafted("can't wait")]  # Claude reads the answer as the second time offered, then drafts
 
     incoming(client, card_id, "the second one works for me")
     work(app)
@@ -398,7 +387,7 @@ def test_booking_a_date_tells_the_calendar_that_the_cards_stage_changed(
     jev.yes["logistics"] = ["when are you free", "works for me"]
     incoming(client, card_id, "when are you free?")
     work(app)
-    llm.replies = ["2", "can't wait"]
+    llm.replies = ["2", drafted("can't wait")]
 
     incoming(client, card_id, "the second one works for me")
     work(app)
@@ -414,7 +403,7 @@ def test_full_mode_releases_the_holds_a_match_declines_and_offers_other_times(
     jev.yes["logistics"] = ["when are you free", "neither works"]
     incoming(client, card_id, "when are you free?")
     work(app)
-    llm.replies = ["none", "no worries"]
+    llm.replies = ["none", drafted("no worries")]
 
     incoming(client, card_id, "neither works, sorry")
     work(app)
@@ -433,7 +422,7 @@ def test_full_mode_hands_over_an_answer_that_neither_accepts_nor_declines(
     jev.yes["logistics"] = ["when are you free", "where"]
     incoming(client, card_id, "when are you free?")
     work(app)
-    llm.replies = ["other", "good question"]
+    llm.replies = ["other", drafted("good question")]
 
     incoming(client, card_id, "where would we go?")
     work(app)
@@ -495,7 +484,7 @@ def test_dismissing_a_later_draft_keeps_the_slots_an_earlier_message_offered(
     jev.yes["logistics"] = ["when are you free", "where"]
     incoming(client, card_id, "when are you free?")
     work(app)
-    llm.replies = ["other", "good question"]
+    llm.replies = ["other", drafted("good question")]
     incoming(client, card_id, "where would we go?")
     work(app)
     (draft,) = queued_for_review(client)

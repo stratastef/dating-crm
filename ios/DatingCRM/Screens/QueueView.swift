@@ -26,10 +26,20 @@ struct QueueView: View {
                 }
                 ForEach(review.items) { item in
                     // Kinds this version does not know are not shown.
-                    if let draft = item.draft {
+                    if item.kind == "draft", let draft = item.draft {
                         DraftItem(client: client, review: review, item: item, draft: draft) {
                             review.dismiss(item)
                             toast = Toast(text: "Dismissed the draft for \(item.cardName)") { review.undo(item) }
+                        } copied: {
+                            toast = Toast(text: "Copied. Paste it in \(item.datingApp).")
+                        }
+                    } else if item.kind == "copied_draft", let draft = item.draft {
+                        CopiedDraftItem(item: item, draft: draft) {
+                            UIPasteboard.general.string = draft.text
+                            toast = Toast(text: "Copied. Paste it in \(item.datingApp).")
+                        } clear: {
+                            review.dismiss(item)
+                            toast = Toast(text: "Cleared the draft for \(item.cardName)") { review.undo(item) }
                         }
                     } else if item.kind == "handover", let cardID = item.cardID {
                         HandoverItem(client: client, review: review, item: item, cardID: cardID) {
@@ -52,6 +62,11 @@ struct QueueView: View {
     }
 }
 
+private extension QueueItem {
+    /// Where the user pastes a copied draft: "Hinge".
+    var datingApp: String { card.map { $0.app.capitalized } ?? "the dating app" }
+}
+
 /// A face filling the item, with the plate on Liquid Glass over its lower part: the one place glass sits on
 /// content (ADR 0009).
 private struct PhotoCard<Plate: View>: View {
@@ -65,7 +80,7 @@ private struct PhotoCard<Plate: View>: View {
             .padding(14)
             .background {
                 // The fill keeps the plate's text at 4.5:1 over any photo, so plates use `.primary` text only.
-                // Glass on the background, not the content: glass would make the black Approve capsule grey.
+                // Glass on the background, not the content: glass would make the black Send capsule grey.
                 RoundedRectangle(cornerRadius: 24)
                     .fill(Color(uiColor: .systemBackground).opacity(0.72))
                     .glassEffect(.regular, in: .rect(cornerRadius: 24))
@@ -88,6 +103,7 @@ private struct ItemHeader: View {
                 if let card = item.card {
                     NavigationLink(value: card) {
                         Text(name ?? item.cardName)
+                            .multilineTextAlignment(.leading)  // a link's label centers a name that wraps
                     }
                     .accessibilityHint("Opens the card")
                 } else {
@@ -128,30 +144,40 @@ private struct Inset<Content: View>: View {
     }
 }
 
+/// A pending draft, with the action named for its effect (ADR 0003): Send where the app can send it, Copy where
+/// it cannot.
 private struct DraftItem: View {
     let client: APIClient
     let review: ReviewQueue
     let item: QueueItem
-    let draft: Draft
     let dismiss: () -> Void
+    let copied: () -> Void
 
+    @State private var draft: Draft
     @State private var text: String
     @State private var busy = false
 
-    init(client: APIClient, review: ReviewQueue, item: QueueItem, draft: Draft, dismiss: @escaping () -> Void) {
+    init(
+        client: APIClient, review: ReviewQueue, item: QueueItem, draft: Draft,
+        dismiss: @escaping () -> Void, copied: @escaping () -> Void
+    ) {
         self.client = client
         self.review = review
         self.item = item
-        self.draft = draft
         self.dismiss = dismiss
+        self.copied = copied
+        _draft = State(initialValue: draft)
         _text = State(initialValue: draft.text)
     }
+
+    /// It denies being AI and the user has not changed it: neither sent nor copied until they do.
+    private var waitsForEdit: Bool { draft.deniesAI && text == draft.text }
 
     var body: some View {
         PhotoCard(name: item.cardName, photo: item.card?.leadPhotoUrl) {
             ItemHeader(item: item)
             AdaptiveStack {
-                Text("\(draft.kind == .opener ? "Opener" : "Reply") on \((item.card?.app ?? "").capitalized)")
+                Text("\(draft.kind == .opener ? "Opener" : "Reply") on \(item.datingApp)")
                 if let message = item.message {
                     TimeAgoText(date: message.sentAt)
                 }
@@ -165,30 +191,72 @@ private struct DraftItem: View {
                 TextField("Draft", text: $text, axis: .vertical)
                     .lineLimit(2...)
             }
+            if waitsForEdit {
+                Text("\(Image(systemName: "exclamationmark.triangle")) It says you're not an AI. Edit it before you send it.")
+            }
             AdaptiveStack(spacing: 8) {
                 Button("Dismiss", action: dismiss)
                     .buttonStyle(.secondaryCapsule)
-                Button("Approve") { approve() }
-                    .buttonStyle(.primaryCapsule)
-                    .disabled(text.isEmpty)
+                if !waitsForEdit {
+                    Button(draft.sendable ? "Send" : "Copy") { act() }
+                        .buttonStyle(.primaryCapsule)
+                        .disabled(text.isEmpty)
+                }
             }
             .disabled(busy)
         }
     }
 
-    private func approve() {
+    private func act() {
         busy = true
         Task {
             defer { busy = false }
             do {
                 if text != draft.text {
-                    _ = try await client.saveEdit(draftID: draft.id, text: text)
+                    draft = try await client.saveEdit(draftID: draft.id, text: text)
+                    if draft.deniesAI { return }  // the edit still denies it: the reason shows again
                 }
-                try await client.approve(draftID: draft.id)
-                review.remove(item)
+                if draft.sendable {
+                    try await client.sendDraft(draftID: draft.id)
+                    review.remove(item)
+                } else {
+                    UIPasteboard.general.string = draft.text
+                    _ = try await client.copy(draftID: draft.id)
+                    copied()
+                    await review.load()  // it waits on as a copied draft
+                }
                 review.error = nil
             } catch {
                 review.error = error.localizedDescription
+            }
+        }
+    }
+}
+
+/// A draft the user copied. It waits until their message shows up in the chat, or they clear it (ADR 0003).
+private struct CopiedDraftItem: View {
+    let item: QueueItem
+    let draft: Draft
+    let copyAgain: () -> Void
+    let clear: () -> Void
+
+    var body: some View {
+        PhotoCard(name: item.cardName, photo: item.card?.leadPhotoUrl) {
+            ItemHeader(item: item)
+            Text("Copied for \(item.datingApp), not sent yet")
+            Inset {
+                Text(draft.text)
+            }
+            if draft.deniesAI {
+                Text("\(Image(systemName: "exclamationmark.triangle")) It says you're not an AI. Clear it and write another.")
+            }
+            AdaptiveStack(spacing: 8) {
+                Button("Clear", action: clear)
+                    .buttonStyle(.secondaryCapsule)
+                if !draft.deniesAI {
+                    Button("Copy again", action: copyAgain)
+                        .buttonStyle(.primaryCapsule)
+                }
             }
         }
     }

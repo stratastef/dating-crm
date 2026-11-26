@@ -15,7 +15,7 @@ from app.auth import CurrentUser, Db
 from app.autopilot import autopilot_allowed
 from app.card_lookup import own_card
 from app.drafts import _COLUMNS as _DRAFT_COLUMNS
-from app.drafts import Draft
+from app.drafts import Draft, present
 from app.jobs import enqueue, handler
 from app.review import is_hot_lead
 from app.voice import queue_profile
@@ -28,7 +28,7 @@ Stage = Literal["matched", "chatting", "number_swapped", "date_set", "dated", "s
 _COLUMNS = (
     "id, app, external_id, name, stage, stage_changed_at, notes, next_action, due_date, created_at,"
     " stalled_at IS NOT NULL AS stalled, date_rating, date_note, handover, handover_suggestions,"
-    " led_to_date, ai_disclosed"
+    " led_to_date, ai_disclosed, topic"
 )
 
 # Only cards in these stages can be Stalled. Stalled is a flag (`cards.stalled_at`), not a stage.
@@ -102,6 +102,8 @@ class Card(BaseModel):
     reason: str | None  # a `Reason` when the card is Waiting for you, else null
     handover_trigger: str | None  # with reason `handover`: the handover check that hit, such as `logistics`
     autopilot_activity: str | None  # an `Activity` when the card is Handled by autopilot, else null
+    # What the chat is about, in a few words ("museums"): written with the card's latest draft, empty before one.
+    topic: str
 
     @computed_field
     @property
@@ -131,19 +133,17 @@ def summarize(db: Connection, user_id: int, cards: Sequence[Row]) -> list[Card]:
             params,
         )
     }
-    pending_drafts = {
-        row.card_id: dict(row._mapping)
-        for row in db.execute(
-            text(
-                f"""
-                SELECT DISTINCT ON (card_id) {_DRAFT_COLUMNS} FROM drafts
-                WHERE user_id = :user_id AND card_id = ANY(:ids) AND status = 'pending'
-                ORDER BY card_id, created_at DESC, id DESC
-                """
-            ),
-            params,
-        )
-    }
+    pending = db.execute(
+        text(
+            f"""
+            SELECT DISTINCT ON (card_id) {_DRAFT_COLUMNS} FROM drafts
+            WHERE user_id = :user_id AND card_id = ANY(:ids) AND status = 'pending'
+            ORDER BY card_id, created_at DESC, id DESC
+            """
+        ),
+        params,
+    ).all()
+    pending_drafts = {draft.card_id: draft for draft in present(db, user_id, pending)}
     lead_photos = dict(
         db.execute(
             text(
@@ -368,7 +368,8 @@ def insert_message(
     """Store one message on the user's card and run everything a new message sets off. Every message is
     stored through this function, so those effects are in one place:
 
-    - from `me`: the style profile is rewritten from the user's own messages, and a pending handover ends;
+    - from `me`: the style profile is rewritten from the user's own messages, a pending handover ends, and the
+      card's copied drafts older than the message are `sent`;
     - from `them`: Stalled is cleared, the handover trigger runs, and chat autopilot is asked to reply.
 
     Returns the stored message, or None when the user has no such card. `sent_at` defaults to now. A message
@@ -400,6 +401,14 @@ def insert_message(
     if sender == "me":
         queue_profile(db, user_id)
         handover.answered(db, user_id, card_id)
+        # The user pasted what they copied: a copied draft older than this message is sent (ADR 0003).
+        db.execute(
+            text(
+                "UPDATE drafts SET status = 'sent', updated_at = now()"
+                " WHERE card_id = :card_id AND user_id = :user_id AND status = 'copied' AND copied_at < :sent_at"
+            ),
+            {"card_id": card_id, "user_id": user_id, "sent_at": row.sent_at},
+        )
         return dict(row._mapping)
     # A reply clears Stalled. If it was an old message added late, the next `mark_stalled` run sets the flag again.
     db.execute(

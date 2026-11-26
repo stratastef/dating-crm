@@ -51,6 +51,20 @@ struct PipelineTests {
         #expect(status(waiting) == "You wrote just now")
     }
 
+    @Test func autopilotRowsEndWithWhatTheChatIsAbout() {
+        var sent = card("handled_by_autopilot", activity: "sent_waiting")
+        sent.lastMessage = LastMessage(sender: .me, body: "hey", sentAt: now.addingTimeInterval(-4 * 86400))
+        sent.topic = "museums"
+        var noDraftYet = card("handled_by_autopilot", activity: "drafting_reply")
+        noDraftYet.topic = ""
+        var unknown = card("handled_by_autopilot", activity: "an_activity_from_a_newer_server")
+        unknown.topic = "museums"
+
+        #expect(status(sent) == "sent 4d ago, no reply yet · talking museums")
+        #expect(status(noDraftYet) == "drafting a reply")
+        #expect(status(unknown) == nil)
+    }
+
     @Test func offAppSaysTheNextActionAndItsDayOrTheRating() {
         var booking = card("texting_off_app")
         booking.nextAction = "Confirm the booking"

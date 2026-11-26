@@ -9,7 +9,7 @@ from app.auth import CurrentUser, Db
 from app.autopilot import autopilot_block
 from app.cards import upsert_message
 from app.connectors import CapabilityFailed, call, unavailable
-from app.drafts import _COLUMNS, Draft
+from app.drafts import _COLUMNS, Draft, present
 from app.jobs import enqueue, handler
 from app.sync import CONNECTORS
 
@@ -74,17 +74,6 @@ def queue_send(db: Connection, user_id: int, draft_id: int, trigger: str, unatte
     return draft
 
 
-def send_approved(db: Connection, user_id: int, draft_id: int, trigger: str) -> None:
-    """Queue the send of a draft the caller has just moved to `approved`, if its card's app can send now.
-
-    For the review queue, which approves drafts itself. Call it once per draft: a second job for the same
-    draft would mark it `failed`. When the app cannot send, the draft stays `approved` and the user copies it.
-    """
-    card = _card(db, user_id, draft_id)
-    if card and card.status == "approved" and not refusal(db, user_id, card.app, card.external_id, card.guardrail):
-        enqueue(db, user_id, "send_draft", {"draft_id": draft_id, "trigger": trigger})
-
-
 def _card(db: Connection, user_id: int, draft_id: int) -> Row | None:
     """The app and match a draft would be sent to, and the draft's status."""
     return db.execute(
@@ -116,7 +105,7 @@ def refusal(
 
 @router.post("/drafts/{draft_id}/send", response_model=Draft, status_code=202)
 def tap_send(draft_id: int, user: CurrentUser, db: Db):
-    """The user approves a draft: queue it for the worker to send. `409` says why when it cannot be sent."""
+    """The user's Send: queue the draft for the worker to send. `409` says why when it cannot be sent."""
     card = _card(db, user.id, draft_id)
     if not card:
         raise HTTPException(status_code=404, detail="draft not found")
@@ -126,7 +115,7 @@ def tap_send(draft_id: int, user: CurrentUser, db: Db):
     draft = queue_send(db, user.id, draft_id, trigger=f"copilot: user tapped send on draft {draft_id}")
     if not draft:
         raise HTTPException(status_code=409, detail=f"the draft is already {card.status}")
-    return draft
+    return present(db, user.id, [draft])[0]
 
 
 @handler("send_draft")

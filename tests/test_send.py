@@ -12,6 +12,7 @@ from app.connectors import call
 from app.jobs import run_once
 from app.tinder import TinderConnector
 from app.vault import store_token
+from tests.test_drafts import drafted
 
 FIXTURES = Path(__file__).parent / "fixtures" / "tinder"
 TOKEN = "tinder-session-secret"
@@ -68,7 +69,7 @@ def draft(app, client, llm, user_id) -> dict:
     work(app)
     card_id = client.post("/cards", json={"app": "tinder", "name": "Cleo", "external_id": CLEO}).json()["id"]
     client.post(f"/cards/{card_id}/messages", json={"sender": "them", "body": "do you climb indoors or outdoors"})
-    llm.reply = "both. badly."
+    llm.reply = drafted("both. badly.")
     return client.post(f"/cards/{card_id}/drafts").json()
 
 
@@ -111,27 +112,6 @@ def test_the_users_edit_is_what_gets_sent(app, client, draft, tinder):
     work(app)
 
     assert tinder.sent == [(f"/user/matches/{CLEO}", {"message": "both, badly"})]
-
-
-def test_approving_a_draft_in_the_review_queue_sends_it_once(app, client, draft, tinder):
-    assert client.post(f"/drafts/{draft['id']}/approve").status_code == 200
-    assert client.post(f"/drafts/{draft['id']}/send").status_code == 409
-
-    work(app)
-
-    assert tinder.sent == [(f"/user/matches/{CLEO}", {"message": "both. badly."})]
-    assert status(app, draft) == "sent"
-    assert client.get("/audit-log").json()[0]["trigger"] == f"copilot: user approved draft {draft['id']}"
-
-
-def test_a_pause_does_not_stop_a_draft_the_user_approves(app, client, draft, tinder):
-    client.post("/autopilot/pause", params={"app": "tinder"})
-
-    assert client.post(f"/drafts/{draft['id']}/approve").status_code == 200
-    work(app)
-
-    assert len(tinder.sent) == 1
-    assert status(app, draft) == "sent"
 
 
 def test_a_second_tap_is_refused_and_the_draft_is_sent_once(app, client, draft, tinder):

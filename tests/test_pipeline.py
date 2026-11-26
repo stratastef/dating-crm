@@ -83,6 +83,23 @@ def test_a_failed_send_waits_for_you(app, client, draft, tinder):  # noqa: F811
     assert (card["pipeline_group"], card["reason"]) == ("waiting_for_you", "failed_send")
 
 
+def test_a_copied_draft_waits_for_you_after_a_draft_in_review_and_before_a_failed_send(
+    app, client, draft, tinder  # noqa: F811
+):
+    tinder.status = 500
+    client.post(f"/drafts/{draft['id']}/send")
+    work(app)
+    copied = client.post(f"/cards/{draft['card_id']}/drafts").json()
+    client.post(f"/drafts/{copied['id']}/copy")
+
+    card = placed(client, "Cleo")
+    assert (card["pipeline_group"], card["reason"]) == ("waiting_for_you", "copied_draft")
+
+    client.post(f"/cards/{draft['card_id']}/drafts")
+
+    assert placed(client, "Cleo")["reason"] == "draft_in_review"
+
+
 def test_a_stalled_card_waits_for_you(app, client):
     message(client, new_card(client, "Ada", stage="date_set"), "me", sent_at=ago(days=4))
     assert placed(client, "Ada")["pipeline_group"] == "texting_off_app"

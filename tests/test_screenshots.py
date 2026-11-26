@@ -1,6 +1,7 @@
 import json
 
 from app.jobs import run_once
+from tests.test_drafts import drafted
 
 PNG = b"\x89PNG\r\n\x1a\n not a real picture; the stub never looks at it"
 
@@ -14,7 +15,7 @@ def write_profile(app, client, llm):
 
 def share(client, llm, read, draft="both. badly.", image=PNG, content_type="image/png"):
     """Upload a screenshot. `read` is what Claude sees in it; `draft` is what Claude then writes."""
-    llm.replies = [read if isinstance(read, str) else json.dumps(read), draft]
+    llm.replies = [read if isinstance(read, str) else json.dumps(read), drafted(draft)]
     return client.post("/screenshots", content=image, headers={"Content-Type": content_type})
 
 
