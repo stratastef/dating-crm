@@ -47,8 +47,8 @@ class Edit(BaseModel):
 
 class Photo(BaseModel):
     id: int
-    rank: int | None  # 1 is the best photo; null until the photos are ranked
-    reason: str | None  # why the photo has that rank
+    rank: int | None  # the photo's place, 1 the lead photo; null until ranked or ordered. The latest of the two wins.
+    reason: str | None  # why Claude ranked the photo there
     suggested_edit: Edit | None  # the edit on offer; null when there is none to accept or reject
     edit: Edit | None  # the edit the user accepted; null while the photo is as uploaded
 
@@ -99,7 +99,7 @@ def upload(request: Request, data: Annotated[bytes, Depends(_upload)], user: Cur
 
 @router.get("/photos", response_model=list[Photo])
 def photos(user: CurrentUser, db: Db):
-    """The user's photos, best first once ranked. Unranked photos come last, oldest first."""
+    """The user's photos in rank order, lead photo first. Photos added since the last rank or order come last, oldest first."""
     return db.execute(
         text(f"SELECT {_COLUMNS} FROM photos WHERE user_id = :user_id ORDER BY rank NULLS LAST, id"),
         {"user_id": user.id},
@@ -250,3 +250,31 @@ def decide(photo_id: int, decision: Decision, user: CurrentUser, db: Db):
             trigger="copilot: user accepted a photo edit",
         )
     return photo
+
+
+@router.delete("/photos/{photo_id}", status_code=204)
+def delete(photo_id: int, user: CurrentUser, db: Db):
+    """Delete the photo and its file. It cannot be undone."""
+    deleted = db.execute(
+        text("DELETE FROM photos WHERE id = :id AND user_id = :user_id RETURNING id"), {"id": photo_id, "user_id": user.id}
+    ).one_or_none()
+    if not deleted:
+        raise HTTPException(status_code=404, detail="photo not found")
+    _path(user.id, photo_id).unlink(missing_ok=True)
+
+
+class Order(BaseModel):
+    ids: list[int]  # every one of the user's photos once, lead photo first
+
+
+@router.put("/photos/order", response_model=list[Photo])
+def order(order: Order, user: CurrentUser, db: Db):
+    """Set the photos' order: each photo's rank becomes its place, 1 the lead photo. Reasons stay."""
+    ids = db.execute(text("SELECT id FROM photos WHERE user_id = :user_id ORDER BY id"), {"user_id": user.id}).scalars().all()
+    if sorted(order.ids) != ids:
+        raise HTTPException(status_code=422, detail="name each of your photos once")
+    db.execute(
+        text("UPDATE photos SET rank = :rank WHERE id = :id AND user_id = :user_id"),
+        [{"rank": rank, "id": id, "user_id": user.id} for rank, id in enumerate(order.ids, start=1)],
+    )
+    return photos(user, db)
