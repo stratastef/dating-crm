@@ -4,6 +4,7 @@ Cards, messages, drafts and settings go in through the API; `GET /pipeline` is r
 """
 
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -101,6 +102,18 @@ def test_a_next_action_due_today_is_not_overdue_until_the_day_after(client):
 
     card = placed(client, "Ada")
     assert (card["pipeline_group"], card["reason"]) == ("waiting_for_you", "overdue")
+
+
+def test_overdue_follows_the_users_time_zone(client):
+    """Kiritimati is 25 hours ahead of Pago Pago: its yesterday is still today or tomorrow in Pago Pago."""
+    kiritimati_yesterday = datetime.now(ZoneInfo("Pacific/Kiritimati")).date() - timedelta(days=1)
+    new_card(client, "Ada", stage="number_swapped", next_action="Book the bar", due_date=kiritimati_yesterday.isoformat())
+
+    client.patch("/settings", json={"time_zone": "Pacific/Pago_Pago"})
+    assert placed(client, "Ada")["reason"] is None
+
+    client.patch("/settings", json={"time_zone": "Pacific/Kiritimati"})
+    assert placed(client, "Ada")["reason"] == "overdue"
 
 
 def test_a_dated_card_waits_for_you_until_the_date_is_rated(client):

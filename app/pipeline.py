@@ -4,7 +4,7 @@
 it. `summarize()` in `app/cards.py` calls it, so every card summary carries them. `GET /pipeline` lists the groups.
 """
 
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from typing import Literal, get_args
 
 from fastapi import APIRouter
@@ -15,6 +15,7 @@ from app.auth import CurrentUser, Db
 from app.autopilot import autopilot_block
 from app.cards import _COLUMNS, Card, summarize
 from app.send import CHAT_STAGES, refusal
+from app.settings import user_zone
 
 router = APIRouter()
 
@@ -69,8 +70,7 @@ def place(db: Connection, user_id: int, cards: list[dict]) -> None:
             params,
         ).all()
     )
-    # shortcut: today in UTC, the database's clock. Use the user's time zone once Today (#54) stores it.
-    today = datetime.now(UTC).date()
+    today = datetime.now(user_zone(db, user_id)).date()  # the user's day, as on Today
     acting: dict[tuple[str, bool], bool] = {}  # (app, card linked to a match) -> chat autopilot may act now
 
     for card in cards:

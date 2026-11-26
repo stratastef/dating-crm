@@ -175,12 +175,14 @@ def alerts(db: Connection, user_id: int) -> list[Row]:
 
 
 def is_copilot_only(db: Connection, user_id: int, app: str) -> bool:
-    """True while the user has an alert for this app. Delete the app's alerts to re-enable its connector."""
+    """True while the user has an alert for this app or chose to keep it copilot-only (`copilot_only_apps`).
+    A fresh session token (`PUT /connectors/{app}/token`) deletes both and re-enables its connector."""
     # Transient errors are no longer stored; a row left from before must not keep the app off.
     return db.execute(
         text(
             "SELECT EXISTS (SELECT 1 FROM connector_alerts"
             " WHERE user_id = :user_id AND app = :app AND reason <> 'transient')"
+            " OR EXISTS (SELECT 1 FROM copilot_only_apps WHERE user_id = :user_id AND app = :app)"
         ),
         {"user_id": user_id, "app": app},
     ).scalar_one()

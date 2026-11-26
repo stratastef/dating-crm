@@ -38,6 +38,16 @@ struct APIClient {
         try await data("POST", "sign-out")
     }
 
+    /// The review summary and what the user has to do: Overdue, Today and Coming up.
+    func today() async throws -> Today {
+        try await send("GET", "today")
+    }
+
+    /// Stores the phone's time zone (an IANA name), which "today" and "overdue" follow. Sent on each launch.
+    func setTimeZone(_ identifier: String) async throws {
+        try await data("PATCH", "settings", body: Self.encoder.encode(["time_zone": identifier]))
+    }
+
     func cards() async throws -> [Card] {
         try await send("GET", "cards")
     }
@@ -258,6 +268,25 @@ struct APIClient {
 
     func setSwipeLimits(_ limits: SwipeLimits) async throws -> SwipeLimits {
         try await send("PUT", "swipes/limits", body: Self.encoder.encode(limits))
+    }
+
+    // Connected apps.
+
+    /// Each dating app (Tinder, Hinge, Bumble) with its connector state.
+    func connectedApps() async throws -> [ConnectedApp] {
+        try await send("GET", "connectors")
+    }
+
+    /// Stores the app's session token on the server, which turns its connector on and syncs now. `404`: the
+    /// app has no connector.
+    func connect(app: String, token: String) async throws {
+        try await data("PUT", "connectors/\(app)/token", body: Self.encoder.encode(["token": token]))
+    }
+
+    /// Keeps the app copilot-only: the server deletes its session token and stops syncing, sending and
+    /// swiping there. `connect` turns it back on.
+    func chooseCopilotOnly(app: String) async throws {
+        try await data("PUT", "connectors/\(app)/copilot-only")
     }
 
     /// Whether the match read may guess ethnicity, religion, health, sexuality and politics. Off by default.

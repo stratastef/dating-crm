@@ -7,7 +7,7 @@
 1. On your computer, log in at <https://tinder.com> in a desktop browser.
 2. Open the developer tools (F12), then the Network tab, and reload the page.
 3. Click any request to `api.gotinder.com` and copy the value of the `X-Auth-Token` request header. The same value is in Application > Local Storage > `https://tinder.com` under the key `TinderWeb/APIToken`.
-4. Send it to your server. `$API_TOKEN` is your Dating CRM token from `python -m app.auth`:
+4. On the phone, paste it under You > Connected apps > Tinder > Connect, which shows these steps. Or send it to your server from the computer. `$API_TOKEN` is your Dating CRM token from `python -m app.auth`:
 
 ```sh
 curl -X PUT http://localhost:8000/connectors/tinder/token \
