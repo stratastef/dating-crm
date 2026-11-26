@@ -118,12 +118,31 @@ struct Message: Codable, Identifiable, Hashable {
 /// Today: the review summary, then what the user has to do by day, in the time zone the app sent.
 struct Today: Codable, Equatable {
     var review: ReviewSummary
+    /// "Finish setup": nil once the user dismissed it or no step is left.
+    var setup: SetupSummary?
     var overdue: [TodayItem]
     var today: [TodayItem]
     var comingUp: [TodayItem]
 
     /// Nothing in any of the three groups: "Nothing for today".
     var isEmpty: Bool { overdue.isEmpty && today.isEmpty && comingUp.isEmpty }
+}
+
+/// How many setup steps are not done yet, for Today's "Finish setup" row.
+struct SetupSummary: Codable, Equatable {
+    var stepsLeft: Int
+}
+
+/// One setup step, in the order setup runs them, and whether it is done.
+struct SetupStep: Codable, Equatable {
+    enum Step: String, Codable {
+        case datingApps = "dating_apps"
+        case calendar, voice, preferences
+        case swipeLayoutAndAutonomy = "swipe_layout_and_autonomy"
+    }
+
+    var step: Step
+    var done: Bool
 }
 
 /// How many items wait in Review, and how many of them are hot leads.
@@ -431,8 +450,10 @@ struct Voice: Decodable, Equatable {
 /// One of the user's own photos on the server.
 struct ProfilePhoto: Codable, Identifiable, Equatable {
     let id: Int
-    /// 1 is the best photo. nil, like `reason`, until the photos are ranked.
+    /// The photo's place on the profile, 1 the lead photo: Claude's ranking or the user's order, whichever came
+    /// last. nil until either.
     var rank: Int?
+    /// Why Claude ranked the photo where it did. nil until ranked.
     var reason: String?
     /// The light edit on offer, to accept or reject. nil when there is none.
     var suggestedEdit: PhotoEdit?
@@ -457,4 +478,11 @@ struct PhotoEdit: Codable, Equatable {
         if colour != 1 { parts.append(colour > 1 ? "more colour" : "less colour") }
         return parts.joined(separator: ", ")
     }
+}
+
+/// A bio and prompt answers for one dating app: what the user accepted, or a rewrite on offer.
+struct Bio: Codable, Equatable {
+    var bio = ""
+    /// Prompt -> answer, keyed by the prompt's exact text.
+    var prompts: [String: String] = [:]
 }
