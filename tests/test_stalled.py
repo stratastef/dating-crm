@@ -24,11 +24,11 @@ def run_scheduled_jobs(app) -> None:
 
 
 def test_silent_days_default_to_three_and_the_user_can_change_them(client):
-    assert client.get("/settings").json() == {"stalled_after_days": 3}
+    assert client.get("/settings").json()["stalled_after_days"] == 3
 
     assert client.patch("/settings", json={"stalled_after_days": 5}).status_code == 200
 
-    assert client.get("/settings").json() == {"stalled_after_days": 5}
+    assert client.get("/settings").json()["stalled_after_days"] == 5
     assert client.patch("/settings", json={"stalled_after_days": 0}).status_code == 422
 
 

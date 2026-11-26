@@ -1,14 +1,14 @@
 """the Swipe layout each user picks, and the age and distance of a swipe candidate
 
 Revision ID: t66_swipe_layout
-Revises: t61_copilot_only_apps
+Revises: t55_review_context
 """
 
 import sqlalchemy as sa
 from alembic import op
 
 revision = "t66_swipe_layout"
-down_revision = "t61_copilot_only_apps"
+down_revision = "t55_review_context"
 branch_labels = None
 depends_on = None
 

@@ -10,26 +10,20 @@ struct MainTabView: View {
 
     // `DCRM_TAB=review` opens another tab, for scripted simulator checks (see `Session.init`).
     @State private var selection = AppTab(rawValue: ProcessInfo.processInfo.environment["DCRM_TAB"] ?? "") ?? .today
+    // From Today's review summary.
+    @State private var reviewCount = 0
 
     var body: some View {
         TabView(selection: $selection) {
             Tab("Today", systemImage: "calendar", value: .today) {
-                // shortcut: a placeholder until the Today screen lands.
-                NavigationStack {
-                    ContentUnavailableView(
-                        "Your day will be here", systemImage: "calendar",
-                        description: Text("Overdue, today and coming up. Until then, the Pipeline has every card.")
-                            .foregroundStyle(.secondaryText)
-                    )
-                    .fontDesign(.serif)
-                    .navigationTitle("Today")
-                }
+                TodayView(client: client, openReview: { selection = .review }, reviewCount: $reviewCount)
             }
             Tab("Review", systemImage: "checklist", value: .review) {
                 NavigationStack { QueueView(client: client) }
             }
+            .badge(reviewCount)
             Tab("Pipeline", systemImage: "person.2", value: .pipeline) {
-                BoardView(client: client, push: push)
+                PipelineView(client: client, push: push)
             }
             Tab("Swipe", systemImage: "rectangle.stack", value: .swipe) {
                 NavigationStack { SwipeView(client: client) }

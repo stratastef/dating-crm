@@ -207,6 +207,9 @@ def test_a_candidate_shows_age_distance_and_the_super_like_proposed_for_them_whi
         "name": "Eve",
         "reason": "She climbs.",
         "status": "pending",
+        "candidate_id": eve["id"],
+        "photo_url": "https://images-ssl.gotinder.com/5f00000000000000000000e5/p-e5-1.jpg",
+        "cost": None,
     }
     assert found["Dana"]["paid_item"] is None
     signed_in.post(f"/paid-items/{eve['paid_item']['id']}/decline")

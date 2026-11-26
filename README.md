@@ -29,7 +29,8 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/preferences.py` | What the user wants, versioned: routes under `/preferences`, `current_preferences()` |
 | `app/dashboard.py` | Good dates per hour, weekly: `POST /time` and `GET /dashboard` |
 | `app/feedback.py` | Feedback loop: `swipe_lines()` for the swipe pre-screen prompt, and `GET /feedback/export` |
-| `app/settings.py` | User settings: `GET` and `PATCH /settings` |
+| `app/settings.py` | User settings: `GET` and `PATCH /settings`, `user_zone()` |
+| `app/today.py` | Today: `GET /today`, the review summary and what the user has to do by time |
 | `app/tenancy.py` | `user_id_column()` for tenant tables |
 | `app/vault.py` | `store_token()`, `read_token()`, `delete_token()` for encrypted dating-app session tokens |
 | `app/audit.py` | `record_action()` and `GET /audit-log` |
@@ -58,6 +59,7 @@ Requirements: Docker, [uv](https://docs.astral.sh/uv/). Python 3.12 is pinned in
 Read the doc for a module before you change it or call it. Review rules live in `CODING_STANDARDS.md`.
 
 - [Cards and messages](docs/modules/cards-and-messages.md)
+- [Pipeline](docs/modules/pipeline.md)
 - [Background jobs](docs/modules/background-jobs.md)
 - [Calling Claude](docs/modules/calling-claude.md)
 - [Voice](docs/modules/voice.md)
@@ -87,6 +89,7 @@ Read the doc for a module before you change it or call it. Review rules live in 
 - [Tinder connector](docs/modules/tinder-connector.md)
 - [iOS app shell and shared components](docs/modules/ios-app-shell.md)
 - [Sign-in](docs/modules/sign-in.md)
+- [Today](docs/modules/today.md)
 
 ## Run the stack
 

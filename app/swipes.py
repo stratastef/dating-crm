@@ -49,7 +49,8 @@ Swipe = Literal["like", "pass"]
 _COLUMNS = """
     id, app, profile_id, name, bio, photos, age, distance_mi, suggestion, reason, source, decision,
     (SELECT json_build_object('id', p.id, 'app', p.app, 'item', p.item, 'name', swipe_candidates.name,
-                              'reason', p.reason, 'status', p.status)
+                              'reason', p.reason, 'status', p.status, 'candidate_id', p.candidate_id,
+                              'photo_url', swipe_candidates.photos->>0, 'cost', p.cost)
      FROM paid_item_proposals p
      WHERE p.user_id = swipe_candidates.user_id AND p.candidate_id = swipe_candidates.id AND p.status = 'pending'
        AND swipe_candidates.decision IS NULL) AS paid_item
@@ -193,7 +194,7 @@ def screen(db: Connection, user_id: int, app: str) -> None:
             },
         ).scalar_one()
         if suggestion == "super like":  # proposed only: the user approves it in the review queue or it is not spent
-            paid_items.propose(db, user_id, app, "super_like", reason, candidate_id)
+            paid_items.propose(db, user_id, app, "super_like", reason, candidate_id, candidate.get("cost"))
 
 
 @router.post("/swipes/{app}/suggestions", response_model=list[Candidate])

@@ -169,11 +169,11 @@ The screen that shows every card, grouped by who acts next: waiting for you, han
 _Avoid_: Board
 
 **Waiting for you**:
-A card blocked on the user: a pending handover, a draft in Review, a copied draft not yet sent, a Stalled card, an overdue next action, or a Dated card with no rating. A next action due today does not count until it is overdue.
+A card blocked on the user: a pending handover, a draft in Review, a copied draft not yet sent, a failed send, a Stalled card, an overdue next action, a Dated card with no rating, a match's message autopilot is not answering, or a new match autopilot is not writing to. A next action due today does not count until it is overdue. An Archived card never waits for the user.
 _Avoid_: Needs you, due
 
 **Handled by autopilot**:
-A Matched or Chatting card that autopilot can act on now: chat autonomy is Autopilot or Full autopilot, the app's connector works, nothing is paused and the AI budget is not reached.
+A Matched or Chatting card that autopilot can act on now: chat autonomy is Autopilot or Full autopilot, the app's connector works, the card is linked to its match and has no handover, nothing is paused and the AI budget is not reached.
 
 **Waiting for them**:
 A Matched or Chatting card where the match owes a reply and autopilot cannot act on it.
