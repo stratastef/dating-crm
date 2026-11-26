@@ -173,9 +173,9 @@ struct SwipeView: View {
         candidates.removeAll { ids.contains($0.id) }
         held.formUnion(ids)
         done += decisions.count
-        let send = Held { await send(decisions) }
+        let swipes = Held { await self.send(decisions) }
         toast = Toast(text: Self.toastText(decisions)) {
-            guard send.undo() else { return }  // too late: already on the dating app
+            guard swipes.undo() else { return }  // too late: already on the dating app
             held.subtract(ids)
             done -= decisions.count
             restore(decisions.map(\.candidate))
