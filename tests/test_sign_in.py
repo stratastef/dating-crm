@@ -35,6 +35,14 @@ def clock(monkeypatch):
     return clock
 
 
+@pytest.fixture
+def invite_code(database) -> str:
+    """An invite code from the owner's CLI, printed the way the owner hands it out."""
+    printed = subprocess.run([sys.executable, "-m", "app.invite_codes"], check=True, capture_output=True, text=True)
+    [code] = printed.stdout.split()
+    return code
+
+
 def bearer(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
@@ -144,6 +152,55 @@ def test_a_phone_number_with_no_account_needs_an_invite_code(app, sms, clock):
 
     assert (refused.status_code, refused.json()) == (403, {"detail": "invite_code_needed"})
     assert sms.sent == []
+
+
+def test_a_new_phone_number_with_a_valid_invite_code_gets_an_account_on_sign_in(app, sms, clock, invite_code):
+    device = TestClient(app)
+
+    assert device.post("/sign-in/code", json={"phone": PHONE, "invite_code": invite_code}).status_code == 204
+    signed_in = sign_in(device, sms.code(PHONE))
+
+    assert signed_in.status_code == 200
+    assert signed_in.json()["new_account"] is True
+    assert TestClient(app, headers=bearer(signed_in.json()["token"])).get("/me").json() == {"email": None}
+    # The account is this number's now: the next sign-in needs no invite code.
+    assert send_code(device) == 204
+    assert sign_in(device, sms.code(PHONE)).json()["new_account"] is False
+
+
+def test_a_used_invite_code_is_refused_for_another_phone_number(app, sms, clock, invite_code):
+    device = TestClient(app)
+    device.post("/sign-in/code", json={"phone": PHONE, "invite_code": invite_code})
+    assert sign_in(device, sms.code(PHONE)).status_code == 200
+
+    refused = device.post("/sign-in/code", json={"phone": "+15555550199", "invite_code": invite_code})
+
+    assert (refused.status_code, refused.json()) == (403, {"detail": "invite_code_invalid"})
+    assert [to for to, _ in sms.sent] == [PHONE]
+
+
+def test_an_unknown_invite_code_is_refused(app, sms, clock, invite_code):
+    refused = TestClient(app).post("/sign-in/code", json={"phone": PHONE, "invite_code": "AAAA-AAAA"})
+
+    assert (refused.status_code, refused.json()) == (403, {"detail": "invite_code_invalid"})
+    assert sms.sent == []
+
+
+def test_an_invite_code_creates_one_account_even_when_two_numbers_got_a_sign_in_code_with_it(app, sms, clock, invite_code):
+    device, second = TestClient(app), "+15555550199"
+    for phone in [PHONE, second]:
+        assert device.post("/sign-in/code", json={"phone": phone, "invite_code": invite_code}).status_code == 204
+    assert sign_in(device, sms.code(PHONE)).status_code == 200
+
+    refused = sign_in(device, sms.code(second), phone=second)
+
+    assert (refused.status_code, refused.json()) == (403, {"detail": "invite_code_invalid"})
+
+
+def test_an_invite_code_is_typed_without_regard_to_case_spaces_or_dashes(app, sms, clock, invite_code):
+    typed = " " + invite_code.replace("-", " ").lower()
+
+    assert TestClient(app).post("/sign-in/code", json={"phone": PHONE, "invite_code": typed}).status_code == 204
 
 
 def test_a_phone_number_must_be_in_e164_form(app, account, sms):

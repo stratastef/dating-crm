@@ -45,7 +45,16 @@ PRESCREEN_SYSTEM = (
 
 Swipe = Literal["like", "pass"]
 
-_COLUMNS = "id, app, profile_id, name, bio, photos, suggestion, reason, source, decision"
+# The table is named in full, not aliased, so the paid item's subquery also works in `UPDATE ... RETURNING`.
+_COLUMNS = """
+    id, app, profile_id, name, bio, photos, age, distance_mi, suggestion, reason, source, decision,
+    (SELECT json_build_object('id', p.id, 'app', p.app, 'item', p.item, 'name', swipe_candidates.name,
+                              'reason', p.reason, 'status', p.status, 'candidate_id', p.candidate_id,
+                              'photo_url', swipe_candidates.photos->>0, 'cost', p.cost)
+     FROM paid_item_proposals p
+     WHERE p.user_id = swipe_candidates.user_id AND p.candidate_id = swipe_candidates.id AND p.status = 'pending'
+       AND swipe_candidates.decision IS NULL) AS paid_item
+"""
 
 
 class Candidate(BaseModel):
@@ -54,10 +63,13 @@ class Candidate(BaseModel):
     name: str
     bio: str
     photos: list[str]
+    age: int | None  # null when the dating app does not say
+    distance_mi: int | None
     suggestion: Swipe
     reason: str
     source: Literal["jev", "model"]  # which pre-filter suggested
     decision: Swipe | None  # null until the user swipes
+    paid_item: paid_items.Proposal | None  # the Super Like proposed for this profile, while it waits
 
 
 class Decided(Candidate):
@@ -160,8 +172,10 @@ def screen(db: Connection, user_id: int, app: str) -> None:
         candidate_id = db.execute(
             text(
                 """
-                INSERT INTO swipe_candidates (user_id, app, profile_id, name, bio, photos, suggestion, reason, source)
-                VALUES (:user_id, :app, :profile_id, :name, :bio, CAST(:photos AS jsonb), :suggestion, :reason, :source)
+                INSERT INTO swipe_candidates
+                    (user_id, app, profile_id, name, bio, photos, age, distance_mi, suggestion, reason, source)
+                VALUES (:user_id, :app, :profile_id, :name, :bio, CAST(:photos AS jsonb), :age, :distance_mi,
+                        :suggestion, :reason, :source)
                 RETURNING id
                 """
             ),
@@ -172,6 +186,8 @@ def screen(db: Connection, user_id: int, app: str) -> None:
                 "name": candidate["name"],
                 "bio": candidate["bio"],
                 "photos": json.dumps(candidate["photos"]),
+                "age": candidate.get("age"),  # optional in the connector contract
+                "distance_mi": candidate.get("distance_mi"),
                 "suggestion": "like" if suggestion == "super like" else suggestion,
                 "reason": reason,
                 "source": source,
@@ -244,6 +260,27 @@ def set_limits(body: Limits, user: CurrentUser, db: Db):
         text("UPDATE users SET swipes_per_run = :swipes_per_run, swipes_per_day = :swipes_per_day WHERE id = :id"),
         {"id": user.id, **body.model_dump()},
     )
+    return body
+
+
+class Layout(BaseModel):
+    """How the Swipe tab shows candidates, as the user picked (ADR 0004)."""
+
+    layout: Literal["one_at_a_time", "list"]
+
+
+class StoredLayout(BaseModel):
+    layout: Literal["one_at_a_time", "list"] | None  # null until the user picks: the app shows one at a time
+
+
+@router.get("/swipes/layout", response_model=StoredLayout)
+def read_layout(user: CurrentUser, db: Db):
+    return {"layout": db.execute(text("SELECT swipe_layout FROM users WHERE id = :id"), {"id": user.id}).scalar_one()}
+
+
+@router.put("/swipes/layout", response_model=StoredLayout)
+def set_layout(body: Layout, user: CurrentUser, db: Db):
+    db.execute(text("UPDATE users SET swipe_layout = :layout WHERE id = :id"), {"id": user.id, "layout": body.layout})
     return body
 
 

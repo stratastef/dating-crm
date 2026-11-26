@@ -282,6 +282,38 @@ struct SwipeCandidate: Codable, Identifiable, Hashable {
     var reason: String
     /// Which pre-filter suggested: `jev` or `model`.
     var source: String
+    /// Nil when the dating app does not say.
+    var age: Int? = nil
+    var distanceMi: Int? = nil
+    /// The Super Like proposed for this profile, while it waits for the user's answer.
+    var paidItem: PaidItem? = nil
+
+    /// "Eve, 30", or the name alone when the app gives no age.
+    var nameAndAge: String { age.map { "\(name), \($0)" } ?? name }
+
+    /// "5 mi · Tinder". Miles become km where the locale says so.
+    var details: String {
+        let distance = distanceMi.map {
+            Measurement(value: Double($0), unit: UnitLength.miles).formatted(.measurement(width: .abbreviated, usage: .road))
+        }
+        return [distance, app.capitalized].compactMap(\.self).joined(separator: " · ")
+    }
+}
+
+/// How the Swipe tab shows swipe candidates (ADR 0004). Raw values match the server's.
+enum SwipeLayout: String, Codable, CaseIterable, Identifiable {
+    case oneAtATime = "one_at_a_time"
+    case list
+
+    var id: Self { self }
+    var title: String { self == .list ? "List" : "One at a time" }
+
+    var summary: String {
+        switch self {
+        case .oneAtATime: "One person per screen with large photos. Pass or Like, then the next."
+        case .list: "Everyone in one list with the suggestion picked. Accept them all at once."
+        }
+    }
 }
 
 /// Pause: what autopilot is paused for. `all` pauses every app; `apps` are paused on their own.

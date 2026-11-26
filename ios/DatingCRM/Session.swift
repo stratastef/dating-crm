@@ -18,6 +18,8 @@ enum SignInError: LocalizedError {
 /// group a new item is stored in.
 @Observable final class Session {
     private(set) var client: APIClient?
+    /// True when the last phone number sign-in created the account, so setup runs next. Not kept across launches.
+    var isNewAccount = false
 
     private let keychainService: String
     private let defaults: UserDefaults
@@ -62,15 +64,16 @@ enum SignInError: LocalizedError {
         return "+" + digits
     }
 
-    /// Texts a sign-in code to the phone number (E.164).
-    func requestCode(phone: String) async throws {
-        try await makeClient(serverURL, "").requestSignInCode(phone: phone)
+    /// Texts a sign-in code to the phone number (E.164). A number with no account needs an invite code.
+    func requestCode(phone: String, inviteCode: String? = nil) async throws {
+        try await makeClient(serverURL, "").requestSignInCode(phone: phone, inviteCode: inviteCode)
     }
 
     /// Trades the phone number and the sign-in code for this device's API token, then keeps it.
     func signIn(phone: String, code: String) async throws {
-        let token = try await makeClient(serverURL, "").signIn(phone: phone, code: code)
-        keep(makeClient(serverURL, token))
+        let signedIn = try await makeClient(serverURL, "").signIn(phone: phone, code: code)
+        isNewAccount = signedIn.newAccount
+        keep(makeClient(serverURL, signedIn.token))
     }
 
     /// The developer sign-in: checks the URL and token with one request to the server, then keeps them.
