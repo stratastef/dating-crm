@@ -10,7 +10,7 @@ from app.auth import CurrentUser, Db
 
 router = APIRouter()
 
-_COLUMNS = "stalled_after_days, time_zone"
+_COLUMNS = "stalled_after_days, time_zone, setup_dismissed"
 
 
 class Settings(BaseModel):
@@ -18,6 +18,8 @@ class Settings(BaseModel):
     stalled_after_days: int = Field(ge=1)
     # The phone's time zone, an IANA name such as `Europe/Berlin`. The app sends it on each launch.
     time_zone: str
+    # The user hid "Finish setup" on Today. The steps stay under You.
+    setup_dismissed: bool
 
 
 class SettingsChange(BaseModel):
@@ -25,6 +27,7 @@ class SettingsChange(BaseModel):
 
     stalled_after_days: int | None = Field(default=None, ge=1)
     time_zone: str | None = None
+    setup_dismissed: bool | None = None
 
     @field_validator("time_zone")
     @classmethod
@@ -54,7 +57,8 @@ def update_settings(change: SettingsChange, user: CurrentUser, db: Db):
     return db.execute(
         text(
             "UPDATE users SET stalled_after_days = COALESCE(:stalled_after_days, stalled_after_days),"
-            f" time_zone = COALESCE(:time_zone, time_zone) WHERE id = :id RETURNING {_COLUMNS}"
+            " time_zone = COALESCE(:time_zone, time_zone),"
+            f" setup_dismissed = COALESCE(:setup_dismissed, setup_dismissed) WHERE id = :id RETURNING {_COLUMNS}"
         ),
         {"id": user.id, **change.model_dump()},
     ).one()

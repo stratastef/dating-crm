@@ -10,7 +10,9 @@ struct DatingCRMApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if let client = session.client {
+                if let client = session.client, session.isNewAccount {
+                    SetupView(client: client) { session.isNewAccount = false }
+                } else if let client = session.client {
                     let push = appDelegate.push
                     MainTabView(client: client, push: push, signOut: session.signOut)
                         .task {
