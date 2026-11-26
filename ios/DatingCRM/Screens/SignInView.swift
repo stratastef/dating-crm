@@ -6,7 +6,10 @@ import SwiftUI
 struct SignInView: View {
     let session: Session
 
-    @State private var phone = "+"
+    /// The country the number is in, and the number without its dialing code, as Telegram asks for them.
+    @State private var region = PhoneNumber.defaultRegion()
+    @State private var national = ""
+    @State private var showsCountries = false
     @State private var code = ""
     /// The number (E.164) the last code went to; nil while the user types their number.
     /// `DCRM_PHONE=+1…` opens the code step for scripted simulator checks (see `Session.init`). It sends nothing.
@@ -42,12 +45,7 @@ struct SignInView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Sign in with your phone number. We'll text you your Dating CRM code.")
                 .fontDesign(.serif)
-            field("Phone number", text: $phone, prompt: "+1 415 555 0100")
-                .keyboardType(.phonePad)
-                .textContentType(.telephoneNumber)
-            Text("Start with + and your country code.")
-                .font(.footnote)
-                .foregroundStyle(.secondaryText)
+            phoneField
             if let invite = Binding($inviteCode) {
                 field("Invite code", text: invite, prompt: "K7QX-M2PA")
                     .textInputAutocapitalization(.characters)
@@ -56,7 +54,49 @@ struct SignInView: View {
             errorLabel
             Button(isWorking ? "Sending…" : "Send code") { Task { await sendCode() } }
                 .buttonStyle(.primaryCapsule)
-                .disabled(phone.count < 2 || inviteCode == "" || isWorking)
+                .disabled(national.isEmpty || inviteCode == "" || isWorking)
+        }
+        .sheet(isPresented: $showsCountries) { CountryPicker(region: $region) }
+        .onChange(of: region) { national = PhoneNumber.formatted(national, region: region) }
+    }
+
+    /// The country's flag and dialing code, which opens the country list, then the number on its own. A pasted or
+    /// autofilled "+44 7700 900123" picks the country itself.
+    private var phoneField: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Phone number")
+                .font(.subheadline.weight(.semibold))
+                .accessibilityHidden(true)
+            AdaptiveStack(spacing: 8) {
+                Button { showsCountries = true } label: {
+                    Text("\(PhoneNumber.flag(region)) +\(PhoneNumber.codes[region] ?? "")")
+                        .font(.title3)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 52)
+                        .background(Color(uiColor: .secondarySystemBackground), in: .rect(cornerRadius: 12))
+                }
+                .accessibilityLabel("Country: \(PhoneNumber.name(region)), plus \(PhoneNumber.codes[region] ?? "")")
+                .accessibilityHint("Opens the list of countries")
+                TextField("Phone number", text: $national, prompt: Text(region == "US" || region == "CA"
+                    ? "415 555 0100" : "Number").foregroundStyle(.secondaryText))
+                    .font(.title3)
+                    .keyboardType(.phonePad)
+                    .textContentType(.telephoneNumber)
+                    .padding(.horizontal, 16)
+                    .frame(minHeight: 52)
+                    .background(Color(uiColor: .secondarySystemBackground), in: .rect(cornerRadius: 12))
+                    .onChange(of: national) { _, typed in
+                        if let full = PhoneNumber.split(typed, near: region) {
+                            region = full.region
+                            national = PhoneNumber.formatted(full.national, region: full.region)
+                        } else {
+                            let shown = PhoneNumber.formatted(typed, region: region)
+                            if shown != typed { national = shown }
+                        }
+                    }
+            }
         }
     }
 
@@ -75,8 +115,7 @@ struct SignInView: View {
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 let wait = Int(codeSentAt.addingTimeInterval(resendWait).timeIntervalSince(context.date).rounded(.up))
                 Button(wait > 0 ? "Send a new code in \(wait) s" : "Send a new code") {
-                    phone = number
-                    Task { await sendCode() }
+                    Task { await sendCode(to: number) }
                 }
                 .buttonStyle(.secondaryCapsule)
                 .disabled(wait > 0 || isWorking)
@@ -114,9 +153,10 @@ struct SignInView: View {
         }
     }
 
-    private func sendCode() async {
-        guard let number = Session.e164(phone) else {
-            error = "Enter your number with its country code, such as +1 415 555 0100."
+    /// Sends a code to `number` (E.164), or to the number typed when nil.
+    private func sendCode(to number: String? = nil) async {
+        guard let number = number ?? Session.e164(PhoneNumber.e164(region: region, national: national)) else {
+            error = "Check the number and its country: it looks too short or too long."
             return
         }
         isWorking = true
@@ -132,7 +172,7 @@ struct SignInView: View {
                 403: inviteCode == nil
                     ? "No account has this number yet. Enter your invite code to create one."
                     : "That invite code is not valid or was already used. Check it, or ask for a new one.",
-                422: "Enter your number with its country code, such as +1 415 555 0100.",
+                422: "Check the number and its country: it looks too short or too long.",
                 429: "Too many codes were sent to this number. Try again in an hour.",
             ])
             if (error as? APIError)?.status == 403 { inviteCode = inviteCode ?? "" }
