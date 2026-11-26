@@ -25,6 +25,9 @@ struct DashboardView: View {
                             PointMark(x: .value("Week", week.week, unit: .weekOfYear), y: .value("Good dates per hour", week.goodDatesPerHour ?? 0))
                         }
                         .foregroundStyle(Color.primary)
+                        // The default axis labels are the system grey, under 4.5:1.
+                        .chartXAxis { AxisMarks { _ in AxisGridLine(); AxisValueLabel().foregroundStyle(.secondaryText) } }
+                        .chartYAxis { AxisMarks { _ in AxisGridLine(); AxisValueLabel().foregroundStyle(.secondaryText) } }
                         .frame(height: 200)
                         .accessibilityLabel("Good dates per hour by week")
                     } header: {

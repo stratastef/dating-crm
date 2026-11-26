@@ -47,6 +47,7 @@ struct YouView: View {
         .task { dashboard = try? await client.dashboard() }
         .navigationDestination(item: $opened) { screen in
             switch screen {
+            case "dashboard": DashboardView(client: client)
             case "voice": VoiceView(client: client)
             case "preferences": PreferencesView(client: client)
             case "connected-apps": ConnectedAppsView(client: client)
