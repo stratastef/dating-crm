@@ -19,7 +19,7 @@ struct SessionTests {
 
     @Test func signsInWithAPhoneNumberAndSignInCodeAndKeepsTheSessionForTheShareExtension() async throws {
         server.respond("", status: 204)
-        server.respond(#"{"token": "device-token"}"#)
+        server.respond(#"{"token": "device-token", "new_account": false}"#)
         let session = session()
 
         try await session.requestCode(phone: "+15555550100")
@@ -27,6 +27,7 @@ struct SessionTests {
         try await session.signIn(phone: "+15555550100", code: "123456")
 
         #expect(server.requests.map { $0.url?.path() } == ["/sign-in/code", "/sign-in"])
+        #expect(!session.isNewAccount)
         #expect(session.client?.baseURL.absoluteString == "https://crm.test")
         #expect(session.client?.token == "device-token")
         // The share extension makes its own `Session()` and finds the same server and token.
@@ -36,6 +37,21 @@ struct SessionTests {
 
         server.respond("", status: 204)
         await shareExtension.signOut()
+    }
+
+    @Test func knowsWhenTheSignInCreatedTheAccountSoSetupCanStart() async throws {
+        server.respond("", status: 204)
+        server.respond(#"{"token": "device-token", "new_account": true}"#)
+        let session = session()
+
+        try await session.requestCode(phone: "+15555550100", inviteCode: "K7QX-M2PA")
+        try await session.signIn(phone: "+15555550100", code: "123456")
+
+        #expect(session.isNewAccount)
+        #expect(session.client?.token == "device-token")
+
+        server.respond("", status: 204)
+        await session.signOut()
     }
 
     @Test func staysSignedOutWhenTheSignInCodeIsWrong() async {

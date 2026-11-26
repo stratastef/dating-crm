@@ -20,17 +20,18 @@ struct APIClient {
 
     // Sign-in. The first two need no token: call them on a client whose token is "".
 
-    /// Texts a sign-in code to the phone number (E.164). `403` means no account has the number: an invite code
-    /// is needed. `429` means too many codes were asked for.
-    func requestSignInCode(phone: String) async throws {
-        try await data("POST", "sign-in/code", body: Self.encoder.encode(["phone": phone]))
+    /// Texts a sign-in code to the phone number (E.164). `403` means no account has the number, and the invite code
+    /// was missing, unknown or used. `429` means too many codes were asked for.
+    func requestSignInCode(phone: String, inviteCode: String? = nil) async throws {
+        var body = ["phone": phone]
+        body["invite_code"] = inviteCode
+        try await data("POST", "sign-in/code", body: Self.encoder.encode(body))
     }
 
     /// Trades the phone number and sign-in code for an API token for this device. `401` means a wrong code,
-    /// `410` an expired one, `429` too many tries.
-    func signIn(phone: String, code: String) async throws -> String {
-        let signedIn: SignedIn = try await send("POST", "sign-in", body: Self.encoder.encode(["phone": phone, "code": code]))
-        return signedIn.token
+    /// `410` an expired one, `429` too many tries, `403` an invite code that created another account meanwhile.
+    func signIn(phone: String, code: String) async throws -> SignedIn {
+        try await send("POST", "sign-in", body: Self.encoder.encode(["phone": phone, "code": code]))
     }
 
     /// Revokes this device's token. The server stops sending this phone the user's pushes.
@@ -389,8 +390,10 @@ struct APIClient {
     }()
 }
 
-private struct SignedIn: Decodable {
+struct SignedIn: Decodable {
     let token: String
+    /// True when this sign-in created the account (with an invite code).
+    let newAccount: Bool
 }
 
 private struct SwipeDecided: Decodable {
