@@ -8,7 +8,7 @@ The signed-in app is `MainTabView` (`ios/DatingCRM/Screens/MainTabView.swift`): 
 | Review | `QueueView` |
 | Pipeline | `BoardView`, still under the seven stages. A tapped push switches to this tab and opens the card. Search (minimized to a toolbar button) filters the loaded cards by name; the plus button opens `NewCardSheet` to add a card by hand. |
 | Swipe | `SwipeView` |
-| You | `YouView`: Dashboard, Autopilot (`AutopilotView`), Preferences, Profile (Photos, Voice), Account (Settings, Sign out, which asks first) |
+| You | `YouView`: Dashboard, Autopilot (`AutopilotView`), Preferences, Connected apps (`ConnectedAppsView`), Profile (Photos, Voice), Account (Settings, Sign out, which asks first) |
 
 ## Look (ADR 0009, `docs/design/mockups/a3-combined.html`)
 
@@ -42,13 +42,17 @@ Type: SF Pro text styles. New York (`.fontDesign(.serif)`) only for explanations
 
 Every `Card` carries its card summary (see "Cards and messages"): `stageChangedAt`, `stalled`, `lastMessage` (`LastMessage`: sender, body, sent time), `hot`, `pendingDraft`, `leadPhotoUrl`. A row reads only these, never `/queue`. `BoardView.CardRow` is the A3 row: `Avatar` with the lead photo, the name with `TimeAgoText(date: card.lastActivity)` at the trailing edge (the last message, or the last stage change), "Chatting · Tinder", then the Hot, Stalled and Overdue badges. Name and time, and caption and badges, are each an `AdaptiveStack`, so they stack at accessibility sizes.
 
+## Connected apps
+
+`ConnectedAppsView(client:)` lists each dating app from `client.connectedApps()` (`GET /connectors`, see "Sync") with its `ConnectorState`: Connected, broken with its alert and when it came (the alert line in the accent, since it waits on the user), Copilot only, Not connected, or No connector (Hinge, Bumble: the app drafts and the user copies). Connect or Reconnect opens `ConnectAppSheet(client:app:onConnected:)`, which shows `ConnectAppSheet.steps[app]` (Tinder's say a computer is needed) and a secure field for the session token, and calls `client.connect(app:token:)`. Copilot only asks first, then calls `client.chooseCopilotOnly(app:)`. The setup step can push `ConnectedAppsView`; anything that offers Reconnect can present `ConnectAppSheet` alone.
+
 ## API dates
 
 `APIClient` decodes a plain day (`2026-12-01`, local midnight) or a full timestamp (`2026-11-20T10:00:00.123456Z` or with an offset). It encodes plain days only. `Message.sentAt` is the first timestamp the app reads.
 
 ## Simulator checks
 
-Besides the Debug sign-in (`DCRM_SERVER`, `DCRM_TOKEN`) and `DCRM_TAB`, `DCRM_OPEN=voice` or `DCRM_OPEN=preferences` pushes that screen under You on launch: `SIMCTL_CHILD_DCRM_TAB=you SIMCTL_CHILD_DCRM_OPEN=voice xcrun simctl launch …`.
+Besides the Debug sign-in (`DCRM_SERVER`, `DCRM_TOKEN`) and `DCRM_TAB`, `DCRM_OPEN=voice`, `DCRM_OPEN=preferences` or `DCRM_OPEN=connected-apps` pushes that screen under You on launch: `SIMCTL_CHILD_DCRM_TAB=you SIMCTL_CHILD_DCRM_OPEN=voice xcrun simctl launch …`.
 
 ## Limits
 

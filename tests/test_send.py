@@ -200,6 +200,18 @@ def test_send_is_refused_while_the_send_capability_is_off(app, client, draft, ti
     assert status(app, draft) == "pending"
 
 
+def test_marking_an_app_copilot_only_makes_its_drafts_not_sendable(app, client, draft, tinder):
+    client.put("/connectors/tinder/copilot-only")
+
+    refused = client.post(f"/drafts/{draft['id']}/send")
+
+    assert refused.status_code == 409
+    assert "tinder is copilot-only" in refused.json()["detail"]
+    work(app)
+    assert tinder.sent == []
+    assert status(app, draft) == "pending"
+
+
 def test_a_pause_after_the_tap_does_not_stop_the_send(app, client, draft, tinder):
     client.post(f"/drafts/{draft['id']}/send")
     client.post("/autopilot/pause", params={"app": "tinder"})
