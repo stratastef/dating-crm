@@ -262,6 +262,8 @@ struct Inference: Codable, Identifiable, Hashable {
     /// 0 to 1.
     var confidence: Double
     var corrected: String?
+    /// `confidence` as the server words it for the card: Sure, Likely or Guess.
+    var confidenceWord: String
 
     /// What to show and use: the user's correction when there is one.
     var text: String { corrected ?? value }
