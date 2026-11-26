@@ -61,11 +61,40 @@ struct Card: Codable, Identifiable, Hashable {
     /// nil when unknown: the row shows the monogram.
     var leadPhotoUrl: URL?
 
+    // Where the Pipeline lists the card, and why: the server's codes, worded by `pipelineStatus`.
+    /// `waiting_for_you`, `handled_by_autopilot`, `waiting_for_them`, `texting_off_app` or `archived`.
+    var pipelineGroup: String?
+    /// Why the card is Waiting for you, such as `draft_in_review`; nil in the other groups.
+    var reason: String?
+    /// With reason `handover`: the check that hit, such as `logistics`.
+    var handoverTrigger: String?
+    /// When the card is Handled by autopilot: `writing_opener`, `drafting_reply` or `sent_waiting`.
+    var autopilotActivity: String?
+
     /// True when the card is in Dated and has no rating yet: the app then asks for one.
     var needsDateRating: Bool { stage == .dated && dateRating == nil }
 
     /// The row's time: the last message, or the last stage change when there are no messages.
     var lastActivity: Date? { lastMessage?.sentAt ?? stageChangedAt }
+}
+
+/// One Pipeline group from `GET /pipeline`, its cards in the server's order: hot leads, then the latest activity.
+struct PipelineGroup: Codable, Identifiable, Hashable {
+    var group: String
+    var cards: [Card]
+
+    var id: String { group }
+
+    var title: String {
+        switch group {
+        case "waiting_for_you": "Waiting for you"
+        case "handled_by_autopilot": "Handled by autopilot"
+        case "waiting_for_them": "Waiting for them"
+        case "texting_off_app": "Texting off-app"
+        case "archived": "Archived"
+        default: group
+        }
+    }
 }
 
 /// A card's newest message, as its summary carries it. `body` is the first 100 characters.

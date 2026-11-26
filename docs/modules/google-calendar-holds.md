@@ -10,7 +10,7 @@ Do this once per server, at <https://console.cloud.google.com>:
 2. In APIs & Services > Library, enable the **Google Calendar API**.
 3. In APIs & Services > OAuth consent screen, choose user type **External**, and add the scopes `.../auth/calendar.events` and `.../auth/calendar.freebusy`. Add your own Google account under Test users.
 4. Set the publishing status to **In production**. In **Testing**, Google expires the refresh token after 7 days and the calendar disconnects. Your own unverified app shows a warning page on connect; continue through it.
-5. In APIs & Services > Credentials, create an **OAuth client ID** of type **Web application**. Add `https://<your server>/calendar/callback` as an authorized redirect URI (`http://localhost:8000/calendar/callback` for local use).
+5. In APIs & Services > Credentials, create an **OAuth client ID** of type **Web application**. Add `https://<your server>/calendar/callback` as an authorized redirect URI (`http://localhost:8000/calendar/callback` for local use; the simulator reaches the Mac's `localhost`, a phone does not). Nothing in Google names the app: the server sends the browser on to it.
 6. Give the server the three values. Compose passes them to the API and worker:
 
 | Variable | Value |
@@ -23,9 +23,12 @@ Do this once per server, at <https://console.cloud.google.com>:
 
 | Route | Does |
 | --- | --- |
-| `GET /calendar/connect` | Returns `{"url": "..."}`: Google's consent page. Open it in a browser. `503` while a variable above is unset. |
-| `GET /calendar/callback?code=&state=` | Where Google sends the browser. Stores the refresh token and shows one line of text. It takes no API token: `state` names the user and is valid for 10 minutes. |
-| `GET /calendar` | `{"connected": true}` once a refresh token is stored. |
+| `GET /calendar/connect` | Returns `{"url": "..."}`: Google's consent page. The app opens it in a web authentication session. `503` while a variable above is unset. |
+| `GET /calendar/callback?code=&state=` | Where Google sends the browser. Stores the refresh token, then answers `303` to `datingcrm://calendar`, which ends the app's session. It takes no API token: `state` names the user and is valid for 10 minutes; a bad or expired `state` is `400`. |
+| `GET /calendar/callback?error=&state=` | Google's answer when the user refuses (`error=access_denied`). Stores nothing and answers `303` to `datingcrm://calendar?error=access_denied`. |
+| `GET /calendar` | `{"connected": true}` once a refresh token is stored. The app asks this after the session ends: the return address is not proof. |
+
+The callback always returns to the iOS app (`APP_RETURN`), so connecting from a desktop browser stores the token but ends on an address the browser cannot open. The later web app needs its own return address, carried in `state`.
 
 The refresh token is stored in the token vault under the app name `google_calendar`. Never log it. Only the user's primary calendar is used. To disconnect, remove the app's access at <https://myaccount.google.com/permissions>; there is no disconnect route.
 

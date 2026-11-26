@@ -60,6 +60,7 @@ Requirements: Docker, [uv](https://docs.astral.sh/uv/). Python 3.12 is pinned in
 Read the doc for a module before you change it or call it. Review rules live in `CODING_STANDARDS.md`.
 
 - [Cards and messages](docs/modules/cards-and-messages.md)
+- [Pipeline](docs/modules/pipeline.md)
 - [Background jobs](docs/modules/background-jobs.md)
 - [Calling Claude](docs/modules/calling-claude.md)
 - [Voice](docs/modules/voice.md)

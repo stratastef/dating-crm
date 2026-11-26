@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import RedirectResponse
 from sqlalchemy import Connection, text
 from sqlalchemy.exc import IntegrityError
 
@@ -29,6 +29,9 @@ VAULT_APP = "google_calendar"
 SCOPES = "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.freebusy"
 _API = "https://www.googleapis.com/calendar/v3"
 _TOKEN_URL = "https://oauth2.googleapis.com/token"
+# Where the callback sends the browser: the iOS app's web authentication session waits for this scheme.
+# shortcut: every connect returns to the iOS app; carry the return address in `state` when the web app connects too.
+APP_RETURN = "datingcrm://calendar"
 
 Slot = tuple[datetime, datetime]
 
@@ -310,7 +313,7 @@ def status(user: CurrentUser, db: Db) -> dict[str, bool]:
 
 @router.get("/calendar/connect")
 def connect(user: CurrentUser) -> dict[str, str]:
-    """The Google consent page to open in a browser. Google then sends the browser to `/calendar/callback`."""
+    """The Google consent page, for the app to open. Google then sends the browser to `/calendar/callback`."""
     names = ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI")
     # Compose passes an unset variable as an empty string.
     if not all(os.environ.get(name) for name in names):
@@ -329,11 +332,15 @@ def connect(user: CurrentUser) -> dict[str, str]:
     return {"url": "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(query)}
 
 
-@router.get("/calendar/callback", response_class=PlainTextResponse)
-def callback(code: str, state: str, db: Db) -> str:
+@router.get("/calendar/callback")
+def callback(state: str, db: Db, code: str | None = None, error: str | None = None) -> RedirectResponse:
+    """Stores the refresh token, then sends the browser to the app, which asks `GET /calendar` whether it worked."""
     try:
         user_id = int(_state_key().decrypt(state.encode(), ttl=600))
     except InvalidToken:
         raise HTTPException(status_code=400, detail="invalid or expired state: start again from /calendar/connect")
+    if code is None:
+        # Google sends `error` (`access_denied`) instead of a code when the user refuses. Nothing is stored.
+        return RedirectResponse(f"{APP_RETURN}?{urlencode({'error': error or 'no_code'})}", status_code=303)
     vault.store_token(db, user_id, VAULT_APP, google.exchange_code(code))
-    return "Google Calendar is connected. You can close this page."
+    return RedirectResponse(APP_RETURN, status_code=303)
