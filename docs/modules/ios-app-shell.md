@@ -8,7 +8,7 @@ The signed-in app is `MainTabView` (`ios/DatingCRM/Screens/MainTabView.swift`): 
 | Review | `QueueView`. The tab's badge is the review count from Today's last load. |
 | Pipeline | `BoardView`, still under the seven stages. A tapped push switches to this tab and opens the card. Search (minimized to a toolbar button) filters the loaded cards by name; the plus button opens `NewCardSheet` to add a card by hand. |
 | Swipe | `SwipeView` |
-| You | `YouView`: Dashboard, Autopilot (`AutopilotView`), Preferences, Connected apps (`ConnectedAppsView`), Profile (Photos, Voice), Account (Settings, Sign out, which asks first) |
+| You | `YouView`: Dashboard, Autopilot (`AutopilotView`), Preferences, Connected apps (`ConnectedAppsView`), Calendar (`CalendarView`), Profile (Photos, Voice), Account (Settings, Sign out, which asks first) |
 
 ## Look (ADR 0009, `docs/design/mockups/a3-combined.html`)
 
@@ -46,13 +46,17 @@ Every `Card` carries its card summary (see "Cards and messages"): `stageChangedA
 
 `ConnectedAppsView(client:)` lists each dating app from `client.connectedApps()` (`GET /connectors`, see "Sync") with its `ConnectorState`: Connected, broken with its alert and when it came (the alert line in the accent, since it waits on the user), Copilot only, Not connected, or No connector (Hinge, Bumble: the app drafts and the user copies). Connect or Reconnect opens `ConnectAppSheet(client:app:onConnected:)`, which shows `ConnectAppSheet.steps[app]` (Tinder's say a computer is needed) and a secure field for the session token, and calls `client.connect(app:token:)`. Copilot only asks first, then calls `client.chooseCopilotOnly(app:)`. The setup step can push `ConnectedAppsView`; anything that offers Reconnect can present `ConnectAppSheet` alone.
 
+## Calendar
+
+`CalendarView(client:)` shows whether Google Calendar is connected (`client.calendarConnected()`, `GET /calendar`, see "Google Calendar holds") with Connect, or Reconnect once connected. Connect gets Google's consent page from `client.calendarConsentURL()` (`GET /calendar/connect`) and opens it in an ephemeral `ASWebAuthenticationSession` that waits for the `datingcrm` scheme; the server's callback sends it there. The view then asks the server again and shows a toast, or a plain line when it is still not connected: Google refused, the user closed the page, or the server answered `503` (no Google OAuth client set up). The session is UIKit's, not SwiftUI's `webAuthenticationSession`, which failed on the simulator with `presentationContextNotProvided`. The setup step can push `CalendarView` as is.
+
 ## API dates
 
 `APIClient` decodes a plain day (`2026-12-01`, local midnight) or a full timestamp (`2026-11-20T10:00:00.123456Z` or with an offset). It encodes plain days only. `Message.sentAt` is the first timestamp the app reads.
 
 ## Simulator checks
 
-Besides the Debug sign-in (`DCRM_SERVER`, `DCRM_TOKEN`) and `DCRM_TAB`, `DCRM_OPEN=voice`, `DCRM_OPEN=preferences` or `DCRM_OPEN=connected-apps` pushes that screen under You on launch: `SIMCTL_CHILD_DCRM_TAB=you SIMCTL_CHILD_DCRM_OPEN=voice xcrun simctl launch …`.
+Besides the Debug sign-in (`DCRM_SERVER`, `DCRM_TOKEN`) and `DCRM_TAB`, `DCRM_OPEN=voice`, `DCRM_OPEN=preferences`, `DCRM_OPEN=connected-apps` or `DCRM_OPEN=calendar` pushes that screen under You on launch: `SIMCTL_CHILD_DCRM_TAB=you SIMCTL_CHILD_DCRM_OPEN=voice xcrun simctl launch …`.
 
 ## Limits
 

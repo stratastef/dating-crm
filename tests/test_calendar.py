@@ -13,10 +13,18 @@ NINE = SEVEN + timedelta(hours=2)
 ELEVEN = SEVEN + timedelta(hours=4)
 
 
+def consent_state(client) -> str:
+    return parse_qs(urlparse(client.get("/calendar/connect").json()["url"]).query)["state"][0]
+
+
+def callback(app, **params):
+    """Google's redirect to the server, which sends the browser on to the app. Not followed: it leaves for the app."""
+    return TestClient(app).get("/calendar/callback", params=params, follow_redirects=False)
+
+
 def connect(client, app) -> None:
     """Run the OAuth flow as Google's redirect would: the browser returns with a code and the state."""
-    state = parse_qs(urlparse(client.get("/calendar/connect").json()["url"]).query)["state"][0]
-    assert TestClient(app).get("/calendar/callback", params={"code": "the-code", "state": state}).status_code == 200
+    assert callback(app, code="the-code", state=consent_state(client)).headers["location"] == "datingcrm://calendar"
 
 
 @pytest.fixture
@@ -54,9 +62,18 @@ def test_user_connects_google_calendar(client, app, gcal):
 
 
 def test_callback_with_a_forged_state_connects_nobody(client, app, gcal):
-    response = TestClient(app).get("/calendar/callback", params={"code": "the-code", "state": "forged"})
+    response = callback(app, code="the-code", state="forged")
 
     assert response.status_code == 400
+    assert gcal.codes == []
+    assert client.get("/calendar").json() == {"connected": False}
+
+
+def test_refused_consent_leaves_the_calendar_not_connected(client, app, gcal):
+    # Google sends `error` instead of a code when the user refuses or backs out of its consent page.
+    response = callback(app, error="access_denied", state=consent_state(client))
+
+    assert response.headers["location"] == "datingcrm://calendar?error=access_denied"
     assert gcal.codes == []
     assert client.get("/calendar").json() == {"connected": False}
 
