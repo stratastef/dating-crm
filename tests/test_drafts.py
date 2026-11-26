@@ -26,6 +26,7 @@ def test_a_card_with_no_messages_gets_an_opener_written_from_the_style_profile(a
         "edited": None,
         "guardrail": [],
         "hot_lead": False,
+        "sendable": False,  # Hinge has no connector
     }
     prompt = llm.prompts[-1]
     assert "opener" in prompt

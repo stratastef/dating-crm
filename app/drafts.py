@@ -1,5 +1,7 @@
 """Copilot drafts: an opener or reply Claude writes for a card in the user's voice, and the user's edit of it."""
 
+from collections.abc import Sequence
+
 import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -21,12 +23,39 @@ class Draft(BaseModel):
     id: int
     card_id: int
     kind: str  # `opener` when the card had no messages, else `reply`
-    status: str  # `pending`, then `dismissed`, or `approved`, `sending` and `sent` or `failed`: see `app/send.py`
+    # `pending`, then `dismissed`; or sent through the app: `approved` (queued), `sending`, then `sent` or `failed`
+    # (see `app/send.py`); or `copied`, then `sent` once the user's message appears in the chat, or `dismissed`.
+    status: str
     original: str  # what Claude wrote; never changes
     edited: str | None  # the user's version; null until they edit
     # The guardrail checks the text to send hit (see `app/jev.py`); empty means safe, null means not checked.
     guardrail: list[str] | None
     hot_lead: bool  # hot-lead triage: this draft deserves a live push
+    # The app can send it now: its card is linked to a match on an app whose connector works and is not
+    # copilot-only. Otherwise the user copies it. The guardrail is not part of it.
+    sendable: bool
+
+
+def present(db: Connection, user_id: int, rows: Sequence[Row]) -> list[Draft]:
+    """Draft rows selected with `_COLUMNS`, as the API returns them: each says whether the app can send it now."""
+    from app.send import refusal  # imported here: app.send imports this module
+
+    drafts = [dict(row._mapping) for row in rows]
+    cards = {
+        card.id: card
+        for card in db.execute(
+            text("SELECT id, app, external_id FROM cards WHERE user_id = :user_id AND id = ANY(:ids)"),
+            {"user_id": user_id, "ids": [draft["card_id"] for draft in drafts]},
+        )
+    }
+    can_send: dict[tuple[str, bool], bool] = {}  # (app, card linked to a match): the same for every card of the key
+    for draft in drafts:
+        card = cards[draft["card_id"]]
+        key = (card.app, card.external_id is not None)
+        if key not in can_send:
+            can_send[key] = refusal(db, user_id, card.app, card.external_id) is None
+        draft["sendable"] = can_send[key]
+    return [Draft.model_validate(draft) for draft in drafts]
 
 
 class Edit(BaseModel):
@@ -54,7 +83,7 @@ def write_draft(card_id: int, user: CurrentUser, db: Db):
     except CannotDraft as error:
         raise HTTPException(status_code=error.status, detail=str(error))
     notify_if_hot(db, user.id, card_id, name)
-    return draft
+    return present(db, user.id, [draft])[0]
 
 
 class CannotDraft(Exception):
@@ -195,4 +224,4 @@ def edit_draft(draft_id: int, edit: Edit, user: CurrentUser, db: Db):
         },
     ).one()
     queue_profile(db, user.id)  # feedback loop: the edit shows what the style profile got wrong
-    return draft
+    return present(db, user.id, [draft])[0]

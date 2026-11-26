@@ -24,7 +24,6 @@ router = APIRouter()
 Group = Literal["waiting_for_you", "handled_by_autopilot", "waiting_for_them", "texting_off_app", "archived"]
 
 # Why a card is Waiting for you, in precedence order: the first that applies is the card's `reason`.
-# `copied_draft` takes its slot after `draft_in_review` when copied drafts exist (#56); `_reason()` marks the spot.
 Reason = Literal[
     "handover", "draft_in_review", "copied_draft", "failed_send", "stalled", "overdue", "rate_date",
     "your_turn", "opener_due",
@@ -41,12 +40,16 @@ def place(db: Connection, user_id: int, cards: list[dict]) -> None:
     `cards` are rows selected with `_COLUMNS` of `app/cards.py`, with `last_message` and `pending_draft` added.
     """
     params = {"user_id": user_id, "ids": [card["id"] for card in cards]}
-    failed = set(
-        db.execute(
-            text("SELECT card_id FROM drafts WHERE user_id = :user_id AND card_id = ANY(:ids) AND status = 'failed'"),
-            params,
-        ).scalars()
-    )
+    # The statuses of the card's drafts that wait for the user besides a pending one.
+    drafts: dict[int, set[str]] = {}
+    for card_id, status in db.execute(
+        text(
+            "SELECT card_id, status FROM drafts"
+            " WHERE user_id = :user_id AND card_id = ANY(:ids) AND status IN ('copied', 'failed')"
+        ),
+        params,
+    ):
+        drafts.setdefault(card_id, set()).add(status)
     # A job that is running is still `queued` until it ends (see `app/jobs.py`).
     replying = set(
         db.execute(
@@ -90,7 +93,7 @@ def place(db: Connection, user_id: int, cards: list[dict]) -> None:
             # and that job queued is Handled by autopilot with activity `writing_opener`.
             handled = acting[key] and bool(last) and (last["sender"] == "me" or card["id"] in replying)
 
-        reason = None if card["stage"] == "archived" else _reason(card, card["id"] in failed, today, handled)
+        reason = None if card["stage"] == "archived" else _reason(card, drafts.get(card["id"], set()), today, handled)
         card["reason"] = reason
         card["handover_trigger"] = triggers.get(card["id"]) if reason == "handover" else None
         card["autopilot_activity"] = None
@@ -107,15 +110,16 @@ def place(db: Connection, user_id: int, cards: list[dict]) -> None:
             card["pipeline_group"] = "waiting_for_them"
 
 
-def _reason(card: dict, failed: bool, today: date, handled: bool) -> Reason | None:
+def _reason(card: dict, drafts: set[str], today: date, handled: bool) -> Reason | None:
     """Why the card waits for the user, or None. The order of the checks is the precedence of `Reason`."""
     last = card["last_message"]
     if card["handover"] == "pending":
         return "handover"
     if card["pending_draft"]:
         return "draft_in_review"
-    # `copied_draft` goes here (#56): a copied draft whose message has not appeared in the chat yet.
-    if failed:
+    if "copied" in drafts:  # its message has not appeared in the chat yet
+        return "copied_draft"
+    if "failed" in drafts:
         return "failed_send"
     if card["stalled"]:
         return "stalled"

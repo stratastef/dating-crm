@@ -73,12 +73,12 @@ def chat_reply(db: Connection, user_id: int, payload: dict) -> None:
     under_way = db.execute(
         text(
             "SELECT EXISTS (SELECT 1 FROM drafts WHERE card_id = :card_id AND user_id = :user_id"
-            " AND status IN ('pending', 'approved', 'sending'))"
+            " AND status IN ('pending', 'copied', 'approved', 'sending'))"
         ),
         {"card_id": card_id, "user_id": user_id},
     ).scalar_one()
     if under_way:
-        return  # a draft waits for the user or is being sent: a second reply would cross it
+        return  # a draft waits for the user, waits to be pasted or is being sent: a second reply would cross it
 
     level = autonomy_levels(db, user_id)["chat"]
     # Every message the user has not answered counts, not only the newest: "when are you free?" then "??".

@@ -34,7 +34,7 @@ struct APIClientTests {
           "stage_changed_at": "2026-11-19T09:00:00Z", "stalled": true, "hot": true,
           "last_message": {"sender": "them", "body": "saturday?", "sent_at": "2026-11-20T10:00:00Z"},
           "pending_draft": {"id": 5, "card_id": 1, "kind": "reply", "status": "pending", "original": "yes!", "edited": null,
-                            "guardrail": [], "hot_lead": true},
+                            "guardrail": [], "hot_lead": true, "sendable": true},
           "lead_photo_url": "https://photos.test/ada.jpg"},
          {"id": 2, "app": "hinge", "name": "Bea", "stage": "matched", "notes": "",
           "stage_changed_at": "2026-11-19T09:00:00Z", "stalled": false, "hot": false,
@@ -45,7 +45,7 @@ struct APIClientTests {
 
         #expect(cards[0].stalled && cards[0].hot)
         #expect(cards[0].lastMessage == LastMessage(sender: .them, body: "saturday?", sentAt: Date(timeIntervalSince1970: 1_795_168_800)))
-        #expect(cards[0].pendingDraft == Draft(id: 5, kind: .reply, original: "yes!", edited: nil))
+        #expect(cards[0].pendingDraft == Draft(id: 5, kind: .reply, original: "yes!", edited: nil, guardrail: [], sendable: true))
         #expect(cards[0].leadPhotoUrl == URL(string: "https://photos.test/ada.jpg"))
         #expect(!cards[1].stalled && !cards[1].hot)
         #expect(cards[1].lastMessage == nil && cards[1].pendingDraft == nil && cards[1].leadPhotoUrl == nil)
@@ -164,13 +164,13 @@ struct APIClientTests {
 
     @Test func asksForADraftOnACard() async throws {
         server.respond(
-            #"{"id": 5, "card_id": 1, "kind": "opener", "status": "pending", "original": "is biscuit accepting visitors", "edited": null}"#,
+            #"{"id": 5, "card_id": 1, "kind": "opener", "status": "pending", "original": "is biscuit accepting visitors", "edited": null, "sendable": true}"#,
             status: 201
         )
 
         let draft = try await server.client().writeDraft(cardID: 1)
 
-        #expect(draft == Draft(id: 5, kind: .opener, original: "is biscuit accepting visitors", edited: nil))
+        #expect(draft == Draft(id: 5, kind: .opener, original: "is biscuit accepting visitors", edited: nil, sendable: true))
         #expect(draft.text == "is biscuit accepting visitors")
         let request = try #require(server.requests.first)
         #expect(request.httpMethod == "POST")
@@ -179,7 +179,7 @@ struct APIClientTests {
 
     @Test func savesTheUsersEditOfADraft() async throws {
         server.respond(
-            #"{"id": 5, "card_id": 1, "kind": "reply", "status": "pending", "original": "both. badly.", "edited": "both, badly"}"#
+            #"{"id": 5, "card_id": 1, "kind": "reply", "status": "pending", "original": "both. badly.", "edited": "both, badly", "sendable": false}"#
         )
 
         let draft = try await server.client().saveEdit(draftID: 5, text: "both, badly")

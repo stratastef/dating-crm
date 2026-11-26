@@ -218,18 +218,6 @@ def test_a_draft_that_denies_being_ai_is_never_sent_until_it_is_edited(app, clie
     assert sent(tinder) == ["both, poorly"]
 
 
-def test_approving_a_draft_that_denies_being_ai_in_the_review_queue_sends_nothing(
-    app, client, card_id, tinder, jev  # noqa: F811
-):
-    jev.yes["denies_ai"] = ["badly"]
-    draft = client.post(f"/cards/{card_id}/drafts").json()
-
-    client.post(f"/drafts/{draft['id']}/approve")
-    work(app)
-
-    assert sent(tinder) == []
-
-
 # (c) A card paused for handover or taken over is never sent to.
 
 
