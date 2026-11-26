@@ -31,6 +31,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/feedback.py` | Feedback loop: `swipe_lines()` for the swipe pre-screen prompt, and `GET /feedback/export` |
 | `app/settings.py` | User settings: `GET` and `PATCH /settings`, `user_zone()` |
 | `app/today.py` | Today: `GET /today`, the review summary and what the user has to do by time |
+| `app/status.py` | The status strip: `GET /status`, what stops autopilot now, in the order the phone shows it |
 | `app/tenancy.py` | `user_id_column()` for tenant tables |
 | `app/vault.py` | `store_token()`, `read_token()`, `delete_token()` for encrypted dating-app session tokens |
 | `app/audit.py` | `record_action()` and `GET /audit-log` |
@@ -90,6 +91,7 @@ Read the doc for a module before you change it or call it. Review rules live in 
 - [iOS app shell and shared components](docs/modules/ios-app-shell.md)
 - [Sign-in](docs/modules/sign-in.md)
 - [Today](docs/modules/today.md)
+- [Status strip](docs/modules/status-strip.md)
 
 ## Run the stack
 

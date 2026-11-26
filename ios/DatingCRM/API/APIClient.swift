@@ -242,6 +242,11 @@ struct APIClient {
         try await send("PUT", "photos/\(photoID)/edit", body: Self.encoder.encode(["accept": accept]))
     }
 
+    /// What stops autopilot now, for the status strip: pauses, the AI budget, broken connectors. Empty when nothing does.
+    func status() async throws -> [StatusMessage] {
+        try await send("GET", "status")
+    }
+
     // Settings. Each call returns the state the server now holds.
 
     /// What is paused.

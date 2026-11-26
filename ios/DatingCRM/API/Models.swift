@@ -374,6 +374,22 @@ struct ConnectorAlert: Codable, Equatable {
     let createdAt: Date
 }
 
+/// One message of the status strip: something that stops autopilot now. The server sends them in the strip's
+/// order; the app holds the copy for each `kind`.
+struct StatusMessage: Codable, Equatable {
+    enum Kind: String, Codable {
+        case paused
+        case budgetReached = "budget_reached"
+        case connectorAlert = "connector_alert"
+    }
+
+    let kind: Kind
+    /// `paused`: the paused app, nil for all apps. `connectorAlert`: the app whose connector stopped.
+    let app: String?
+    /// `budgetReached`: when the next month's budget starts.
+    let resetsAt: Date?
+}
+
 /// How many profiles swipe autopilot may swipe on, per app: per run of the job (1 to 10) and per day (1 to 100).
 struct SwipeLimits: Codable, Equatable {
     var swipesPerRun: Int

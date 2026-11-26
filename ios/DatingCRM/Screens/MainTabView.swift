@@ -32,6 +32,7 @@ struct MainTabView: View {
                 NavigationStack { YouView(client: client, signOut: signOut) }
             }
         }
+        .modifier(StatusStrip(client: client, tab: selection))
         // Black and white: buttons, links and the selected tab never take the accent.
         .tint(.primary)
         .listStyle(.plain)
