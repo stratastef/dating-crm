@@ -22,6 +22,6 @@ For an implementer started by `/implement-spec` or `/implement`, and for whoever
 - **Before iOS tickets**, allow the iOS simulator tool for the session, so implementers can tap what they build.
 - **Merge with** `scripts/merge-ticket <branch>`: it re-points the migration, runs the tests and removes the worktree.
 - **After each iOS merge**, run `scripts/ios-test` on the integration branch.
-- **After each push**, `gh pr checks` is green before the next merge and before the PR is marked ready. CI builds iOS with an older Xcode than yours.
+- **After each push**, `gh pr checks` is green before the next merge and before the PR is marked ready. CI runs on pull requests and `main` only; the iOS job runs on the owner's Mac when `ios/` changed, and waits while that Mac sleeps.
 - **Owner decisions** from a report go to the owner when that ticket merges.
 - **Before review**, run `docker compose up --build --wait` once. Unit tests never start the built image.

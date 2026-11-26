@@ -1,6 +1,6 @@
 # Dating CRM for iOS
 
-The SwiftUI client for the API in the repo root. It builds with Xcode 27 locally and Xcode 26.6 in CI (pinned in `.github/workflows/ci.yml`), for an iOS 26 or later simulator or device. Code must build on both: Xcode 26.6 rejects some code Xcode 27 accepts, so a green local run is not a green `ios` job.
+The SwiftUI client for the API in the repo root. It builds with Xcode 27, for an iOS 26 or later simulator or device. Xcode 26.6 is the oldest toolchain it supports, and it rejects some code Xcode 27 accepts: the `ios` CI job builds with it when the runner has it installed (see "CI runner").
 
 ## Layout
 
@@ -41,6 +41,16 @@ xcodebuild test  -project ios/DatingCRM.xcodeproj -scheme DatingCRM -destination
 `xcrun simctl list devices available` lists the simulator names you can use. The tests need no server.
 
 To run on your own iPhone, open the project in Xcode, pick your team under Signing & Capabilities and change the bundle identifier `com.datingcrm.app` to one you own.
+
+## CI runner
+
+`.github/workflows/ios.yml` runs `scripts/ios-test` on a self-hosted runner, `mac-ios`, on the owner's Mac: GitHub's own macOS runners count ten minutes for each one and used up the free Actions allowance. It runs only on pull requests and pushes to `main` that change `ios/`, `scripts/ios-test` or the workflow.
+
+- The runner lives in `~/actions-runner` and starts with the login session (a launch agent). The Mac must be awake for iOS checks to run; a check waits until then.
+- It runs with the owner's user rights. Only code pushed to this private repo reaches it.
+- With `/Applications/Xcode_26.6.app` installed, the job builds with it; without, it builds with the default Xcode and the job says so in a warning.
+- Offline after a restart: `launchctl kickstart -k gui/$(id -u)/actions.runner.stratastef-dating-crm.mac-ios`. Status: `gh api repos/stratastef/dating-crm/actions/runners`.
+- Remove it: `cd ~/actions-runner && ./svc.sh uninstall && ./config.sh remove --token "$(gh api -X POST repos/stratastef/dating-crm/actions/runners/remove-token --jq .token)"`.
 
 ## Sign in
 

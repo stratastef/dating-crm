@@ -178,5 +178,5 @@ Commit `uv.lock`.
 
 ## CI
 
-`.github/workflows/ci.yml` runs four jobs on every push and pull request: `test` (`uv run pytest` against Postgres), `lint` (`uv run ruff check .` and `uv run pyright`), `stack` (builds the images, starts Compose and calls `/health`) and `ios` (`xcodebuild test` on Xcode 26.6, older than a local Xcode 27; see `ios/README.md`). Run the first two locally before you report a ticket done.
+`.github/workflows/ci.yml` runs three jobs on each pull request and each push to `main` (a branch push alone runs nothing): `test` (`uv run pytest` against Postgres), `lint` (`uv run ruff check .` and `uv run pyright`) and `stack` (builds the images, starts Compose and calls `/health`). `.github/workflows/ios.yml` runs `scripts/ios-test` only when `ios/` changed, on the owner's Mac (see `ios/README.md`, "CI runner"). Run the first two locally before you report a ticket done.
 A push to `main` that passes `test`, `lint` and `stack` also runs `deploy`, which ships the API to the VPS. See [docs/deploy.md](docs/deploy.md).
