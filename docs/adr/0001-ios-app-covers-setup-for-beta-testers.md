@@ -1,0 +1,3 @@
+# The iOS app covers setup end to end, for the owner and TestFlight testers
+
+The public product is a web app, and the iOS app is the owner's personal tool plus a small TestFlight beta. We still design the iOS app so a tester can get from install to a working pipeline on the phone alone: connecting a dating app, the calendar, the voice questionnaire and the rest of setup all get phone screens. Testers have no server access or CLI, and the v1 app dead-ends without them. The owner's daily routine still decides every layout; setup screens may stay plain. The later web app gets its own design and shares only the vocabulary in `GLOSSARY.md`.

@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en" data-theme="light" data-accent="indigo">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redesign A3 combined</title>
+<style>
+@property --p { syntax: '<number>'; inherits: false; initial-value: 1; }
+:root{
+  --bg:#FFFFFF; --bg2:#F5F5F7; --fill:#EDEDF0; --text:#0B0B0F; --text2:#3C3C43; --text3:#6C6C70; --line:rgba(60,60,67,.18);
+  --glass:rgba(255,255,255,.58); --edge:rgba(255,255,255,.75); --edge2:rgba(0,0,0,.10); --pri:#000; --onpri:#fff;
+  --acc:#4F46E5; --acc-soft:#EEF0FF; --acc-on:#fff;
+  --page:#E9E9EC; --pagetext:#1C1C1E; --pagetext2:#55555A;
+}
+[data-accent="rose"]{--acc:#BE185D;--acc-soft:#FCE7F1}
+[data-accent="amber"]{--acc:#B45309;--acc-soft:#FEF3E2}
+[data-theme="dark"]{
+  --bg:#000; --bg2:#111113; --fill:#2C2C2E; --text:#F5F5F7; --text2:#D1D1D6; --text3:#98989F; --line:rgba(235,235,245,.16);
+  --glass:rgba(40,40,44,.55); --edge:rgba(255,255,255,.18); --edge2:rgba(0,0,0,.5); --pri:#F5F5F7; --onpri:#000;
+  --acc:#A5B4FC; --acc-soft:#1E1B4B; --acc-on:#0B0B0F; --page:#1C1C1E; --pagetext:#F5F5F7; --pagetext2:#A1A1A6;
+}
+[data-theme="dark"][data-accent="rose"]{--acc:#F9A8D4;--acc-soft:#3B0A22}
+[data-theme="dark"][data-accent="amber"]{--acc:#FCD34D;--acc-soft:#3A2405}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--page);color:var(--pagetext);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+::selection{background:var(--acc);color:var(--acc-on)}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.page{max-width:1180px;margin:0 auto;padding:28px 20px 60px}
+.top{display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between;margin-bottom:8px}
+.top h1{font-size:24px;margin:0;font-weight:600}
+.seg{display:inline-flex;background:var(--fill);border-radius:10px;padding:2px}
+.seg button{padding:6px 12px;border-radius:8px;font-size:14px}
+.seg button[aria-pressed="true"]{background:var(--bg);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.12)}
+section{margin-top:36px}
+section h2{font-size:19px;font-weight:600;margin:0 0 4px}
+section p.lead{font-size:15px;color:var(--pagetext2);margin:0 0 16px;max-width:70ch;line-height:1.5}
+.row{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}
+.cap{font-size:13px;color:var(--pagetext2);text-align:center;margin-top:8px;max-width:330px}
+
+/* phone */
+.phone{width:330px;height:700px;border-radius:48px;border:7px solid #111;background:var(--bg);color:var(--text);position:relative;overflow:hidden;box-shadow:0 20px 40px rgba(0,0,0,.18)}
+.scroll{position:absolute;inset:0;overflow-y:auto;padding:54px 0 120px;scrollbar-width:none}
+.scroll::-webkit-scrollbar{display:none}
+.status{position:absolute;top:0;left:0;right:0;height:50px;display:flex;justify-content:space-between;align-items:center;padding:6px 30px 0;font-size:15px;font-weight:600;z-index:5;background:linear-gradient(var(--bg) 55%,transparent)}
+#amb .status{background:none}
+.big{font-size:34px;font-weight:700;letter-spacing:-.02em;padding:6px 20px 10px}
+.serif{font-family:"New York",ui-serif,Georgia,serif}
+
+/* glass */
+.glass{background:var(--glass);-webkit-backdrop-filter:blur(22px) saturate(180%);backdrop-filter:blur(22px) saturate(180%);border:.5px solid var(--edge2);box-shadow:0 8px 24px rgba(0,0,0,.14),inset 0 1px 0 var(--edge)}
+.tabbar{position:absolute;left:14px;right:14px;bottom:16px;height:62px;border-radius:31px;display:flex;justify-content:space-around;align-items:center;z-index:6}
+.tabbar span{display:flex;flex-direction:column;align-items:center;font-size:11px;color:var(--text3);position:relative;min-width:44px}
+.tabbar i{font-size:23px}
+.tabbar .on{color:var(--text);font-weight:600}
+.tabbar b{position:absolute;top:-4px;right:2px;background:var(--acc);color:var(--acc-on);font-size:11px;border-radius:9px;padding:0 6px;font-weight:600}
+.strip{position:absolute;left:24px;right:24px;bottom:88px;height:42px;border-radius:21px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;font-size:14px;z-index:6}
+.strip strong{font-weight:600}
+.sticky{position:sticky;top:-54px;z-index:3;padding:58px 20px 8px;margin-top:-54px;font-size:15px;font-weight:600;display:flex;justify-content:space-between;align-items:baseline;transition:background .2s}
+.sticky.hd{padding-top:8px;margin-top:0;top:44px;border-radius:0}
+.sech{position:sticky;top:44px;z-index:3;margin:8px 10px 0;padding:7px 12px;border-radius:14px;font-size:15px;font-weight:600;display:flex;justify-content:space-between}
+.sech.plain{background:transparent;border-color:transparent;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none}
+.sech .n{color:var(--text3);font-weight:500}
+.acc{color:var(--acc)}
+
+/* rows */
+.r{display:flex;gap:14px;align-items:center;padding:11px 20px;position:relative}
+.r::after{content:"";position:absolute;left:82px;right:0;bottom:0;border-bottom:.5px solid var(--line)}
+.r:last-child::after{display:none}
+.face{width:48px;height:48px;border-radius:50%;flex:none;position:relative;overflow:hidden}
+.ic{width:1.05em;height:1.05em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-.17em;flex:none}
+.tabbar .ic{width:24px;height:24px;margin-bottom:2px}
+.nm{font-size:17px;font-weight:600;line-height:1.2}
+.ln{font-size:15px;color:var(--text2);margin-top:2px;line-height:1.3}
+.mt{font-size:13px;color:var(--text3);margin-top:2px}
+.tm{font-size:14px;color:var(--text3);margin-left:auto;align-self:flex-start;padding-top:2px;white-space:nowrap}
+.ai{display:inline-flex;gap:4px;align-items:center;font-size:13px;font-weight:600;color:var(--text2)}
+.pill{display:inline-flex;align-items:center;gap:3px;font-size:13px;font-weight:600;color:var(--acc)}
+.btn{height:44px;border-radius:22px;padding:0 16px;white-space:nowrap;font-size:16px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.btn.pri{background:var(--pri);color:var(--onpri)}
+.btn.sec{background:var(--fill);color:var(--text)}
+.btns{display:flex;gap:8px}
+.btns .btn{flex:1}
+.tile{margin:0 20px 6px;padding:14px 16px;border-radius:20px;background:var(--acc-soft);display:flex;align-items:center;gap:14px}
+.tile .num{font-size:40px;font-weight:700;line-height:1;color:var(--acc);font-variant-numeric:tabular-nums}
+.item{padding:14px 20px 16px;border-bottom:.5px solid var(--line)}
+.quote{font-size:15px;color:var(--text2);margin:10px 0}
+.draft{background:var(--bg2);border-radius:18px;padding:11px 14px;margin-bottom:12px}
+.draft p{margin:4px 0 0;font-size:16px;line-height:1.35}
+.bubble{max-width:78%;padding:9px 13px;border-radius:20px;font-size:16px;line-height:1.3}
+.in{background:var(--fill);align-self:flex-start}
+.out{background:var(--pri);color:var(--onpri);align-self:flex-end}
+.chat{display:flex;flex-direction:column;gap:6px;padding:0 14px}
+.when{font-size:12px;color:var(--text3);text-align:center;margin:8px 0 2px}
+
+/* faces: photo placeholders */
+.p1{background:radial-gradient(circle at 30% 30%,#E7B9A8,#9E6B5C 70%)}
+.p2{background:radial-gradient(circle at 60% 30%,#B8CDB3,#5E7B63 70%)}
+.p3{background:radial-gradient(circle at 40% 35%,#C9C1E6,#6C6497 70%)}
+.p4{background:radial-gradient(circle at 50% 30%,#E8D3A5,#9B7B3E 70%)}
+.p5{background:radial-gradient(circle at 35% 35%,#B6C7DA,#536C88 70%)}
+.p6{background:radial-gradient(circle at 55% 40%,#DDB3C6,#8E5470 70%)}
+
+/* sheet */
+.sheet{position:absolute;left:8px;right:8px;bottom:8px;border-radius:34px;padding:10px 10px 12px;z-index:8}
+.sheet .grab{width:36px;height:5px;border-radius:3px;background:var(--text3);opacity:.5;margin:0 auto 10px}
+.sheet button{display:flex;width:100%;align-items:center;gap:12px;padding:13px 16px;border-radius:18px;font-size:17px;text-align:left}
+.sheet button:hover{background:var(--fill)}
+.dim{position:absolute;inset:0;background:rgba(0,0,0,.18);z-index:7}
+
+/* overdrive 1 */
+.ring{--p:1;width:22px;height:22px;border-radius:50%;background:conic-gradient(var(--acc) calc(var(--p)*360deg),var(--fill) 0);display:inline-block;position:relative;flex:none}
+.ring::after{content:"";position:absolute;inset:3px;border-radius:50%;background:var(--bg)}
+.ring.run{animation:drain var(--dur,20s) linear forwards}
+@keyframes drain{from{--p:1}to{--p:0}}
+.toast{position:absolute;left:14px;right:14px;bottom:20px;height:56px;border-radius:28px;display:flex;align-items:center;gap:12px;padding:0 10px 0 18px;font-size:15px;z-index:9;transform:translateY(120px);transition:transform .45s cubic-bezier(.2,.9,.25,1.1)}
+.toast.show{transform:none}
+.toast .undo{margin-left:auto;font-weight:600;color:var(--acc);padding:10px 14px}
+.flash{animation:flash 1.6s ease-out}
+@keyframes flash{0%{background:var(--acc-soft)}100%{background:transparent}}
+
+/* overdrive 2 */
+.photo-card{margin:6px 14px 14px;height:430px;border-radius:30px;position:relative;overflow:hidden}
+.photo-card .plate{position:absolute;left:10px;right:10px;bottom:10px;border-radius:24px;padding:14px}
+.photo-card .plate .nm,.photo-card .plate .ln,.photo-card .plate .mt{color:var(--text)}
+.hero{height:340px;position:relative}
+.hero-name{position:absolute;left:16px;right:16px;bottom:14px;border-radius:20px;padding:10px 14px}
+.collapsed-head{position:absolute;top:0;left:0;right:0;height:96px;z-index:4;display:flex;align-items:flex-end;gap:10px;padding:0 16px 10px;opacity:0;transition:opacity .2s;border-radius:0}
+
+/* overdrive 3 */
+.ambient{position:absolute;inset:0;overflow:hidden;z-index:0;transition:opacity 1.2s ease;pointer-events:none}
+.ambient i{position:absolute;width:420px;height:420px;border-radius:50%;filter:blur(60px);opacity:.55;font-style:normal}
+.ambient i:nth-child(1){background:var(--acc);top:-160px;left:-120px;animation:float1 14s ease-in-out infinite alternate}
+.ambient i:nth-child(2){background:#F59E0B;top:-120px;right:-200px;opacity:.35;animation:float2 17s ease-in-out infinite alternate}
+.ambient i:nth-child(3){background:#EC4899;bottom:-260px;left:-60px;opacity:.25;animation:float1 21s ease-in-out infinite alternate-reverse}
+@keyframes float1{to{transform:translate(90px,70px) scale(1.15)}}
+@keyframes float2{to{transform:translate(-80px,90px) scale(.9)}}
+.calm .ambient{opacity:.0}
+.amb-content{position:relative;z-index:1}
+.roll{display:inline-block;height:1em;overflow:hidden;vertical-align:top;line-height:1}
+.roll span{display:block;transition:transform .6s cubic-bezier(.2,.9,.25,1)}
+.note{font-size:13px;color:var(--text3);margin:14px 20px 0;line-height:1.45}
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}
+
+.phone:has(#todayScroll) .status{background:none;transition:background .25s}
+.phone:has(#todayScroll.scrolled) .status{background:linear-gradient(var(--bg) 55%,transparent)}
+.heatwrap{position:relative;overflow:hidden;margin-top:-54px;padding-top:54px}
+.heatwrap .ambient{opacity:var(--heat,1);-webkit-mask-image:linear-gradient(#000 55%,transparent);mask-image:linear-gradient(#000 55%,transparent)}
+.heatwrap .ambient i{width:300px;height:300px}
+.counter{display:block;width:calc(100% - 40px);margin:0 20px 8px;text-align:left;padding:4px 0 10px}
+.cnum{font-size:76px;font-weight:700;line-height:1;letter-spacing:-.04em;font-variant-numeric:tabular-nums;display:block}
+.nophoto{background:var(--acc-soft)}
+.nophoto .mono{position:absolute;top:18px;left:0;right:0;text-align:center;font-size:96px;font-weight:600;color:var(--acc);line-height:1}
+.nophoto-s{background:var(--acc-soft);color:var(--acc);display:flex;align-items:center;justify-content:center;font-size:21px;font-weight:600;font-family:"New York",ui-serif,Georgia,serif}
+.tbtn{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:19px}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M16 18a2 2 0 0 1 2 2a2 2 0 0 1 2-2a2 2 0 0 1-2-2a2 2 0 0 1-2 2zm0-12a2 2 0 0 1 2 2a2 2 0 0 1 2-2a2 2 0 0 1-2-2a2 2 0 0 1-2 2zM9 18a6 6 0 0 1 6-6a6 6 0 0 1-6-6a6 6 0 0 1-6 6a6 6 0 0 1 6 6z"/></symbol>
+  <symbol id="i-flame" viewBox="0 0 24 24"><path d="M12 12c2-2.96 0-7-1-8c0 3.04-1.77 4.74-3 6c-1.23 1.26-2 3.24-2 5a6 6 0 1 0 12 0c0-1.53-1.06-3.94-2-5c-1.79 3-2.79 3-4 2z"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="M9 6l6 6l-6 6"/></symbol>
+  <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M16 3v4M8 3v4M4 11h16"/></symbol>
+  <symbol id="i-checklist" viewBox="0 0 24 24"><path d="M9.6 20H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8M14 19l2 2l4-4M9 8h4M9 12h2"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2M16 3.13a4 4 0 0 1 0 7.75M21 21v-2a4 4 0 0 0-3-3.85"/></symbol>
+  <symbol id="i-cards" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="7" r="4"/><path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/></symbol>
+  <symbol id="i-player-pause" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10" cy="10" r="7"/><path d="M21 21l-6-6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-dots" viewBox="0 0 24 24"><path d="M5 12h.01M12 12h.01M19 12h.01" stroke-width="3"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4 20h4L18.5 9.5a2.83 2.83 0 1 0-4-4L4 16v4M13.5 6.5l4 4"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/></symbol>
+  <symbol id="i-hand-stop" viewBox="0 0 24 24"><path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12M11 5.5v-2a1.5 1.5 0 0 1 3 0V12M14 5.5a1.5 1.5 0 0 1 3 0V12M17 7.5a1.5 1.5 0 0 1 3 0V16a6 6 0 0 1-6 6h-2a7 7 0 0 1-5-3l-3.6-5.6a1.5 1.5 0 0 1 2.4-1.8L8 14"/></symbol>
+  <symbol id="i-antenna-bars-5" viewBox="0 0 24 24"><path d="M6 18v-3M10 18v-6M14 18v-9M18 18V6"/></symbol>
+  <symbol id="i-battery-3" viewBox="0 0 24 24"><rect x="3" y="7" width="16" height="10" rx="2"/><path d="M21 11v2M7 10v4M10 10v4M13 10v4"/></symbol>
+</svg>
+<div class="page">
+  <div class="top">
+    <h1>Redesign: A3, the combined direction</h1>
+    <div class="seg" role="group" aria-label="Appearance">
+      <button data-theme="light" aria-pressed="true">Light</button>
+      <button data-theme="dark" aria-pressed="false">Dark</button>
+    </div>
+  </div>
+  <p class="lead" style="font-size:15px;color:var(--pagetext2);margin:0;max-width:78ch">A2's white surfaces in indigo. Today leads with the large rolling counter. Review and the card detail use Faces in glass, with a monogram when a match has no photo. The Pipeline moves like the Living Pipeline. Try the buttons under each phone: they are connected, so sending Lena's reply in Review rolls the counter on Today.</p>
+
+  <section>
+    <div class="row">
+      <div>
+        <div class="phone">
+          <div class="status"><span>9:41</span><span><i class="ti ti-antenna-bars-5"></i> <i class="ti ti-battery-3"></i></span></div>
+          <div class="scroll" id="todayScroll">
+            <div class="heatwrap" id="heat">
+            <div class="ambient"><i></i><i></i><i></i></div>
+            <div class="amb-content">
+            <div class="big">Today</div>
+            <button class="counter" id="toReview">
+              <span class="cnum acc"><span class="roll"><span id="cnt">3</span></span></span>
+              <span class="nm" id="cntLine" style="display:block;margin-top:8px">replies wait for you</span>
+              <span class="ln" id="cntSub" style="display:block">Lena is a hot lead. She wrote 10 min ago.</span>
+            </button>
+            </div></div>
+            <div class="sech glass plain"><span class="acc">Overdue</span><span class="n">1</span></div>
+            <div class="r"><div class="face p1"></div><div><div class="nm">Clara Novak</div><div class="ln">Send her the museum link</div></div><div class="tm acc">2 days late</div></div>
+            <div class="sech glass plain"><span>Today</span><span class="n">3</span></div>
+            <div class="r"><div class="face p2"></div><div><div class="nm">Date with Priya</div><div class="mt">Café Lume</div></div><div class="tm">19:30</div></div>
+            <div class="r"><div class="face p3"></div><div><div class="nm">Iris Romero</div><div class="ln">Revive or archive</div></div><div class="tm">quiet 4d</div></div>
+            <div class="r"><div class="face p4"></div><div><div class="nm">Zoe Tanaka</div><div class="ln">Rate your date</div></div><div class="tm">Sat</div></div>
+            <div class="sech glass plain"><span>Coming up</span><span class="n">2</span></div>
+            <div class="r"><div class="face p5"></div><div><div class="nm">Hannah Brooks</div><div class="ln">Confirm the booking</div></div><div class="tm">Fri</div></div>
+            <div class="r"><div class="face nophoto-s">N</div><div><div class="nm">Noor Aziz</div><div class="ln">Ask about the gallery opening</div></div><div class="tm">Sun</div></div>
+          </div>
+          <div class="tabbar glass"><span class="on"><i class="ti ti-calendar"></i>Today</span><span><i class="ti ti-checklist"></i>Review<b class="rbadge">3</b></span><span><i class="ti ti-users"></i>Pipeline</span><span><i class="ti ti-cards"></i>Swipe</span><span><i class="ti ti-user"></i>You</span></div>
+        </div>
+        <div class="cap">Today: the counter rolls when the queue changes.</div>
+      </div>
+
+      <div>
+        <div class="phone" id="reviewPhone">
+          <div class="status"><span>9:41</span><span><i class="ti ti-antenna-bars-5"></i> <i class="ti ti-battery-3"></i></span></div>
+          <div class="scroll" id="reviewScroll">
+            <div class="big">Review</div>
+            <div class="photo-card p1" id="lenaCard">
+              <div class="plate glass">
+                <div style="display:flex;justify-content:space-between;align-items:center"><div class="nm" style="font-size:22px">Lena, 29</div><span class="pill" style="background:var(--acc-soft);padding:3px 9px;border-radius:10px"><i class="ti ti-flame"></i>Hot lead</span></div>
+                <div class="mt" style="color:var(--text2)">Reply on Tinder, 10 min ago</div>
+                <div class="ln" style="margin:8px 0 10px">“haha yes! when are you free?”</div>
+                <div style="background:var(--bg);border-radius:16px;padding:10px 12px;margin-bottom:10px"><span class="ai"><i class="ti ti-sparkles"></i>AI draft</span><div style="font-size:16px;margin-top:3px">Thursday after 7? I know a quiet wine bar.</div><div class="mt" style="margin-top:5px"><i class="ti ti-clock"></i> Best sent around 20:15</div></div>
+                <div class="btns"><button class="btn sec">Edit</button><button class="btn pri" id="lenaSend">Send</button></div>
+              </div>
+            </div>
+            <div class="photo-card p2" style="height:250px">
+              <div class="plate glass">
+                <div class="nm" style="font-size:20px">Sofia, 31</div>
+                <div class="ln" style="margin:4px 0 10px"><i class="ti ti-hand-stop acc"></i> Autopilot stopped: she asked for your number</div>
+                <div class="btns"><button class="btn sec"><i class="ti ti-sparkles"></i>Replies</button><button class="btn pri">Take over</button></div>
+              </div>
+            </div>
+            <div class="photo-card nophoto" style="height:220px">
+              <span class="mono serif">M</span>
+              <div class="plate glass">
+                <div class="nm" style="font-size:20px">Maya Lindqvist</div>
+                <div class="ln" style="margin:4px 0 10px">Copied for Hinge, not sent yet</div>
+                <div class="btns"><button class="btn sec">Clear</button><button class="btn pri">Copy again</button></div>
+              </div>
+            </div>
+          </div>
+          <div class="toast glass" id="toast"><span class="ring" id="undoRing" style="--dur:5s"></span><span id="toastText">Sending in 5 s</span><button class="undo" id="undoBtn">Undo</button></div>
+          <div class="tabbar glass" id="reviewTabs"><span><i class="ti ti-calendar"></i>Today</span><span class="on"><i class="ti ti-checklist"></i>Review<b class="rbadge">3</b></span><span><i class="ti ti-users"></i>Pipeline</span><span><i class="ti ti-cards"></i>Swipe</span><span><i class="ti ti-user"></i>You</span></div>
+        </div>
+        <div class="cap">Review: faces in glass. Tap Send, then Undo or wait. Maya has no photo, so she gets a monogram.</div>
+      </div>
+
+      <div>
+        <div class="phone">
+          <div class="status"><span>9:41</span><span><i class="ti ti-antenna-bars-5"></i> <i class="ti ti-battery-3"></i></span></div>
+          <div class="scroll">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding-right:16px"><div class="big">Pipeline</div><div style="display:flex;gap:8px"><span class="glass tbtn"><i class="ti ti-search"></i></span><span class="glass tbtn"><i class="ti ti-plus"></i></span></div></div>
+            <div class="sech glass plain"><span class="acc">Waiting for you</span><span class="n" id="cWait">2</span></div>
+            <div id="gWait">
+              <div class="r" id="pLena"><div class="face p1"></div><div><div class="nm">Lena Okafor</div><div class="ln" id="pLenaLine"><span class="ai" style="font-weight:500;font-size:15px"><i class="ti ti-sparkles"></i>Reply ready in Review</span></div><div class="mt">Chatting on Tinder</div></div><div class="tm">10m</div></div>
+              <div class="r"><div class="face p2"></div><div><div class="nm">Sofia Marchetti</div><div class="ln">Asked for your number</div><div class="mt">Chatting on Tinder</div></div><div class="tm">1h</div></div>
+            </div>
+            <div class="sech glass plain"><span>Handled by autopilot</span><span class="n">1</span></div>
+            <div class="r"><div class="face p3"></div><div style="flex:1"><div class="nm">Nora Reyes</div><div class="ln" style="display:flex;align-items:center;gap:8px"><span class="ring run" style="--dur:40s"></span><span class="ai" style="font-weight:500;font-size:15px">Replies around 21:40</span></div><div class="mt">Talking hiking, Tinder</div></div><div class="tm">2m</div></div>
+            <div class="sech glass plain"><span>Waiting for them</span><span class="n" id="cThem">2</span></div>
+            <div id="gThem">
+              <div class="r" id="rNoor"><div class="face nophoto-s">N</div><div><div class="nm">Noor Aziz</div><div class="ln" id="noorLine">You wrote yesterday</div><div class="mt">Chatting on Bumble</div></div><div class="tm" id="noorTime">1d</div></div>
+              <div class="r"><div class="face p5"></div><div><div class="nm">Ella Brandt</div><div class="ln">You wrote 3h ago</div><div class="mt">Chatting on Tinder</div></div><div class="tm">3h</div></div>
+            </div>
+            <div class="sech glass plain"><span>Texting off-app</span><span class="n">1</span></div>
+            <div class="r"><div class="face p2"></div><div><div class="nm">Priya Raman</div><div class="ln">Date tonight, 19:30</div><div class="mt">Date set on Tinder</div></div><div class="tm">1d</div></div>
+          </div>
+          <div class="tabbar glass"><span><i class="ti ti-calendar"></i>Today</span><span><i class="ti ti-checklist"></i>Review<b class="rbadge">3</b></span><span class="on"><i class="ti ti-users"></i>Pipeline</span><span><i class="ti ti-cards"></i>Swipe</span><span><i class="ti ti-user"></i>You</span></div>
+        </div>
+        <div class="cap"><button class="btn sec" id="simReply" style="height:36px;font-size:14px">Simulate: Noor replies</button></div>
+      </div>
+
+      <div>
+        <div class="phone">
+          <div class="scroll" id="heroScroll" style="padding-top:0">
+            <div class="hero p3" id="hero"><div class="hero-name glass"><div class="nm" style="font-size:24px">Nora Reyes</div><div class="mt" style="color:var(--text2)">Chatting on Tinder, matched 3 days ago</div></div></div>
+            <div class="chat" id="noraChat" style="padding-top:14px">
+              <div class="when">Yesterday 21:04</div>
+              <div class="bubble in">ok that hike sounds amazing</div>
+              <div class="bubble out">You'd love the ridge at sunset</div>
+              <div class="ai" style="align-self:flex-end"><i class="ti ti-sparkles"></i>Sent by autopilot</div>
+              <div class="when">Today 20:38</div>
+              <div class="bubble in">just got back from the ridge trail, legs are dead</div>
+              <div class="bubble in">you ever done it?</div>
+              <div id="noraEnd" style="height:200px"></div>
+            </div>
+          </div>
+          <div class="collapsed-head glass" id="collapsed"><div class="face p3" style="width:36px;height:36px"></div><div class="nm" style="font-size:16px">Nora Reyes</div></div>
+          <div class="glass" id="noraComposer" style="position:absolute;left:10px;right:10px;bottom:12px;border-radius:28px;padding:12px 14px;z-index:6">
+            <div style="display:flex;align-items:center;gap:8px"><span class="ring run" style="--dur:40s"></span><span class="ai">Autopilot replies around 21:40</span></div>
+            <div class="mt" style="margin:2px 0 8px">She usually takes about an hour, and it's evening.</div>
+            <div id="noraDraft" style="font-size:16px;background:var(--bg);border-radius:14px;padding:9px 11px;margin-bottom:10px">Twice! The last stretch is brutal. Did you make it to the lookout?</div>
+            <div class="btns"><button class="btn sec" id="noraHold">Hold</button><button class="btn pri" id="noraSend">Send now</button></div>
+          </div>
+        </div>
+        <div class="cap">Card: scroll the photo away. Send now puts the bubble in the chat.</div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+document.querySelectorAll('i.ti').forEach(i=>{const n=[...i.classList].find(c=>c.startsWith('ti-')).slice(3);const cls=[...i.classList].filter(c=>c!=='ti'&&!c.startsWith('ti-')).join(' ');i.outerHTML=`<svg class="ic ${cls}" style="${i.getAttribute('style')||''}" aria-hidden="true"><use href="#i-${n}"/></svg>`});
+const root=document.documentElement,reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const sparkle='<svg class="ic" aria-hidden="true"><use href="#i-sparkles"/></svg>';
+document.querySelectorAll('.seg [data-theme]').forEach(b=>b.onclick=()=>{root.dataset.theme=b.dataset.theme;document.querySelectorAll('.seg [data-theme]').forEach(x=>x.setAttribute('aria-pressed',x===b))});
+document.querySelectorAll('.scroll').forEach(s=>s.addEventListener('scroll',()=>{s.querySelectorAll('.sech').forEach(h=>{const stuck=h.getBoundingClientRect().top-s.getBoundingClientRect().top<=46&&s.scrollTop>10;h.classList.toggle('plain',!stuck)})}));
+function spring(from,axis='Y',{stiffness=170,damping=19}={}){const f=[];let x=from,v=0;const dt=1/60;for(let i=0;i<90;i++){const a=-stiffness*x-damping*v;v+=a*dt;x+=v*dt;f.push({transform:`translate${axis}(${x}px)`});if(Math.abs(x)<.2&&Math.abs(v)<.2)break}f.push({transform:'none'});return f}
+
+// Today: the ambient field runs under the status bar; the bar only gets its fade once rows scroll under it
+const ts=document.getElementById('todayScroll');ts.addEventListener('scroll',()=>ts.classList.toggle('scrolled',ts.scrollTop>150));
+// shared queue count: Today counter, tab badges
+let queue=3;
+function setQueue(n){
+  const el=document.getElementById('cnt');const old=queue;queue=n;
+  const apply=()=>{el.textContent=n;document.getElementById('cntLine').textContent=n===0?'Nothing waits on you':n===1?'reply waits for you':'replies wait for you';document.getElementById('cntSub').textContent=n===3?'Lena is a hot lead. She wrote 10 min ago.':n===0?'Autopilot has the rest.':'Sofia handed her chat to you an hour ago.'};
+  document.querySelectorAll('.rbadge').forEach(b=>{b.textContent=n;b.style.display=n?'':'none'});
+  // ambient field: warmest with 3+ waiting, gone at zero
+  document.getElementById('heat').style.setProperty('--heat',n===0?0:n>=3?1:.55);
+  if(reduce)return apply();
+  const dir=n<old?-1:1;
+  el.animate([{transform:'none',opacity:1},{transform:`translateY(${dir*-100}%)`,opacity:0}],{duration:200,easing:'ease-in'}).onfinish=()=>{apply();el.animate([{transform:`translateY(${dir*100}%)`,opacity:0},{transform:'none',opacity:1}],{duration:420,easing:'cubic-bezier(.2,.9,.25,1)'})};
+}
+
+// Review: send Lena with undo; card leaves with a spring, counter rolls
+const toast=document.getElementById('toast'),ring=document.getElementById('undoRing'),card=document.getElementById('lenaCard');
+let timer,sending=false;
+document.getElementById('lenaSend').onclick=()=>{
+  if(sending)return;sending=true;
+  ring.classList.remove('run');void ring.offsetWidth;ring.classList.add('run');toast.classList.add('show');
+  card.style.transition='opacity .3s';card.style.opacity='.45';
+  let s=5;document.getElementById('toastText').textContent='Sending in 5 s';
+  timer=setInterval(()=>{s--;document.getElementById('toastText').textContent=s>0?`Sending in ${s} s`:'Sent to Lena';
+    if(s<=0){clearInterval(timer);sending=false;
+      const h=card.offsetHeight;
+      const done=()=>{card.remove();setQueue(queue-1);setTimeout(()=>toast.classList.remove('show'),700);
+        // Pipeline: Lena now waits on her, so her row springs into Waiting for them
+        const row=document.getElementById('pLena'),dest=document.getElementById('gThem'),first=row.getBoundingClientRect().top;
+        dest.prepend(row);document.getElementById('pLenaLine').textContent='You replied just now';
+        document.getElementById('cWait').textContent=+document.getElementById('cWait').textContent-1;document.getElementById('cThem').textContent=+document.getElementById('cThem').textContent+1;
+        if(!reduce)row.animate(spring(first-row.getBoundingClientRect().top),{duration:1500,easing:'linear'})};
+      if(reduce)return done();
+      card.animate([{transform:'none',opacity:.45,height:h+'px',marginBottom:'14px'},{transform:'translateX(-110%)',opacity:0,height:h+'px',marginBottom:'14px'},{transform:'translateX(-110%)',opacity:0,height:'0px',marginBottom:'0px'}],{duration:650,easing:'cubic-bezier(.4,0,.2,1)'}).onfinish=done;
+    }},1000);
+};
+document.getElementById('undoBtn').onclick=()=>{if(!sending)return;clearInterval(timer);sending=false;card.style.opacity='1';toast.classList.remove('show')};
+
+// Pipeline: Noor replies, her row springs into Waiting for you
+document.getElementById('simReply').onclick=()=>{
+  const row=document.getElementById('rNoor'),dest=document.getElementById('gWait');
+  if(row.parentElement===dest)return;
+  const first=row.getBoundingClientRect().top;dest.prepend(row);
+  document.getElementById('noorLine').innerHTML=`<span class="ai" style="font-weight:500;font-size:15px">${sparkle}Reply ready in Review</span>`;
+  document.getElementById('noorTime').textContent='now';
+  document.getElementById('cWait').textContent=+document.getElementById('cWait').textContent+1;document.getElementById('cThem').textContent=+document.getElementById('cThem').textContent-1;
+  setQueue(queue+1);
+  if(!reduce){row.animate(spring(first-row.getBoundingClientRect().top),{duration:1500,easing:'linear'});row.classList.add('flash')}
+};
+
+// Card: hero collapses; Send now drops the bubble into the chat
+const hs=document.getElementById('heroScroll'),hero=document.getElementById('hero'),col=document.getElementById('collapsed');
+hs.addEventListener('scroll',()=>{const p=Math.min(hs.scrollTop/240,1);hero.style.transform=`translateY(${hs.scrollTop*.45}px) scale(${1+p*.08})`;hero.style.opacity=1-p;col.style.opacity=p>.85?1:0});
+document.getElementById('noraSend').onclick=()=>{
+  const comp=document.getElementById('noraComposer');if(comp.dataset.sent)return;comp.dataset.sent=1;
+  const b=document.createElement('div');b.className='bubble out';b.textContent=document.getElementById('noraDraft').textContent;
+  const end=document.getElementById('noraEnd');end.before(b);
+  const tag=document.createElement('div');tag.className='mt';tag.style.alignSelf='flex-end';tag.textContent='Sent just now';end.before(tag);
+  comp.style.transition='transform .4s cubic-bezier(.4,0,.2,1),opacity .3s';comp.style.transform='translateY(140%)';comp.style.opacity='0';
+  hs.scrollTo({top:hs.scrollHeight,behavior:reduce?'auto':'smooth'});
+  if(!reduce)b.animate([{transform:'translateY(160px) scale(.92)',opacity:0},{transform:'none',opacity:1}],{duration:560,easing:'cubic-bezier(.2,.9,.25,1.1)'});
+};
+document.getElementById('noraHold').onclick=e=>{e.target.textContent='Held: in Review'};
+</script>
+</body>
+</html>
