@@ -26,3 +26,12 @@ def test_every_model_call_records_its_cost_for_the_user_it_was_made_for(app, cli
 
     assert spend(app, "alice@example.com") == Decimal("0.000036")
     assert spend(app, "bob@example.com") == 0
+
+
+def test_a_free_openrouter_model_costs_nothing(app, client_for, monkeypatch):
+    reply = claude.Completion(text='{"bio": "x", "prompts": {}}', model="vendor/model:free", input_tokens=1000, output_tokens=1000)
+    monkeypatch.setattr(claude, "complete", lambda *args, **kwargs: reply)
+    alice = client_for("alice@example.com")
+    alice.post("/bios/hinge/rewrite", json={"bio": "I like climbing."})
+
+    assert spend(app, "alice@example.com") == 0
