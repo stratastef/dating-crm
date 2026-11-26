@@ -1,0 +1,29 @@
+name: iOS
+
+# Only when the app changed: the iOS tests take a Mac.
+on:
+  push:
+    branches: [main]
+    paths: ['ios/**', 'scripts/ios-test', '.github/workflows/ios.yml']
+  pull_request:
+    paths: ['ios/**', 'scripts/ios-test', '.github/workflows/ios.yml']
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios:
+    # The owner's Mac as a self-hosted runner (ios/README.md, "CI runner"): GitHub's macOS minutes count 10x and used up the free allowance.
+    runs-on: [self-hosted, macOS]
+    steps:
+      - uses: actions/checkout@v4
+      # Xcode 26.6 is the oldest toolchain the project supports, and it rejects code Xcode 27 accepts.
+      - name: Use Xcode 26.6 when the runner has it
+        run: |
+          if [ -d /Applications/Xcode_26.6.app ]; then
+            echo "DEVELOPER_DIR=/Applications/Xcode_26.6.app/Contents/Developer" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Xcode 26.6 is not on this runner, so only $(xcodebuild -version | head -1) checked the build."
+          fi
+      - run: scripts/ios-test

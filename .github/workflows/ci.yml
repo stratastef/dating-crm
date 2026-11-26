@@ -1,8 +1,15 @@
 name: CI
 
+# Once per change: a pull request, then its merge to main. A branch push alone runs nothing.
 on:
   push:
+    branches: [main]
   pull_request:
+
+# A newer push to the same pull request cancels the older run. Pushes to main never cancel: a deploy may be running.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -91,13 +98,3 @@ jobs:
       - name: Check the public health endpoint
         run: curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors "$PUBLIC_URL/health"
 
-  ios:
-    # Pinned: Xcode 26.6 is the oldest toolchain the project supports, and it rejects code Xcode 27 accepts.
-    runs-on: macos-26
-    steps:
-      - uses: actions/checkout@v4
-      - run: sudo xcode-select -s /Applications/Xcode_26.6.app
-      - name: Test on the first available iPhone simulator
-        run: |
-          id=$(xcrun simctl list devices available | grep -m1 -E 'iPhone' | grep -oE '[0-9A-F-]{36}')
-          xcodebuild test -project ios/DatingCRM.xcodeproj -scheme DatingCRM -destination "id=$id"
