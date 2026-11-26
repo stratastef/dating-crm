@@ -29,3 +29,7 @@ def send_reply(db: Connection, user_id: int, payload: dict) -> None: ...
 ```
 
 The worker runs such a job only if `autopilot_allowed()` is true at that moment. Otherwise it sets the job's status to `skipped` and writes the reason to `last_error`. Skipped jobs are not retried. Handlers that draft for copilot are not autopilot jobs: leave `autopilot` unset.
+
+## On the phone
+
+You > Autopilot (`ios/DatingCRM/Screens/AutopilotView.swift`) gathers what the app may do alone, in this order: Pause (all apps, then one switch per app the user has cards on or that is paused), the autonomy level per job with a plain description of each level (`AutonomyLevel.summary`), the AI budget as "$8.20 of $30" with an editable cap (`Budget.spentOfCap`, `PUT /budget`), and the swipe limits (`GET`/`PUT /swipes/limits`, see [Swipe autopilot](swipe-autopilot.md)). It uses only the routes above; Settings keeps privacy and Find and purge.
