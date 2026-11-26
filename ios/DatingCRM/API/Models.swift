@@ -84,6 +84,43 @@ struct Message: Codable, Identifiable, Hashable {
     var sentAt: Date
 }
 
+/// Today: the review summary, then what the user has to do by day, in the time zone the app sent.
+struct Today: Codable, Equatable {
+    var review: ReviewSummary
+    var overdue: [TodayItem]
+    var today: [TodayItem]
+    var comingUp: [TodayItem]
+
+    /// Nothing in any of the three groups: "Nothing for today".
+    var isEmpty: Bool { overdue.isEmpty && today.isEmpty && comingUp.isEmpty }
+}
+
+/// How many items wait in Review, and how many of them are hot leads.
+struct ReviewSummary: Codable, Equatable {
+    var count = 0
+    var hot = 0
+}
+
+struct TodayItem: Codable, Identifiable, Hashable {
+    enum Kind: String, Codable {
+        case date
+        case nextAction = "next_action"
+        case stalled
+        case rateDate = "rate_date"
+    }
+
+    var kind: Kind
+    var card: Card
+    /// `date`: when the confirmed date starts.
+    var startsAt: Date?
+    /// `nextAction`: local midnight of its due day.
+    var dueDate: Date?
+    /// Under Overdue: whole days past the due day.
+    var daysLate: Int?
+
+    var id: String { "\(kind.rawValue)-\(card.id)" }
+}
+
 /// One week on the dashboard. `week` is local midnight of the Monday it starts on.
 struct DashboardWeek: Codable, Identifiable, Equatable {
     var week: Date
@@ -251,6 +288,29 @@ struct Budget: Codable, Equatable {
             .currency(code: "USD").locale(Locale(identifier: "en_US"))
                 .precision(.fractionLength(usd == usd.rounded() ? 0 : 2)))
     }
+}
+
+/// One dating app on Connected apps: its connector state and, while `broken`, the alert that stopped it.
+struct ConnectedApp: Codable, Identifiable, Equatable {
+    let app: String
+    let state: ConnectorState
+    let alert: ConnectorAlert?
+
+    var id: String { app }
+}
+
+/// Raw values match the server's `state`. `copilotOnly` is the user's choice; `noConnector` apps always draft and copy.
+enum ConnectorState: String, Codable {
+    case connected, broken
+    case copilotOnly = "copilot_only"
+    case notConnected = "not_connected"
+    case noConnector = "no_connector"
+}
+
+/// Why a connector stopped. `reason` is `auth failure` (the session ended) or `ban signal`.
+struct ConnectorAlert: Codable, Equatable {
+    let reason: String
+    let createdAt: Date
 }
 
 /// How many profiles swipe autopilot may swipe on, per app: per run of the job (1 to 10) and per day (1 to 100).

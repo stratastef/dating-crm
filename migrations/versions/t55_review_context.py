@@ -1,14 +1,14 @@
 """a paid item keeps the cost the dating app reported for it
 
 Revision ID: t55_review_context
-Revises: t48_phone_sign_in
+Revises: t54_time_zone
 """
 
 import sqlalchemy as sa
 from alembic import op
 
 revision = "t55_review_context"
-down_revision = "t48_phone_sign_in"
+down_revision = "t54_time_zone"
 branch_labels = None
 depends_on = None
 

@@ -4,11 +4,11 @@ The signed-in app is `MainTabView` (`ios/DatingCRM/Screens/MainTabView.swift`): 
 
 | Tab | Shows now |
 | --- | --- |
-| Today | A placeholder until the Today screen lands |
-| Review | `QueueView`: the review queue as faces in glass (below) |
+| Today | `TodayView` (see "Today"). Tapping the review count switches to Review. |
+| Review | `QueueView`: the review queue as faces in glass (see "Review"). The tab's badge is the review count from Today's last load. |
 | Pipeline | `BoardView`, still under the seven stages. A tapped push switches to this tab and opens the card. Search (minimized to a toolbar button) filters the loaded cards by name; the plus button opens `NewCardSheet` to add a card by hand. |
 | Swipe | `SwipeView` |
-| You | `YouView`: Dashboard, Autopilot (`AutopilotView`), Preferences, Profile (Photos, Voice), Account (Settings, Sign out, which asks first) |
+| You | `YouView`: Dashboard, Autopilot (`AutopilotView`), Preferences, Connected apps (`ConnectedAppsView`), Profile (Photos, Voice), Account (Settings, Sign out, which asks first) |
 
 ## Look (ADR 0009, `docs/design/mockups/a3-combined.html`)
 
@@ -52,17 +52,21 @@ Every `Card` carries its card summary (see "Cards and messages"): `stageChangedA
 - **Dismiss with Undo:** `dismiss(item)` takes the draft out at once and calls `POST /drafts/{id}/dismiss` only after the undo window (5 s, the toast's time). Undo puts it back where it was and the server never hears of it; a reload meanwhile does not bring it back. A failed dismissal reloads, so the draft returns with the error.
 - **A new action** (Send, Copy, Retry) replaces Approve in `DraftItem`; one that ends the item calls `review.remove(item)`, one with Undo follows `dismiss`/`undo`. A new item kind gets its own view next to `DraftItem` and a branch in `QueueView`'s `ForEach`; kinds the app does not know are skipped.
 
+## Connected apps
+
+`ConnectedAppsView(client:)` lists each dating app from `client.connectedApps()` (`GET /connectors`, see "Sync") with its `ConnectorState`: Connected, broken with its alert and when it came (the alert line in the accent, since it waits on the user), Copilot only, Not connected, or No connector (Hinge, Bumble: the app drafts and the user copies). Connect or Reconnect opens `ConnectAppSheet(client:app:onConnected:)`, which shows `ConnectAppSheet.steps[app]` (Tinder's say a computer is needed) and a secure field for the session token, and calls `client.connect(app:token:)`. Copilot only asks first, then calls `client.chooseCopilotOnly(app:)`. The setup step can push `ConnectedAppsView`; anything that offers Reconnect can present `ConnectAppSheet` alone.
+
 ## API dates
 
 `APIClient` decodes a plain day (`2026-12-01`, local midnight) or a full timestamp (`2026-11-20T10:00:00.123456Z` or with an offset). It encodes plain days only. `Message.sentAt` is the first timestamp the app reads.
 
 ## Simulator checks
 
-Besides the Debug sign-in (`DCRM_SERVER`, `DCRM_TOKEN`) and `DCRM_TAB`, `DCRM_OPEN=voice` or `DCRM_OPEN=preferences` pushes that screen under You on launch: `SIMCTL_CHILD_DCRM_TAB=you SIMCTL_CHILD_DCRM_OPEN=voice xcrun simctl launch …`.
+Besides the Debug sign-in (`DCRM_SERVER`, `DCRM_TOKEN`) and `DCRM_TAB`, `DCRM_OPEN=voice`, `DCRM_OPEN=preferences` or `DCRM_OPEN=connected-apps` pushes that screen under You on launch: `SIMCTL_CHILD_DCRM_TAB=you SIMCTL_CHILD_DCRM_OPEN=voice xcrun simctl launch …`.
 
 ## Limits
 
-- No Review count badge on the tab yet: it waits for the server's review summary.
+- The Review badge is the system red, not the accent: `UITabBarItem.appearance().badgeColor` has no effect on the SwiftUI `TabView`. It updates when Today loads, not when Review clears an item.
 - Not verified on screen: typing, autosave, the save error under a field and Edit on Voice and Preferences (screenshots only, no taps).
 - Not verified on screen: the toast (Review's Dismiss shows one, but nothing was tapped) and VoiceOver reading the AI marker and badges. Review's buttons, the card link and the profile sheet were not tapped either: screenshots only.
 - Error text is still system red, under 4.5:1 on white, outside `ErrorRow`. Settings is still a grey grouped form until its ticket.

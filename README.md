@@ -29,7 +29,8 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/preferences.py` | What the user wants, versioned: routes under `/preferences`, `current_preferences()` |
 | `app/dashboard.py` | Good dates per hour, weekly: `POST /time` and `GET /dashboard` |
 | `app/feedback.py` | Feedback loop: `swipe_lines()` for the swipe pre-screen prompt, and `GET /feedback/export` |
-| `app/settings.py` | User settings: `GET` and `PATCH /settings` |
+| `app/settings.py` | User settings: `GET` and `PATCH /settings`, `user_zone()` |
+| `app/today.py` | Today: `GET /today`, the review summary and what the user has to do by time |
 | `app/tenancy.py` | `user_id_column()` for tenant tables |
 | `app/vault.py` | `store_token()`, `read_token()`, `delete_token()` for encrypted dating-app session tokens |
 | `app/audit.py` | `record_action()` and `GET /audit-log` |
@@ -41,7 +42,7 @@ Product spec: [Dating CRM Spec.md](Dating%20CRM%20Spec.md). Agent docs: `CLAUDE.
 | `app/handover.py` | Handover: pauses a card on a handover trigger, suggested replies, take-over and hand-back, `is_paused()` |
 | `app/chat_autopilot.py` | Chat autopilot: the `chat_reply` job, `GET` and `PUT /settings/ai-disclosure` |
 | `app/tinder.py` | `TinderConnector`: reads matches and messages from Tinder's unofficial web API |
-| `app/sync.py` | `PUT /connectors/{app}/token` and the `sync_matches` job |
+| `app/sync.py` | `PUT /connectors/{app}/token`, Connected apps (`GET /connectors`, `PUT /connectors/{app}/copilot-only`) and the `sync_matches` job |
 | `app/purge.py` | Find and purge: `GET /people`, `GET /people/candidates`, `POST /people/purge` |
 | `app/tombstones.py` | `bury()` and `is_buried()`: a purged person is not stored again |
 | `app/paid_items.py` | Paid items (Super Like, Rose, Boost): `propose()`, approve and decline routes, and `spend()`, the only code that spends one |
@@ -87,6 +88,7 @@ Read the doc for a module before you change it or call it. Review rules live in 
 - [Tinder connector](docs/modules/tinder-connector.md)
 - [iOS app shell and shared components](docs/modules/ios-app-shell.md)
 - [Sign-in](docs/modules/sign-in.md)
+- [Today](docs/modules/today.md)
 
 ## Run the stack
 
