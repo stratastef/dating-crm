@@ -10,8 +10,9 @@ from pathlib import Path
 APP = Path(__file__).parent.parent / "app"
 SQL = re.compile(r"^\s*(SELECT\s|INSERT INTO\s|UPDATE \w+ SET\s|DELETE FROM\s|WITH \w+ AS)")
 
-# The users table is the tenant itself, keyed by its own id; the last two read no table.
-EXEMPT = re.compile(r"\b(FROM users|UPDATE users|INTO users)\b|^SELECT (1|now\(\))$")
+# The users table is the tenant itself, keyed by its own id. Invite codes belong to no user: one creates a user.
+# The last two read no table.
+EXEMPT = re.compile(r"\b(FROM|UPDATE|INTO) (users|invite_codes)\b|^SELECT (1|now\(\))$")
 
 # (file, how the statement starts) -> why it needs no user_id
 ALLOWED: dict[tuple[str, str], str] = {

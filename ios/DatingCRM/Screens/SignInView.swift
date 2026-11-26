@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Sign-in: the phone number, then the sign-in code the server texts to it. A long press on the title opens the
+/// Sign-in: the phone number, plus an invite code when the server asks for one (the number has no account yet), then
+/// the sign-in code the server texts to it. A long press on the title opens the
 /// developer sign-in (server URL and API token), for pointing the app at a local stack.
 struct SignInView: View {
     let session: Session
@@ -10,6 +11,9 @@ struct SignInView: View {
     /// The number (E.164) the last code went to; nil while the user types their number.
     /// `DCRM_PHONE=+1…` opens the code step for scripted simulator checks (see `Session.init`). It sends nothing.
     @State private var codeSentTo = ProcessInfo.processInfo.environment["DCRM_PHONE"]
+    /// Nil until the server asks for an invite code: the number has no account yet.
+    /// `DCRM_INVITE=K7QX-M2PA` shows the field for scripted simulator checks.
+    @State private var inviteCode = ProcessInfo.processInfo.environment["DCRM_INVITE"]
     @State private var codeSentAt = Date.now
     @State private var error: String?
     @State private var isWorking = false
@@ -44,10 +48,15 @@ struct SignInView: View {
             Text("Start with + and your country code.")
                 .font(.footnote)
                 .foregroundStyle(.secondaryText)
+            if let invite = Binding($inviteCode) {
+                field("Invite code", text: invite, prompt: "K7QX-M2PA")
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+            }
             errorLabel
             Button(isWorking ? "Sending…" : "Send code") { Task { await sendCode() } }
                 .buttonStyle(.primaryCapsule)
-                .disabled(phone.count < 2 || isWorking)
+                .disabled(phone.count < 2 || inviteCode == "" || isWorking)
         }
     }
 
@@ -113,17 +122,20 @@ struct SignInView: View {
         isWorking = true
         defer { isWorking = false }
         do {
-            try await session.requestCode(phone: number)
+            try await session.requestCode(phone: number, inviteCode: inviteCode)
             codeSentTo = number
             codeSentAt = .now
             code = ""
             error = nil
         } catch {
             self.error = message(for: error, [
-                403: "No account has this number yet. You need an invite code to create one.",
+                403: inviteCode == nil
+                    ? "No account has this number yet. Enter your invite code to create one."
+                    : "That invite code is not valid or was already used. Check it, or ask for a new one.",
                 422: "Enter your number with its country code, such as +1 415 555 0100.",
                 429: "Too many codes were sent to this number. Try again in an hour.",
             ])
+            if (error as? APIError)?.status == 403 { inviteCode = inviteCode ?? "" }
         }
     }
 
@@ -137,6 +149,7 @@ struct SignInView: View {
                 401: "That code is wrong. Check the text and try again.",
                 410: "That code has expired. Send a new code.",
                 429: "Too many tries with this code. Send a new code.",
+                403: "That invite code was just used to create another account. Ask for a new one.",
             ])
         }
     }
