@@ -13,14 +13,14 @@ from sqlalchemy import Connection, text
 
 from app.auth import CurrentUser, Db
 from app.autopilot import autopilot_block
-from app.cards import _COLUMNS, Card, summarize
+from app.cards import CARD_COLUMNS, Card, summarize
 from app.send import CHAT_STAGES, refusal
 from app.settings import user_zone
 
 router = APIRouter()
 
-# The groups, in the order the Pipeline lists them. An Archived card is Archived, as in the prototype: archiving
-# is how the user is done with it. Any other card gets the first group that matches.
+# The groups, in the order the Pipeline lists them. A card gets the first group that matches; an Archived card
+# for which no reason applies is Archived (owner, 2026-11-25: Waiting for you wins, as the spec's group order says).
 Group = Literal["waiting_for_you", "handled_by_autopilot", "waiting_for_them", "texting_off_app", "archived"]
 
 # Why a card is Waiting for you, in precedence order: the first that applies is the card's `reason`.
@@ -37,7 +37,7 @@ Activity = Literal["writing_opener", "drafting_reply", "planned", "sent_waiting"
 def place(db: Connection, user_id: int, cards: list[dict]) -> None:
     """Add `pipeline_group`, `reason`, `autopilot_activity` and `handover_trigger` to each card summary.
 
-    `cards` are rows selected with `_COLUMNS` of `app/cards.py`, with `last_message`, `pending_draft` and
+    `cards` are rows selected with `CARD_COLUMNS` of `app/cards.py`, with `last_message`, `pending_draft` and
     `planned_send` added.
     """
     params = {"user_id": user_id, "ids": [card["id"] for card in cards]}
@@ -95,14 +95,14 @@ def place(db: Connection, user_id: int, cards: list[dict]) -> None:
                 card["id"] in replying or card["planned_send"] is not None or bool(last) and last["sender"] == "me"
             )
 
-        reason = None if card["stage"] == "archived" else _reason(card, drafts.get(card["id"], set()), today, handled)
+        reason = _reason(card, drafts.get(card["id"], set()), today, handled)
         card["reason"] = reason
         card["handover_trigger"] = triggers.get(card["id"]) if reason == "handover" else None
         card["autopilot_activity"] = None
-        if card["stage"] == "archived":
-            card["pipeline_group"] = "archived"
-        elif reason:
+        if reason:
             card["pipeline_group"] = "waiting_for_you"
+        elif card["stage"] == "archived":
+            card["pipeline_group"] = "archived"
         elif card["stage"] not in CHAT_STAGES:
             card["pipeline_group"] = "texting_off_app"
         elif handled:
@@ -152,7 +152,7 @@ class PipelineGroup(BaseModel):
 def read_pipeline(user: CurrentUser, db: Db):
     """Every card of the user, in its group. Groups in `Group` order, empty ones left out. Inside a group, hot
     leads first, then the most recent activity: the last message, or the last stage change without one."""
-    rows = db.execute(text(f"SELECT {_COLUMNS} FROM cards WHERE user_id = :user_id ORDER BY id"), {"user_id": user.id}).all()
+    rows = db.execute(text(f"SELECT {CARD_COLUMNS} FROM cards WHERE user_id = :user_id ORDER BY id"), {"user_id": user.id}).all()
     cards = sorted(
         summarize(db, user.id, rows),
         key=lambda card: (

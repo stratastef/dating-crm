@@ -10,7 +10,7 @@ All in `app/pipeline.py`. The Pipeline groups every card by who acts next, not b
 
 `place(db, user_id, summaries)` sets each card summary's `pipeline_group`, `reason`, `handover_trigger` and `autopilot_activity`. `summarize()` in `app/cards.py` calls it, so every card response carries them, not only `GET /pipeline`.
 
-An Archived card is `archived`, whatever else is true of it: archiving is how the user is done with a card (as in the prototype). Every other card gets the first group that matches:
+Every card gets the first group that matches. Waiting for you comes before Archived, as the spec's group order says: an Archived card for which a reason applies (an overdue next action, a failed send, a handover, and so on) is `waiting_for_you` with that reason, and the app's row says "Archived" in its stage caption. The owner confirmed this on 2026-11-25.
 
 1. **`waiting_for_you`**, when a reason applies. The first that applies, in this order, is `reason`:
    1. `handover`: the handover is pending. `handover_trigger` is the first check the newest flagged message from the match hit (`logistics`, `asks_if_ai`, `place_or_exclusivity`, `personal_info`, `sensitive`, or `unavailable` when Jev could not be asked); null for every other reason.
@@ -25,6 +25,7 @@ An Archived card is `archived`, whatever else is true of it: archiving is how th
 2. **`handled_by_autopilot`**: a Matched or Chatting card autopilot is handling (below). `autopilot_activity` is `writing_opener` (no messages, and the `chat_reply` job that writes the opener is queued or running), `drafting_reply` (the match wrote last and a `chat_reply` job is queued or running), `planned` (the card has a planned send, a reply or an opener: its `planned_send` gives the send time, reason and `kind`, see "Send timing") or `sent_waiting` (the user or autopilot wrote last). The time to show is `last_message.sent_at`, or `planned_send.send_at` for `planned`, and the row ends with the card's `topic` (see "Cards and messages").
 3. **`waiting_for_them`**: every other Matched or Chatting card.
 4. **`texting_off_app`**: Number swapped, Date set, Dated and Seeing them.
+5. **`archived`**: an Archived card no reason applies to.
 
 **Handled by autopilot** needs all of these:
 
@@ -33,7 +34,9 @@ An Archived card is `archived`, whatever else is true of it: archiving is how th
 - the card has no handover, pending or taken over;
 - autopilot is doing something: a `chat_reply` job is queued, a planned send waits for its send time, or the user or autopilot wrote last. A reply job that wrote nothing (no style profile, an old message) leaves the card `your_turn`.
 
-A new match sync finds is Handled by autopilot while autopilot writes and plans its opener (see "Chat autopilot"). A match added by hand, or one synced while autopilot could not act, is `opener_due`.
+This is stricter than "autopilot may act" alone: a card autopilot could act on but is doing nothing for is Waiting for them or Waiting for you. The owner confirmed this rule on 2026-11-25.
+
+A new match sync finds is Handled by autopilot while autopilot writes and plans its opener (see "Chat autopilot"). A match added by hand, one synced while autopilot could not act, or one already there at the first sync after a connect or reconnect, is `opener_due`.
 
 ## Adding a reason or an activity
 

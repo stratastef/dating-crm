@@ -36,7 +36,7 @@ struct SessionTests {
         #expect(shareExtension.client?.token == "device-token")
 
         server.respond("", status: 204)
-        await shareExtension.signOut()
+        try await shareExtension.signOut()
     }
 
     @Test func knowsWhenTheSignInCreatedTheAccountSoSetupCanStart() async throws {
@@ -51,7 +51,7 @@ struct SessionTests {
         #expect(session.client?.token == "device-token")
 
         server.respond("", status: 204)
-        await session.signOut()
+        try await session.signOut()
     }
 
     @Test func staysSignedOutWhenTheSignInCodeIsWrong() async {
@@ -83,7 +83,7 @@ struct SessionTests {
         #expect(!UserDefaults(suiteName: name)!.dictionaryRepresentation().values.contains { $0 as? String == "secret" })
 
         server.respond("", status: 204)
-        await relaunched.signOut()
+        try await relaunched.signOut()
     }
 
     @Test func staysSignedOutWhenTheServerRejectsTheToken() async {
@@ -114,7 +114,7 @@ struct SessionTests {
         try await session.signIn(serverURL: "https://crm.test", token: "secret")
         server.respond("", status: 204)
 
-        await session.signOut()
+        try await session.signOut()
 
         let request = try #require(server.requests.last)
         #expect(request.httpMethod == "POST")
@@ -124,15 +124,31 @@ struct SessionTests {
         #expect(self.session().client == nil)
     }
 
-    @Test func signingOutForgetsTheSessionEvenWhenTheServerCannotBeReached() async throws {
+    /// Signed out on the phone but not on the server, it would keep getting pushes.
+    @Test func signingOutStaysSignedInWhenTheServerCannotBeReached() async throws {
         server.respond("[]")
         let session = session()
         try await session.signIn(serverURL: "https://crm.test", token: "secret")
         server.respond("", status: 503)
 
-        await session.signOut()
+        await #expect(throws: APIError(status: 503)) {
+            try await session.signOut()
+        }
+
+        #expect(session.client?.token == "secret")
+        #expect(self.session().client?.token == "secret")
+        server.respond("", status: 204)
+        try await session.signOut()
+    }
+
+    @Test func signingOutWithATokenTheServerNoLongerKnowsForgetsTheSession() async throws {
+        server.respond("[]")
+        let session = session()
+        try await session.signIn(serverURL: "https://crm.test", token: "secret")
+        server.respond(#"{"detail": "invalid token"}"#, status: 401)
+
+        try await session.signOut()
 
         #expect(session.client == nil)
-        #expect(self.session().client == nil)
     }
 }

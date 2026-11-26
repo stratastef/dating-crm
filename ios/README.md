@@ -13,8 +13,9 @@ The SwiftUI client for the API in the repo root. It needs Xcode 27 and an iOS 26
 | `DatingCRM/Push.swift` | `Push` (device token, tapped card) and `AppDelegate`, which receives both from UIKit. |
 | `DatingCRM.entitlements` | The push notification entitlement. |
 | `DatingCRM/API/APIClient.swift` | Every call to the server. |
-| `DatingCRM/API/Models.swift` | `Stage`, `Card`, `Message`, `Inference`, `Preferences`, `Dashboard`, `DashboardWeek`, `ProfilePhoto`, `PhotoEdit`, `Bio`, `SwipeCandidate`, `Pauses`, `AutonomyLevel`, `Budget`: the JSON the server sends. |
-| `DatingCRM/Components/` | The shared A3 look: colors, button styles, AI marker, badges, toast, relative times, avatar. See `docs/modules/ios-app-shell.md`. |
+| `DatingCRM/API/Models.swift` | The JSON the server sends. Cards: `Stage`, `Handover`, `Card`, `PipelineGroup`, `LastMessage`, `Message`, `Draft`, `Inference`. Today and Review: `Today`, `SetupSummary`, `SetupStep`, `ReviewSummary`, `TodayItem`, `QueueItem`, `QuotedMessage`, `PaidItem`. Swipe: `Swipe`, `SwipeCandidate`, `SwipeLayout`, `SwipeLimits`. Autopilot and status: `Pauses`, `AutonomyLevel`, `Budget`, `StatusMessage`, `ConnectedApp`, `ConnectorState`, `ConnectorAlert`. You: `Dashboard`, `DashboardWeek`, `UserSettings`, `ActivityEntry`, `PurgeConfirmation`, `Preferences`, `Voice`, `ProfilePhoto`, `PhotoEdit`, `Bio`. |
+| `DatingCRM/ReviewQueue.swift` | `ReviewQueue`: the review queue as Review shows it. A dismissal reaches the server only once its Undo is gone; `undoSend` takes a send back. |
+| `DatingCRM/Components/` | Shared views and helpers, one type per file: the A3 look (`Palette`: colors and button styles; `AIMarker`, `Badge`, `Toast`, `Avatar`, `FacePhoto`, `BlurredFace`, `RelativeTime`, `AdaptiveStack`, `Motion`, `Ring`, `ErrorRow`, `Inset`, `GrowingField`), card parts (`CardRow`, `DraftComposer`, `HandoverBanner`, `Held`, `PlannedRing`, `SuggestedSendTime`, `SendAtButton`, `RatingPicker`, `Autosave`), and pieces of You and Today (`StatusStrip`, `DashboardHeadline`, `AutonomySections`, `SwipeLayoutSection`). See `docs/modules/ios-app-shell.md`. |
 | `DatingCRM/Screens/` | One file per screen. `PhotosView` uploads photos from the photo library as JPEG, ranks, reorders and deletes them, labels the first "Lead photo", and shows each offered edit next to the original to accept or reject. The server makes every preview from the uploaded pixels. |
 | `DatingCRM/ScreenshotImport.swift` | Uploads a shared screenshot and holds the draft or error the share extension shows. |
 | `DatingCRMShare/` | The share extension: `ShareViewController` takes the picture from the share sheet, `ScreenshotImportView` shows the result. |
@@ -44,9 +45,9 @@ To run on your own iPhone, open the project in Xcode, pick your team under Signi
 `SignInView` asks for the phone number, then for the sign-in code the server texts to it ("your Dating CRM code"). A new code can be asked for 30 seconds after the last. A refusal (wrong or expired code, too many tries, no account for the number) shows in plain words under the field. See `docs/modules/sign-in.md` for the routes.
 
 - The server is `ServerURL` in `Info.plist`, `http://localhost:8000` for now. Set it to the production server before a TestFlight build.
-- Without an SMS provider the server writes the code to its log (`SMS to +1…: 123456 is your Dating CRM code`). Give your account a phone number first: `uv run python -m app.sign_in you@example.com +491701234567`.
+- In local development (`SMS_PROVIDER=log`, the `compose.yaml` default) the server writes the code to its log (`SMS to +1…: 123456 is your Dating CRM code`). Running the API with `uv run uvicorn`, set `SMS_PROVIDER=log` yourself: unset, code requests fail with `503`. Give your account a phone number first: `uv run python -m app.sign_in you@example.com +491701234567`.
 - Developer sign-in: a two-second press on the "Dating CRM" title opens a sheet for a server URL and an API token from `uv run python -m app.auth you@example.com`. The app checks them with one `GET /cards` before it keeps them.
-- Sign out sits under You and asks first. It revokes this device's token on the server (`POST /sign-out`), which also stops this phone's pushes, then forgets the session even if the server cannot be reached.
+- Sign out sits under You and asks first. It revokes this device's token on the server (`POST /sign-out`), which also stops this phone's pushes, then forgets the session. If the server cannot be reached, the phone stays signed in and says so next to Sign out.
 
 A server on `localhost` or your local network may use plain `http`. Any other server needs `https`.
 

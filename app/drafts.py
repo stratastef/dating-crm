@@ -17,7 +17,7 @@ from app.voice import queue_profile, similar_chats
 
 router = APIRouter()
 
-_COLUMNS = "id, card_id, kind, status, original, edited, guardrail, hot_lead, send_at, timing_reason, created_at"
+DRAFT_COLUMNS = "id, card_id, kind, status, original, edited, guardrail, hot_lead, send_at, timing_reason, created_at"
 
 
 def _queued_send(flag: str) -> str:
@@ -58,7 +58,7 @@ class Draft(BaseModel):
 
 
 def present(db: Connection, user_id: int, rows: Sequence[Row]) -> list[Draft]:
-    """Draft rows selected with `_COLUMNS`, as the API returns them: each says whether the app can send it now."""
+    """Draft rows selected with `DRAFT_COLUMNS`, as the API returns them: each says whether the app can send it now."""
     from app.send import refusal  # imported here: app.send imports this module
 
     drafts = [dict(row._mapping) for row in rows]
@@ -240,7 +240,7 @@ def draft_for(db: Connection, user_id: int, card_id: int, rule: str = "", offer:
         text(
             f"""
             UPDATE drafts SET original = :original, guardrail = :guardrail, hot_lead = :hot_lead
-            WHERE id = :id AND user_id = :user_id RETURNING {_COLUMNS}
+            WHERE id = :id AND user_id = :user_id RETURNING {DRAFT_COLUMNS}
             """
         ),
         {
@@ -270,7 +270,7 @@ def edit_draft(draft_id: int, edit: Edit, user: CurrentUser, db: Db):
             f"""
             UPDATE drafts SET edited = :edited, guardrail = :guardrail, updated_at = now()
             WHERE id = :id AND user_id = :user_id
-            RETURNING {_COLUMNS}
+            RETURNING {DRAFT_COLUMNS}
             """
         ),
         {

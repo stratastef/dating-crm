@@ -6,7 +6,7 @@ struct MainTabView: View {
 
     let client: APIClient
     let push: Push
-    let signOut: () async -> Void
+    let signOut: () async throws -> Void
 
     // `DCRM_TAB=review` opens another tab, for scripted simulator checks (see `Session.init`).
     @State private var selection = AppTab(rawValue: ProcessInfo.processInfo.environment["DCRM_TAB"] ?? "") ?? .today

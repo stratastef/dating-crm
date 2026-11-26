@@ -343,8 +343,20 @@ def test_with_sms_provider_set_a_missing_twilio_setting_fails_the_code_request(a
     assert twilio.sent == []
 
 
-def test_without_sms_provider_the_code_goes_to_the_server_log_and_not_to_twilio(app, account, clock, twilio, monkeypatch, caplog):
+def test_without_sms_provider_the_code_request_fails_closed(app, account, clock, twilio, monkeypatch, caplog):
+    """A server set up without a provider writes no code to its log: a missing setting fails closed (#50)."""
     monkeypatch.delenv("SMS_PROVIDER")
+
+    with caplog.at_level(logging.WARNING, logger="app.sms"):
+        failed = TestClient(app).post("/sign-in/code", json={"phone": PHONE})
+
+    assert (failed.status_code, failed.json()) == (503, {"detail": "sms_not_sent"})
+    assert twilio.sent == []
+    assert not re.findall(r"\b\d{6}\b", caplog.text)
+
+
+def test_with_sms_provider_log_the_code_goes_to_the_server_log_and_not_to_twilio(app, account, clock, twilio, monkeypatch, caplog):
+    monkeypatch.setenv("SMS_PROVIDER", "log")
     device = TestClient(app)
 
     with caplog.at_level(logging.WARNING, logger="app.sms"):

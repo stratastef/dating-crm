@@ -46,7 +46,7 @@ PRESCREEN_SYSTEM = (
 Swipe = Literal["like", "pass"]
 
 # The table is named in full, not aliased, so the paid item's subquery also works in `UPDATE ... RETURNING`.
-_COLUMNS = """
+CANDIDATE_COLUMNS = """
     id, app, profile_id, name, bio, photos, age, distance_mi, suggestion, reason, source, decision,
     (SELECT json_build_object('id', p.id, 'app', p.app, 'item', p.item, 'name', swipe_candidates.name,
                               'reason', p.reason, 'status', p.status, 'candidate_id', p.candidate_id,
@@ -117,7 +117,7 @@ def pending(db: Connection, user_id: int, app: str | None = None) -> list:
     """The candidates that wait for the user's swipe, oldest first."""
     return list(db.execute(
         text(
-            f"SELECT {_COLUMNS} FROM swipe_candidates WHERE user_id = :user_id AND decision IS NULL"
+            f"SELECT {CANDIDATE_COLUMNS} FROM swipe_candidates WHERE user_id = :user_id AND decision IS NULL"
             " AND (CAST(:app AS text) IS NULL OR app = :app) ORDER BY id"
         ),
         {"user_id": user_id, "app": app},
@@ -217,7 +217,7 @@ def decide(candidate_id: int, body: Decision, user: CurrentUser, db: Db):
     row = db.execute(
         text(
             "UPDATE swipe_candidates SET decision = :decision, decided_at = now()"
-            f" WHERE id = :id AND user_id = :user_id AND decision IS NULL RETURNING {_COLUMNS}"
+            f" WHERE id = :id AND user_id = :user_id AND decision IS NULL RETURNING {CANDIDATE_COLUMNS}"
         ),
         {"decision": body.decision, "id": candidate_id, "user_id": user.id},
     ).one_or_none()

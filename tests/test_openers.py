@@ -1,6 +1,6 @@
 """Openers (ADR 0008, user story 143): chat autopilot writes an opener to each new match and plans it for a random
 time 30 minutes to 6 hours after the match synced, outside the night window and at least 10 minutes from the
-user's other openers.
+user's other openers. A match that was already there when the app was connected gets none.
 
 New matches sync from a Tinder stub, the worker runs, and the planned sends are read from the card summaries.
 """
@@ -11,8 +11,9 @@ from itertools import pairwise
 
 import httpx
 import pytest
+from sqlalchemy import text
 
-from app.jobs import run_once
+from app.jobs import enqueue, run_once
 from app.tinder import TinderConnector
 from tests.test_drafts import drafted, write_profile
 from tests.test_pipeline import placed
@@ -56,10 +57,24 @@ def autopilot(app, client, llm):
     llm.reply = drafted(OPENER)
 
 
-def sync(app, client, tinder, *names: str) -> list[dict]:
-    """The user connects Tinder, the matches named sync, and the worker runs. Returns their cards."""
-    tinder.names = list(names)
+def connect(app, client) -> None:
+    """The user connects Tinder, or connects it again, and its first sync runs."""
     assert client.put("/connectors/tinder/token", json={"token": TOKEN}).status_code == 204
+    work_now(app)
+
+
+def queue_sync(app) -> None:
+    """Queue the recurring sync, as the worker does every 15 minutes."""
+    with app.state.engine.begin() as db:
+        enqueue(db, db.execute(text("SELECT id FROM users")).scalar_one(), "sync_matches")
+
+
+def sync(app, client, tinder, *names: str) -> list[dict]:
+    """The user connected Tinder earlier and the matches named are new since: a later sync finds them, and the
+    worker runs. Returns their cards."""
+    connect(app, client)
+    tinder.names = list(names)
+    queue_sync(app)
     work_now(app)
     return [card for card in client.get("/cards").json() if card["name"] in names]
 
@@ -101,8 +116,9 @@ def test_openers_for_matches_synced_together_are_at_least_ten_minutes_apart(app,
 def test_a_new_match_is_handled_by_autopilot_while_it_writes_the_opener_and_until_the_opener_goes_out(
     app, client, tinder, autopilot
 ):
+    connect(app, client)
     tinder.names = ["Ana"]
-    client.put("/connectors/tinder/token", json={"token": TOKEN})
+    queue_sync(app)
     run_once(app.state.engine)  # the sync, not yet the opener job it queues
 
     card = placed(client, "Ana")
@@ -132,3 +148,27 @@ def test_an_opener_is_dropped_when_the_user_writes_first(app, client, tinder, au
 
     assert tinder.sent == []
     assert client.get("/queue").json() == []  # dropped, not left for the user
+
+
+def test_matches_already_there_when_the_app_is_connected_or_reconnected_get_no_opener(app, client, tinder, autopilot):
+    """A first sync brings in months of matches: autopilot writing to them all at once would flood them. Each waits
+    for the user's opener instead (owner, 2026-11-25)."""
+    tinder.names = ["Ana"]
+    connect(app, client)
+    client.put("/connectors/tinder/copilot-only")
+    tinder.names = ["Ana", "Bo"]  # Bo matched while Tinder was not connected
+
+    connect(app, client)
+
+    for name in ("Ana", "Bo"):
+        card = placed(client, name)
+        assert (card["pipeline_group"], card["reason"], card["planned_send"]) == ("waiting_for_you", "opener_due", None)
+    work_after_send_time(app)
+    assert tinder.sent == []
+
+
+def test_an_opener_has_a_one_line_timing_reason_like_every_draft(app, client, tinder, autopilot):
+    (card,) = sync(app, client, tinder, "Ana")
+
+    reason = card["planned_send"]["timing_reason"]
+    assert reason and "\n" not in reason

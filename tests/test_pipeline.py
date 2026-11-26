@@ -243,14 +243,16 @@ def test_cards_from_number_swapped_on_are_texting_off_app(client):
     assert list(pipeline(client)) == ["texting_off_app"]
 
 
-def test_an_archived_card_is_archived_even_with_an_overdue_next_action(client):
-    """Archiving is how the user is done with a card, so nothing on it waits for them."""
+def test_an_archived_card_waits_for_you_while_a_reason_applies_and_is_archived_otherwise(client):
+    """Waiting for you wins over Archived, as the spec's group order says (owner, 2026-11-25)."""
     yesterday = (datetime.now(UTC).date() - timedelta(days=1)).isoformat()
     new_card(client, "Ada", stage="archived", next_action="Return her book", due_date=yesterday)
+    new_card(client, "Kim", stage="archived")
 
-    card = placed(client, "Ada")
+    ada, kim = placed(client, "Ada"), placed(client, "Kim")
 
-    assert (card["pipeline_group"], card["reason"]) == ("archived", None)
+    assert (ada["pipeline_group"], ada["reason"]) == ("waiting_for_you", "overdue")
+    assert (kim["pipeline_group"], kim["reason"]) == ("archived", None)
 
 
 # Order inside a group, and every card response.

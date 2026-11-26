@@ -89,9 +89,12 @@ enum SignInError: LocalizedError {
     }
 
     /// Revokes this device's token on the server, which also stops its pushes, then forgets the session.
-    /// The app signs out even when the server cannot be reached.
-    func signOut() async {
-        try? await client?.signOut()
+    /// If the server cannot be reached it throws and the phone stays signed in: signed out, it would still get
+    /// pushes. A token the server no longer knows (`401`) has nothing left to revoke.
+    func signOut() async throws {
+        do {
+            try await client?.signOut()
+        } catch let error as APIError where error.status == 401 {}
         storeToken(nil)
         defaults.removeObject(forKey: serverURLKey)
         client = nil

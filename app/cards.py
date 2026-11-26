@@ -14,8 +14,7 @@ from app import calendar, handover, tombstones
 from app.auth import CurrentUser, Db
 from app.autopilot import autopilot_allowed
 from app.card_lookup import own_card
-from app.drafts import _COLUMNS as _DRAFT_COLUMNS
-from app.drafts import PLANNED, SCHEDULED, Draft, present
+from app.drafts import DRAFT_COLUMNS, PLANNED, SCHEDULED, Draft, present
 from app.jobs import enqueue, handler
 from app.review import is_hot_lead
 from app.voice import queue_profile
@@ -25,7 +24,7 @@ router = APIRouter()
 # The seven pipeline stages, in order. The `cards.stage` check constraint lists the same values.
 Stage = Literal["matched", "chatting", "number_swapped", "date_set", "dated", "seeing_them", "archived"]
 
-_COLUMNS = (
+CARD_COLUMNS = (
     "id, app, external_id, name, stage, stage_changed_at, notes, next_action, due_date, created_at,"
     " stalled_at IS NOT NULL AS stalled, date_rating, date_note, handover, handover_suggestions,"
     " led_to_date, ai_disclosed, topic"
@@ -123,7 +122,7 @@ class Card(BaseModel):
 
 
 def summarize(db: Connection, user_id: int, cards: Sequence[Row]) -> list[Card]:
-    """The user's card rows, selected with `_COLUMNS`, with their card summaries, in the same order."""
+    """The user's card rows, selected with `CARD_COLUMNS`, with their card summaries, in the same order."""
     params = {"user_id": user_id, "ids": [card.id for card in cards]}
     last_messages = {
         row.card_id: dict(row._mapping)
@@ -141,7 +140,7 @@ def summarize(db: Connection, user_id: int, cards: Sequence[Row]) -> list[Card]:
     waiting = db.execute(
         text(
             f"""
-            SELECT {_DRAFT_COLUMNS}, {SCHEDULED} AS scheduled FROM drafts
+            SELECT {DRAFT_COLUMNS}, {SCHEDULED} AS scheduled FROM drafts
             WHERE user_id = :user_id AND card_id = ANY(:ids)
               AND (status IN ('pending', 'copied', 'failed') OR {PLANNED} OR {SCHEDULED})
             ORDER BY created_at DESC, id DESC
@@ -209,7 +208,7 @@ def create_card(card: NewCard, user: CurrentUser, db: Db):
                 f"""
                 INSERT INTO cards (user_id, app, external_id, name, stage, notes, next_action, due_date)
                 VALUES (:user_id, :app, :external_id, :name, :stage, :notes, :next_action, :due_date)
-                RETURNING {_COLUMNS}
+                RETURNING {CARD_COLUMNS}
                 """
             ),
             {"user_id": user.id, **card.model_dump()},
@@ -220,13 +219,14 @@ def create_card(card: NewCard, user: CurrentUser, db: Db):
 
 
 def upsert_card(
-    db: Connection, user_id: int, app: str, external_id: str, name: str, has_messages: bool = True
+    db: Connection, user_id: int, app: str, external_id: str, name: str, opener: bool = False
 ) -> int | None:
     """Create the card for a synced match in Matched, or refresh its name. Returns the card id.
 
     An existing card keeps its stage, notes, next action and due date. A match the user purged is not stored
-    again: None is returned and the caller must store nothing about them. A new match without `has_messages`
-    gets chat autopilot's opener, if it may act.
+    again: None is returned and the caller must store nothing about them. With `opener`, a card this creates gets
+    chat autopilot's opener, if it may act: sync asks for it for a match with no messages that is new since the
+    app was connected.
     """
     if tombstones.is_buried(db, user_id, "match", app, external_id):
         return None
@@ -242,7 +242,7 @@ def upsert_card(
         {"user_id": user_id, "app": app, "external_id": external_id, "name": name},
     ).one()
     # `now()` is when this transaction began, so only a card it inserted was created then.
-    if card.created and not has_messages:
+    if card.created and opener:
         _queue_reply(db, user_id, card.id)
     return card.id
 
@@ -317,7 +317,7 @@ def list_cards(user: CurrentUser, db: Db, stage: Stage | None = None, app: str |
     rows = db.execute(
         text(
             f"""
-            SELECT {_COLUMNS} FROM cards
+            SELECT {CARD_COLUMNS} FROM cards
             WHERE user_id = :user_id
               AND (CAST(:stage AS text) IS NULL OR stage = :stage)
               AND (CAST(:app AS text) IS NULL OR app = :app)
@@ -348,7 +348,7 @@ def update_card(card_id: int, changes: CardChanges, user: CurrentUser, db: Db):
             f"""
             UPDATE cards SET {", ".join(assignments) or "notes = notes"}
             WHERE id = :id AND user_id = :user_id
-            RETURNING {_COLUMNS}
+            RETURNING {CARD_COLUMNS}
             """
         ),
         {"id": card_id, "user_id": user.id, **fields},
@@ -367,7 +367,7 @@ def update_card(card_id: int, changes: CardChanges, user: CurrentUser, db: Db):
 
 @router.get("/cards/{card_id}", response_model=Card)
 def read_card(card_id: int, user: CurrentUser, db: Db):
-    return summarize(db, user.id, [own_card(db, user.id, card_id, _COLUMNS)])[0]
+    return summarize(db, user.id, [own_card(db, user.id, card_id, CARD_COLUMNS)])[0]
 
 
 _MESSAGE_COLUMNS = "id, card_id, external_id, sender, body, sent_at, handover, sent_by_autopilot"

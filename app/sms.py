@@ -1,7 +1,7 @@
 """Text messages to phones, through Twilio (ADR 0010).
 
 `send()` is the only function that texts a phone, and `post()` the only one that talks to Twilio; tests replace them.
-Without `SMS_PROVIDER`, the text goes to the server log instead (local development).
+With `SMS_PROVIDER=log` the text goes to the server log instead (local development, set in `compose.yaml`).
 """
 
 import logging
@@ -26,14 +26,15 @@ def post(url: str, auth: tuple[str, str], data: dict[str, str]) -> tuple[int, di
 
 
 def send(phone: str, body: str) -> None:
-    """Text `body` to `phone` (E.164). With `SMS_PROVIDER` set, raises `NotSent` unless Twilio accepted the text."""
+    """Text `body` to `phone` (E.164). Raises `NotSent` unless Twilio accepted the text, or `SMS_PROVIDER=log` wrote
+    it to the server log. `SMS_PROVIDER` unset or unknown fails closed too."""
     provider = os.environ.get("SMS_PROVIDER")
-    if not provider:
+    if provider == "log":
         log.warning("SMS to %s: %s", phone, body)
         return
     account, token, sender = (os.environ.get(name) for name in TWILIO_SETTINGS)
     if provider != "twilio" or not (account and token and sender):
-        raise NotSent(f"set SMS_PROVIDER=twilio and {', '.join(TWILIO_SETTINGS)}")
+        raise NotSent(f"set SMS_PROVIDER=twilio and {', '.join(TWILIO_SETTINGS)}, or SMS_PROVIDER=log to develop")
     # A Messaging Service (its SID starts with MG) picks the sender for each country; anything else is the sender.
     data = {"To": phone, "Body": body, ("MessagingServiceSid" if sender.startswith("MG") else "From"): sender}
     url = f"https://api.twilio.com/2010-04-01/Accounts/{account}/Messages.json"

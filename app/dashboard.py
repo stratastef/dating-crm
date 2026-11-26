@@ -9,13 +9,12 @@ from sqlalchemy import text
 from app.auth import CurrentUser, Db
 from app.budget import budget
 from app.cards import is_good_date
+from app.llm import month_start
 
 router = APIRouter()
 
 # Weeks start on Monday, in UTC.
 _WEEK = "CAST(date_trunc('week', {} AT TIME ZONE 'UTC') AS date)"
-# Months too, as the AI budget's (`llm.spend`).
-_MONTH = "date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"
 
 
 class AppTime(BaseModel):
@@ -72,12 +71,13 @@ def dashboard(user: CurrentUser, db: Db):
     }
     good_dates: dict[date, int] = {}
     good_this_month = 0
+    params = {"user_id": user.id, "month": month_start(datetime.now(UTC))}  # as the AI budget counts months
     for week, this_month, rating in db.execute(
         text(
-            f"SELECT {_WEEK.format('date_rated_at')}, date_rated_at >= {_MONTH}, date_rating FROM cards"
+            f"SELECT {_WEEK.format('date_rated_at')}, date_rated_at >= :month, date_rating FROM cards"
             " WHERE user_id = :user_id AND date_rated_at IS NOT NULL"
         ),
-        {"user_id": user.id},
+        params,
     ):
         if is_good_date(rating):
             good_dates[week] = good_dates.get(week, 0) + 1
@@ -91,11 +91,11 @@ def dashboard(user: CurrentUser, db: Db):
     monday = today - timedelta(days=today.weekday())
     matched, chatting, date_set, dated = db.execute(
         text(
-            f"SELECT count(*) FILTER (WHERE created_at >= {_MONTH}), count(*) FILTER (WHERE chatting_at >= {_MONTH}),"
-            f" count(*) FILTER (WHERE date_set_at >= {_MONTH}), count(*) FILTER (WHERE dated_at >= {_MONTH})"
+            "SELECT count(*) FILTER (WHERE created_at >= :month), count(*) FILTER (WHERE chatting_at >= :month),"
+            " count(*) FILTER (WHERE date_set_at >= :month), count(*) FILTER (WHERE dated_at >= :month)"
             " FROM cards WHERE user_id = :user_id"
         ),
-        {"user_id": user.id},
+        params,
     ).one()
     spend = budget(db, user.id)
     return Dashboard(

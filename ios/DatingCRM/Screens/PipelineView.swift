@@ -166,7 +166,7 @@ extension Card {
         switch pipelineGroup {
         case "waiting_for_you":
             switch reason {
-            case "handover": ["Handover", handoverTrigger.map(Self.triggerTitle)].compactMap { $0 }.joined(separator: " · ")
+            case "handover": ["Handover", handoverTrigger.map { HandoverBanner.words($0).short }].compactMap { $0 }.joined(separator: " · ")
             case "draft_in_review": "\(pendingDraft?.kind == .opener ? "Opener" : "Reply") ready in Review"
             case "copied_draft": "Copied draft · not sent yet"
             case "failed_send": "Send failed"
@@ -205,19 +205,6 @@ extension Card {
         }
         case "sent_waiting": lastMessage.map { "sent \(RelativeTime.ago($0.sentAt, now: now, calendar: calendar)), no reply yet" }
         default: nil
-        }
-    }
-
-    /// The handover check that hit, in words (`app/jev.py`, `HANDOVER`).
-    private static func triggerTitle(_ check: String) -> String {
-        switch check {
-        case "asks_if_ai": "asked if you're AI"
-        case "logistics": "date plans"
-        case "place_or_exclusivity": "place or exclusivity"
-        case "personal_info": "personal info"
-        case "sensitive": "sensitive topic"
-        case "unavailable": "not checked"
-        default: check.replacing("_", with: " ")
         }
     }
 }

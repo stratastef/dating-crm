@@ -48,8 +48,9 @@ def _answer_to_offer(db: Connection, user_id: int, holds: Sequence, message: str
 @handler("chat_reply", autopilot="chat")
 def chat_reply(db: Connection, user_id: int, payload: dict) -> None:
     """Answer the newest message of a card's match, or write the opener to a match with no messages. Queued for
-    each new message from a match, and for each new match sync finds without one, while chat autopilot may act;
-    the worker runs it only if `autopilot_allowed()` still says yes.
+    each new message from a match, and for each match without one that sync finds after the app's first sync since
+    it was connected (`app/sync.py`), while chat autopilot may act; the worker runs it only if
+    `autopilot_allowed()` still says yes.
 
     The reply is sent alone only if `queue_send(unattended=True)` lets it through. Otherwise it stays a
     pending draft in the review queue. Safe to run twice: a card with a draft under way is left alone.
@@ -157,7 +158,7 @@ def chat_reply(db: Connection, user_id: int, payload: dict) -> None:
     # `draft_for()` timed a reply from the chat. An opener is timed from when the match synced (ADR 0008).
     send_at, reason = draft.send_at, draft.timing_reason
     if not newest:
-        send_at, reason = timing.opener_time(db, user_id, card.created_at), ""
+        send_at, reason = timing.opener_time(db, user_id, card.created_at), timing.OPENER_REASON
     db.execute(
         text(
             "UPDATE drafts SET original = :original, guardrail = :guardrail, send_at = :send_at,"

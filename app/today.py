@@ -9,7 +9,7 @@ from sqlalchemy import text
 
 from app import review, setup
 from app.auth import CurrentUser, Db
-from app.cards import _COLUMNS, Card, summarize
+from app.cards import CARD_COLUMNS, Card, summarize
 from app.settings import user_zone
 
 router = APIRouter()
@@ -65,7 +65,7 @@ def today(user: CurrentUser, db: Db):
     rows = db.execute(
         text(
             f"""
-            SELECT {_COLUMNS} FROM cards WHERE user_id = :user_id AND stage <> 'archived'
+            SELECT {CARD_COLUMNS} FROM cards WHERE user_id = :user_id AND stage <> 'archived'
               AND (id = ANY(:dated) OR (next_action IS NOT NULL AND due_date <= :last) OR stalled_at IS NOT NULL
                    OR (stage = 'dated' AND date_rating IS NULL))
             ORDER BY id

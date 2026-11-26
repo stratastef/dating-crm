@@ -1,5 +1,5 @@
-"""Sending a draft through a connector: `queue_send()` approves a draft and the `send_draft` job sends it once.
-`cancel_send()` takes a queued send back until the job starts."""
+"""Sending a draft through a connector: `queue_send()` queues a draft to send and the `send_draft` job sends it
+once. `cancel_send()` takes a queued send back until the job starts."""
 
 from datetime import UTC, datetime, timedelta
 
@@ -7,13 +7,13 @@ from fastapi import APIRouter, HTTPException
 from pydantic import AwareDatetime, BaseModel
 from sqlalchemy import Connection, Row, text
 
-from app import calendar, handover
+from app import calendar, handover, timing
 from app.audit import record_action
 from app.auth import CurrentUser, Db
 from app.autopilot import autopilot_block
 from app.cards import upsert_message
 from app.connectors import CapabilityFailed, call, unavailable
-from app.drafts import _COLUMNS, PLANNED, Draft, present
+from app.drafts import DRAFT_COLUMNS, PLANNED, Draft, present
 from app.jobs import enqueue, handler
 from app.sync import CONNECTORS
 
@@ -65,8 +65,8 @@ def queue_send(
     run_at: datetime | None = None,
     scheduled: bool = False,
 ) -> Row | None:
-    """Approve a pending draft, or a failed one again (Retry), and queue the job that sends it, in the caller's
-    transaction.
+    """Queue a pending draft, or a failed one again (Retry), to send: it becomes `approved` and the job that sends
+    it is queued, in the caller's transaction.
 
     Returns the draft, now `approved`, or None if the user has no such draft or it is not `pending` or `failed`,
     so a draft is queued at most once. `trigger` is what caused the send; it goes to the audit log.
@@ -84,7 +84,7 @@ def queue_send(
             f"""
             UPDATE drafts SET status = 'approved', updated_at = now(),
                 send_at = CASE WHEN :scheduled THEN CAST(:run_at AS timestamptz) ELSE send_at END
-            WHERE id = :id AND user_id = :user_id AND status IN ('pending', 'failed') RETURNING {_COLUMNS}
+            WHERE id = :id AND user_id = :user_id AND status IN ('pending', 'failed') RETURNING {DRAFT_COLUMNS}
             """
         ),
         {"id": draft_id, "user_id": user_id, "scheduled": scheduled, "run_at": run_at},
@@ -103,7 +103,7 @@ def cancel_send(db: Connection, user_id: int, draft_id: int) -> Row | None:
         text(
             f"""
             UPDATE drafts SET status = 'pending', updated_at = now()
-            WHERE id = :id AND user_id = :user_id AND status = 'approved' RETURNING {_COLUMNS}
+            WHERE id = :id AND user_id = :user_id AND status = 'approved' RETURNING {DRAFT_COLUMNS}
             """
         ),
         {"id": draft_id, "user_id": user_id},
@@ -231,10 +231,38 @@ def send_now(draft_id: int, user: CurrentUser, db: Db):
     return present(db, user.id, [draft])[0]
 
 
+def _planned_again(db: Connection, user_id: int, draft_id: int, payload: dict) -> bool:
+    """Plan a send no user asked for again if it would now go out inside the user's night window: the window or
+    their time zone changed since it was planned. The same rule as planning (`timing.night_rule()`) picks the new
+    time, and the draft waits for it, still `approved`. True if it was planned again."""
+    draft = db.execute(
+        text(
+            "SELECT card_id, greatest(send_at, now()) AS at FROM drafts"
+            " WHERE id = :id AND user_id = :user_id AND status = 'approved'"
+        ),
+        {"id": draft_id, "user_id": user_id},
+    ).one_or_none()
+    if not draft:
+        return False
+    # shortcut: an opener moved here is not spaced from the user's other openers (`timing.opener_time()`); space
+    # it too if a changed night window ever sends several in the same minute.
+    later = timing.night_rule(db, user_id, draft.card_id, draft.at, draft.at)
+    if later == draft.at:
+        return False
+    db.execute(
+        text("UPDATE drafts SET send_at = :later, updated_at = now() WHERE id = :id AND user_id = :user_id"),
+        {"id": draft_id, "user_id": user_id, "later": later},
+    )
+    enqueue(db, user_id, "send_draft", payload, run_at=later)
+    return True
+
+
 @handler("send_draft")
 def send_draft(db: Connection, user_id: int, payload: dict) -> None:
     """Send an approved draft, at most once, and store the sent message on its card. Safe to run twice."""
     draft_id = payload["draft_id"]
+    if payload.get("unattended") and _planned_again(db, user_id, draft_id, payload):
+        return
     # The claim commits on its own before the app is touched, so it survives a crash or a failed attempt.
     # A run that finds the draft already `sending` follows an attempt that died: the message may have gone
     # out, so it is not sent again.

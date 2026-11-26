@@ -34,9 +34,7 @@ def status(user: CurrentUser, db: Db):
     messages += [StatusMessage(kind="paused", app=app) for app in paused["apps"]]  # by name
     if llm.budget_reached(db, user.id):
         # Spend counts the calendar month in UTC (`llm.spend()`), so the budget resets at the next one.
-        today = now()
-        resets_at = datetime(today.year + today.month // 12, today.month % 12 + 1, 1, tzinfo=UTC)
-        messages.append(StatusMessage(kind="budget_reached", resets_at=resets_at))
+        messages.append(StatusMessage(kind="budget_reached", resets_at=llm.month_start(now(), ahead=1)))
     # Connected apps' `broken` state, so the strip and that screen agree; a copilot-only choice answers the alert.
     messages += [
         StatusMessage(kind="connector_alert", app=row["app"])

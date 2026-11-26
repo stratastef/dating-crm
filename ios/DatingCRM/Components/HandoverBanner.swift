@@ -71,19 +71,23 @@ struct HandoverBanner: View {
 
     /// Why autopilot stopped, from the server's trigger codes (`HANDOVER` in `app/jev.py`). Review says it too.
     static func reason(_ triggers: [String]) -> String {
-        let reasons = triggers.map { trigger in
-            switch trigger {
-            case "asks_if_ai": "they asked if you're an AI"
-            case "logistics": "they want to make plans"
-            case "place_or_exclusivity": "they asked where to meet or about being exclusive"
-            case "personal_info": "they shared or asked for personal info"
-            case "sensitive": "they brought up something sensitive"
-            case "unavailable": "the message could not be checked"
-            default: "a handover trigger fired"
-            }
-        }
+        let reasons = triggers.map { words($0).sentence }
         guard !reasons.isEmpty else { return "Autopilot paused this chat" }
         return "Autopilot stopped: \(reasons.formatted())"
+    }
+
+    /// The one place a handover check that hit is put into words (`HANDOVER` in `app/jev.py`): `short` for the
+    /// Pipeline's status line, `sentence` after "Autopilot stopped:" here and in Review.
+    static func words(_ trigger: String) -> (short: String, sentence: String) {
+        switch trigger {
+        case "asks_if_ai": ("asked if you're AI", "they asked if you're an AI")
+        case "logistics": ("date plans", "they want to make plans")
+        case "place_or_exclusivity": ("place or exclusivity", "they asked where to meet or about being exclusive")
+        case "personal_info": ("personal info", "they shared or asked for personal info")
+        case "sensitive": ("sensitive topic", "they brought up something sensitive")
+        case "unavailable": ("not checked", "the message could not be checked")
+        default: (trigger.replacing("_", with: " "), "a handover trigger fired")
+        }
     }
 
     private func change(takeOver: Bool) async {

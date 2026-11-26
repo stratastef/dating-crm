@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from tests.test_drafts import drafted, write_profile
-from tests.test_send import CLEO, tinder, user_id, work_after_send_time, work_now  # noqa: F401  (fixtures)
+from tests.test_send import CLEO, tinder, user_id, work_after_send_time, work_at, work_now  # noqa: F401  (fixtures)
 
 REPLY = "both. badly."
 
@@ -93,7 +93,7 @@ def test_no_reply_is_planned_more_than_twelve_hours_out(app, client, llm, card_i
 
 def test_a_send_time_inside_the_night_window_moves_to_its_end(app, client, card_id):
     zone = at_local_hour(client, 3)
-    chat(client, card_id, ("them", 0, "do you climb indoors or outdoors"))
+    chat(client, card_id, ("them", 6, "do you climb indoors or outdoors"))  # six minutes ago: not live
     today = datetime.now(zone).date()
 
     plan(app, client, card_id)
@@ -106,7 +106,7 @@ def test_a_send_time_inside_the_night_window_moves_to_its_end(app, client, card_
 def test_a_send_time_inside_a_night_window_the_user_set_moves_to_its_end(app, client, card_id):
     zone = at_local_hour(client, 22)
     client.patch("/settings", json={"night_window_start": 22, "night_window_end": 9})
-    chat(client, card_id, ("them", 0, "do you climb indoors or outdoors"))
+    chat(client, card_id, ("them", 6, "do you climb indoors or outdoors"))
     tomorrow = datetime.now(zone).date() + timedelta(days=1)
 
     plan(app, client, card_id)
@@ -114,6 +114,54 @@ def test_a_send_time_inside_a_night_window_the_user_set_moves_to_its_end(app, cl
     local = send_at(planned_send(client, card_id)).astimezone(zone)
     assert local.date() == tomorrow
     assert time(9, 0) < local.time() <= time(9, 15)
+
+
+def test_a_live_match_at_night_gets_its_reply_at_the_live_pace(app, client, llm, card_id, tinder):  # noqa: F811
+    """They answer within a minute at 03:00 (owner, 2026-11-25): the night window does not hold the reply."""
+    at_local_hour(client, 3)
+    llm.reply = drafted(REPLY, adjustment=-0.5)
+    chat(client, card_id, ("me", 3, "climbing?"), ("them", 2, "yes!! you?"), ("me", 1, "badly"), ("them", 0, "same"))
+
+    wait = plan(app, client, card_id)
+
+    assert timedelta(minutes=2) <= wait < timedelta(minutes=2, seconds=5)
+    work_after_send_time(app)
+    assert [body["message"] for _, body in tinder.sent] == [REPLY]  # still live when it goes out
+
+
+def test_a_reply_the_night_window_would_hold_past_twelve_hours_goes_out_just_before_the_window_starts(
+    app, client, llm, card_id
+):
+    """At 09:00 the ceiling puts the reply at 21:00, inside a night window of 11 to 23 whose end is 14 hours away
+    (owner, 2026-11-25)."""
+    zone = at_local_hour(client, 9)
+    client.patch("/settings", json={"night_window_start": 11, "night_window_end": 23})
+    llm.reply = drafted(REPLY, adjustment=3)
+    chat(client, card_id, ("me", 20 * 60, "how was the trip"), ("them", 6, "ok"))
+
+    plan(app, client, card_id)
+
+    local = send_at(planned_send(client, card_id)).astimezone(zone)
+    assert local.date() == datetime.now(zone).date()
+    assert time(10, 45) <= local.time() < time(11, 0)  # a few random minutes before 11:00
+
+
+def test_a_planned_send_that_would_go_out_inside_the_night_window_waits_for_its_end(app, client, card_id, tinder):  # noqa: F811
+    """The user moved their night window over the planned send after it was planned."""
+    zone = at_local_hour(client, 11)
+    chat(client, card_id, ("them", 6, "do you climb indoors or outdoors"))  # planned for about 35 minutes on
+    work_now(app)
+    planned = planned_send(client, card_id)
+    client.patch("/settings", json={"night_window_start": 11, "night_window_end": 14})
+
+    work_at(app, send_at(planned))
+
+    assert tinder.sent == []
+    moved = planned_send(client, card_id)
+    assert moved["id"] == planned["id"]
+    assert time(14, 0) < send_at(moved).astimezone(zone).time() <= time(14, 15)
+    work_after_send_time(app)
+    assert [body["message"] for _, body in tinder.sent] == [REPLY]
 
 
 def test_the_night_window_is_one_to_seven_by_default_and_takes_only_hours_of_the_day(client):

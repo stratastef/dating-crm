@@ -173,7 +173,7 @@ The screen that shows every card, grouped by who acts next: waiting for you, han
 _Avoid_: Board
 
 **Waiting for you**:
-A card blocked on the user: a pending handover, a draft in Review, a copied draft not yet sent, a failed send, a Stalled card, an overdue next action, a Dated card with no rating, a match's message autopilot is not answering, or a new match autopilot is not writing to. A next action due today does not count until it is overdue. An Archived card never waits for the user.
+A card blocked on the user: a pending handover, a draft in Review, a copied draft not yet sent, a failed send, a Stalled card, an overdue next action, a Dated card with no rating, a match's message autopilot is not answering, or a new match autopilot is not writing to. A next action due today does not count until it is overdue. An Archived card waits for the user too while one of these applies.
 _Avoid_: Needs you, due
 
 **Handled by autopilot**:
