@@ -1,14 +1,14 @@
 """a copied draft remembers when it was copied; v1 drafts left approved and never sent are copied
 
 Revision ID: t56_copied_drafts
-Revises: t55_review_context
+Revises: t49_invite_codes
 """
 
 import sqlalchemy as sa
 from alembic import op
 
 revision = "t56_copied_drafts"
-down_revision = "t55_review_context"
+down_revision = "t49_invite_codes"
 branch_labels = None
 depends_on = None
 
