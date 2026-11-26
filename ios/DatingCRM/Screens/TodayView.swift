@@ -17,6 +17,7 @@ struct TodayView: View {
     @State private var settingUp = false
     @State private var toast: Toast?
     @Environment(\.motionReduced) private var motionReduced
+    @Environment(\.todayLoaded) private var todayLoaded
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -64,7 +65,10 @@ struct TodayView: View {
             }
             .toast($toast)
             .refreshable { await load() }
-            .task { await load() }
+            .task {
+                await load()
+                todayLoaded()
+            }
         }
     }
 

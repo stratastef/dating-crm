@@ -27,6 +27,7 @@ extension View {
 private struct ToastPresenter: ViewModifier {
     @Binding var toast: Toast?
     @Environment(\.motionReduced) private var motionReduced
+    @State private var undone = 0
 
     func body(content: Content) -> some View {
         content
@@ -40,6 +41,7 @@ private struct ToastPresenter: ViewModifier {
                         Spacer(minLength: 0)
                         if let undo = current.undo {
                             Button("Undo") {
+                                undone += 1
                                 undo()
                                 toast = nil
                             }
@@ -63,6 +65,8 @@ private struct ToastPresenter: ViewModifier {
                 }
             }
             .animation(motionReduced ? .easeInOut(duration: 0.2) : .spring(duration: 0.45, bounce: 0.2), value: toast?.id)
+            // On the content, which stays: Undo hides the toast at once.
+            .sensoryFeedback(.tap, trigger: undone)
     }
 }
 

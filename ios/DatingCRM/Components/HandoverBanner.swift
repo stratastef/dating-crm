@@ -18,6 +18,7 @@ struct HandoverBanner: View {
     @State private var error: String?
     /// The last button tapped, which the error's tap tries again: Take over (true) or Hand back.
     @State private var tookOver = false
+    @State private var haptic: Haptic?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -37,6 +38,7 @@ struct HandoverBanner: View {
                             HStack {
                                 Text(suggestion).frame(maxWidth: .infinity, alignment: .leading)
                                 Button("Copy", systemImage: "doc.on.doc") {
+                                    haptic = Haptic(.tap)
                                     UIPasteboard.general.string = suggestion
                                     copied()
                                 }
@@ -67,6 +69,7 @@ struct HandoverBanner: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
         .background(Color(uiColor: .secondarySystemBackground), in: .rect(cornerRadius: 24))
+        .haptic(haptic)
     }
 
     /// Why autopilot stopped, from the server's trigger codes (`HANDOVER` in `app/jev.py`). Review says it too.
@@ -93,6 +96,7 @@ struct HandoverBanner: View {
     private func change(takeOver: Bool) async {
         busy = true
         tookOver = takeOver
+        haptic = Haptic(takeOver ? .press : .tap)
         defer { busy = false }
         do {
             if takeOver {

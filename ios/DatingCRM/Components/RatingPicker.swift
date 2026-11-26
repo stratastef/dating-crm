@@ -7,6 +7,9 @@ struct RatingPicker: View {
     let title: String
     @Binding var rating: Int?
 
+    /// Taps per value, so only the tapped row plays its tick: a haptic on the section would play once per row.
+    @State private var taps: [Int: Int] = [:]
+
     static let anchors = [
         1: "Bad: I won't see them again",
         2: "Meh: probably not again",
@@ -20,6 +23,7 @@ struct RatingPicker: View {
             ForEach(1...5, id: \.self) { value in
                 Button {
                     rating = value
+                    taps[value, default: 0] += 1
                 } label: {
                     HStack(spacing: 14) {
                         Text("\(value)").font(.title2.bold()).monospacedDigit()
@@ -39,6 +43,7 @@ struct RatingPicker: View {
                 }
                 .accessibilityLabel("\(value), \(Self.anchors[value] ?? "")\(value >= 4 ? ", good date" : "")")
                 .accessibilityAddTraits(rating == value ? .isSelected : [])
+                .sensoryFeedback(.tick, trigger: taps[value])
             }
         } header: {
             Text(title).foregroundStyle(Color.primary)

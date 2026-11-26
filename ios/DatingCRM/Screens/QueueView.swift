@@ -8,6 +8,8 @@ struct QueueView: View {
 
     @State private var review: ReviewQueue
     @State private var toast: Toast?
+    /// For actions that take their item off the screen at once, so the item cannot play it.
+    @State private var haptic: Haptic?
 
     init(client: APIClient) {
         self.client = client
@@ -28,6 +30,7 @@ struct QueueView: View {
                     // Kinds this version does not know are not shown.
                     if item.kind == "draft" || item.kind == "failed_send", let draft = item.draft {
                         DraftItem(client: client, review: review, item: item, draft: draft) {
+                            haptic = Haptic(.tap)
                             review.dismiss(item)
                             toast = Toast(text: "Dismissed the draft for \(item.cardName)") { review.undo(item) }
                         } copied: {
@@ -43,14 +46,17 @@ struct QueueView: View {
                         }
                     } else if item.kind == "copied_draft", let draft = item.draft {
                         CopiedDraftItem(item: item, draft: draft) {
+                            haptic = Haptic(.tap)
                             UIPasteboard.general.string = draft.text
                             toast = Toast(text: "Copied. Paste it in \(item.datingApp).")
                         } clear: {
+                            haptic = Haptic(.tap)
                             review.dismiss(item)
                             toast = Toast(text: "Cleared the draft for \(item.cardName)") { review.undo(item) }
                         }
                     } else if item.kind == "handover", let cardID = item.cardID {
                         HandoverItem(client: client, review: review, item: item, cardID: cardID) {
+                            haptic = Haptic(.tap)
                             toast = Toast(text: "Copied")
                         }
                     } else if let paidItem = item.paidItem {
@@ -67,6 +73,9 @@ struct QueueView: View {
         .refreshable { await review.load() }
         .task { await review.load() }
         .toast($toast)
+        .haptic(haptic)
+        // The user cleared the last waiting item: Today's count is at zero.
+        .sensoryFeedback(.done, trigger: review.cleared)
     }
 }
 
@@ -155,6 +164,7 @@ private struct DraftItem: View {
     @State private var draft: Draft
     @State private var text: String
     @State private var busy = false
+    @State private var haptic: Haptic?
 
     init(
         client: APIClient, review: ReviewQueue, item: QueueItem, draft: Draft,
@@ -222,6 +232,7 @@ private struct DraftItem: View {
             }
             .disabled(busy)
         }
+        .haptic(haptic)
     }
 
     @ViewBuilder private var secondary: some View {
@@ -250,6 +261,7 @@ private struct DraftItem: View {
 
     private func act(send: Bool, at: Date? = nil) {
         busy = true
+        haptic = Haptic(send ? .press : .tap)
         Task {
             defer { busy = false }
             do {
@@ -268,6 +280,7 @@ private struct DraftItem: View {
                 }
                 review.error = nil
             } catch {
+                if send { haptic = Haptic(.fail) }
                 review.error = error.localizedDescription
             }
         }
@@ -312,6 +325,7 @@ private struct HandoverItem: View {
     let copied: () -> Void
 
     @State private var busy = false
+    @State private var haptic: Haptic?
 
     var body: some View {
         PhotoCard(name: item.cardName, photo: item.card?.leadPhotoUrl) {
@@ -346,11 +360,13 @@ private struct HandoverItem: View {
             }
             .disabled(busy)
         }
+        .haptic(haptic)
     }
 
     /// Either way the handover no longer waits in Review.
     private func change(takeOver: Bool) {
         busy = true
+        haptic = Haptic(takeOver ? .press : .tap)
         Task {
             defer { busy = false }
             do {
@@ -377,6 +393,7 @@ private struct PaidItemCard: View {
 
     @State private var busy = false
     @State private var showsProfile = false
+    @State private var approvals = 0
 
     var body: some View {
         PhotoCard(name: paidItem.name, photo: paidItem.photoUrl) {
@@ -408,10 +425,12 @@ private struct PaidItemCard: View {
                 CandidateProfile(client: client, candidateID: candidateID)
             }
         }
+        .sensoryFeedback(.thud, trigger: approvals)
     }
 
     private func answer(approve: Bool) {
         busy = true
+        if approve { approvals += 1 }
         Task {
             defer { busy = false }
             do {

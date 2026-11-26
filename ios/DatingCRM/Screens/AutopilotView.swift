@@ -16,6 +16,7 @@ struct AutopilotView: View {
     /// Holds the night window; nil until loaded.
     @State private var settings: UserSettings?
     @State private var error: String?
+    @State private var haptic: Haptic?
 
     var body: some View {
         List {
@@ -25,12 +26,14 @@ struct AutopilotView: View {
             pauseSection
             nightSection
             AutonomySections(levels: autonomy) { job, level in
+                haptic = Haptic(.tick)
                 Task { await run { autonomy = try await client.setAutonomy(job: job, level: level) } }
             }
             budgetSection
             limitsSection
         }
         .scrollDismissesKeyboard(.interactively)
+        .haptic(haptic)
         .navigationTitle("Autopilot")
         .task {
             await run {
@@ -168,6 +171,7 @@ struct AutopilotView: View {
         Binding {
             app.map(pauses.apps.contains) ?? pauses.all
         } set: { on in
+            haptic = Haptic(on ? .thud : .press)
             Task { await run { pauses = try await client.setPaused(on, app: app) } }
         }
     }

@@ -95,6 +95,34 @@ struct ReviewQueueTests {
         #expect(request.url?.absoluteString == "https://crm.test/drafts/5/dismiss")
     }
 
+    // Done plays when the user's own action clears the last waiting item, never when a load comes back empty.
+
+    @Test func eachTimeTheUserClearsTheLastItemCountsOnce() async throws {
+        server.respond(oneDraft)
+        let review = ReviewQueue(client: server.client(), undoWindow: .seconds(60))
+        await review.load()
+        let item = try #require(review.items.first)
+
+        review.dismiss(item)
+        #expect(review.cleared == 1)
+        review.undo(item)
+        review.remove(item)  // sent
+
+        #expect(review.cleared == 2)
+    }
+
+    @Test func aLoadThatComesBackEmptyIsNotClearedByTheUser() async throws {
+        server.respond(oneDraft)
+        server.respond("[]")
+        let review = ReviewQueue(client: server.client())
+        await review.load()
+
+        await review.load()  // autopilot or another phone cleared it
+
+        #expect(review.items.isEmpty)
+        #expect(review.cleared == 0)
+    }
+
     // Send: the server holds the send for 5 seconds; Undo asks it back and the draft returns as the server has it.
 
     private let sentItem = QueueItem(

@@ -47,8 +47,35 @@ The shared components are in `ios/DatingCRM/Components/`, one file each:
 | `ErrorRow(text:retry:)` | `ErrorRow.swift` | A failed load or save next to what failed, in primary text with a red icon; tapping it retries. Borderless, so it can share a row with a field. |
 | `StatusStrip(client:tab:)` | `StatusStrip.swift` | The status strip, as a modifier on the `TabView`: its bottom accessory while `GET /status` has a message. Only `MainTabView` uses it. |
 | `\.motionReduced` | `Motion.swift` | True with Reduce Motion or Low Power Mode on. Read it before any spring, ring or color field and use a fade instead. |
+| `.tick`, `.tap`, `.press`, `.thud`, `.done`, `.alert`, `.fail`; `Haptic` and `.haptic(_:)` | `Haptics.swift` | The haptics vocabulary as `SensoryFeedback` names (see "Splash and haptics"). Where one view plays several, set `haptic = Haptic(.press)` in the action and put `.haptic(haptic)` on a view that stays on screen. |
+| `HourRing.play()` | `HourRing.swift`, `HourRing.ahap` | The hour: the one Core Haptics pattern. Silent on hardware without haptics. |
+| `Splash(ready:finish:)` | `Splash.swift` | The animated splash. Only `DatingCRMApp` uses it. |
 
 Type: SF Pro text styles. New York (`.fontDesign(.serif)`) only for explanations, empty states, setup and monograms.
+
+## Splash and haptics
+
+Both follow `docs/brand/motion-and-haptics.md`.
+
+- **Splash.** `DatingCRMApp` lays `Splash` over the app on a cold launch: its state lives as long as the process, so a resume never shows it. The generated launch screen stays blank. The ring draws, the dot lands, the wordmark rises (New York stands in for Newsreader, which the app does not bundle). It fades out once the dot has landed (920 ms) and Today's first load is over (`\.todayLoaded`), at 1.2 s at the latest, at once when there is no Today to wait for (sign-in, setup). With motion reduced: the finished mark and one 300 ms fade. No haptic.
+- **Haptics.** `.sensoryFeedback` on the view that changes, played on the tap, not on the server's answer. Sign-in's done and fail follow the server. Done plays at the app root: sign-in is gone by then.
+
+| Moment | Haptic | Where |
+| --- | --- | --- |
+| Sign-in code accepted / refused | done / fail | `DatingCRMApp` / `SignInView` |
+| The user clears the last item in Review | done | `QueueView` (`ReviewQueue.cleared`; a load that comes back empty does not count) |
+| Send, Send at, Retry, Send now, Take over, Like | press | Review items, `DraftComposer`, `HandoverBanner`, `SwipeView` |
+| Copy, Dismiss, Clear, Hold, Hand back, Pass, Undo | tap | Review items, `DraftComposer`, `HandoverBanner`, `SwipeView`, the toast's Undo |
+| A send fails as the user sends | fail | Review, `DraftComposer` |
+| A handover fires while the card is open | alert | `CardDetailView`, not on the first load |
+| A rating step, an autonomy level | tick | `RatingPicker`, `AutopilotView`, setup |
+| Rate a date 4 or 5 / 1 to 3 | hour / tap | `DateRatingSheet` |
+| A date set: the user picks Date set, or a reload of the open card shows it | hour | `CardDetailView` |
+| A pause on / off, Resume | thud / press | `AutopilotView` (Pause all and each app), `StatusStrip` |
+| Approve a paid item | thud | Review, Swipe's Super Like |
+| The strip starts to say the AI budget is reached or a connector signed out | fail | `StatusStrip`, not on the first load |
+
+Silent: the splash, scrolling, navigation, tab switches, the Pipeline's rows moving and anything autopilot does in the background. The Simulator plays no haptics, so each row is a manual check on an iPhone.
 
 ## Screens
 

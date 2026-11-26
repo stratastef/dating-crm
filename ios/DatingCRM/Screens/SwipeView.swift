@@ -22,6 +22,8 @@ struct SwipeView: View {
     /// Swiped since the last load, for "2 of 4".
     @State private var done = 0
     @State private var enlarged: Photo?
+    /// Here, not on the buttons: a swipe takes its profile off the screen at once.
+    @State private var haptic: Haptic?
 
     var body: some View {
         Group {
@@ -47,6 +49,7 @@ struct SwipeView: View {
         }
         // Again on every return to the tab: the level or layout may have changed under You.
         .task { await refresh() }
+        .haptic(haptic)
     }
 
     // MARK: Off
@@ -170,6 +173,7 @@ struct SwipeView: View {
     /// Takes the candidates off the screen now and sends the swipes when the toast is gone, unless Undo comes first.
     private func decide(_ decisions: [(candidate: SwipeCandidate, swipe: Swipe)]) {
         let ids = Set(decisions.map(\.candidate.id))
+        haptic = Haptic(decisions.contains { $0.swipe == .like } ? .press : .tap)
         candidates.removeAll { ids.contains($0.id) }
         held.formUnion(ids)
         done += decisions.count
@@ -208,6 +212,7 @@ struct SwipeView: View {
     /// The user's answer to the Super Like proposed for a candidate. A spent one is the swipe, so the candidate goes.
     private func answer(_ candidate: SwipeCandidate, approve: Bool) async {
         guard let item = candidate.paidItem else { return }
+        if approve { haptic = Haptic(.thud) }
         do {
             if approve {
                 if try await client.approve(paidItemID: item.id).status == "spent" {

@@ -9,6 +9,7 @@ struct DateRatingSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var rating: Int?
     @State private var note = ""
+    @State private var lowRatings = 0
 
     var body: some View {
         NavigationStack {
@@ -29,12 +30,17 @@ struct DateRatingSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        if let rating { onRated(rating, note) }
+                        if let rating {
+                            // A good date is the brand moment. A lower one gets no celebration and no punishment.
+                            if rating >= 4 { HourRing.play() } else { lowRatings += 1 }
+                            onRated(rating, note)
+                        }
                         dismiss()
                     }
                     .disabled(rating == nil)
                 }
             }
         }
+        .sensoryFeedback(.tap, trigger: lowRatings)
     }
 }

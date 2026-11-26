@@ -27,6 +27,7 @@ struct CardDetailView: View {
     @State private var toast: Toast?
     @State private var needsVoice = false
     @State private var position = ScrollPosition(edge: .bottom)
+    @State private var handoverFired = 0
 
     init(client: APIClient, card: Card, onSaved: @escaping (Card) -> Void) {
         self.client = client
@@ -78,6 +79,7 @@ struct CardDetailView: View {
         // On the whole card, not the Details tab: switching to Chat keeps the debounce, leaving saves at once.
         .autosave(Edits(card), saved: Edits(saved)) { await save($0) }
         .task { await load() }
+        .sensoryFeedback(.alert, trigger: handoverFired)
     }
 
     private static let headerHeight: CGFloat = 340
@@ -171,7 +173,7 @@ struct CardDetailView: View {
                 ErrorRow(text: error) { await load() }
             }
             Section {
-                Picker("Stage", selection: $card.stage) {
+                Picker("Stage", selection: stage) {
                     ForEach(Stage.allCases) { Text($0.title).tag($0) }
                 }
                 .frame(minHeight: 44)
@@ -233,6 +235,16 @@ struct CardDetailView: View {
         }
     }
 
+    /// The stage as the user picks it. Picking Date set plays the hour at once, before the save.
+    private var stage: Binding<Stage> {
+        Binding {
+            card.stage
+        } set: { picked in
+            if picked == .dateSet && card.stage != .dateSet { HourRing.play() }
+            card.stage = picked
+        }
+    }
+
     private var hasDueDate: Binding<Bool> {
         Binding(
             get: { card.dueDate != nil },
@@ -275,6 +287,11 @@ struct CardDetailView: View {
 
     /// Takes the server's copy of the card. Details edits it does not have yet stay; everything else is the server's.
     private func take(_ fresh: Card) {
+        // What happened while the card is open; the first load only shows how it already was.
+        if loaded {
+            if fresh.handover == .pending && card.handover != .pending { handoverFired += 1 }
+            if fresh.stage == .dateSet && card.stage != .dateSet { HourRing.play() }  // Full autopilot set the date
+        }
         let edits = Edits(card)
         let unsaved = edits != Edits(saved)
         saved = fresh

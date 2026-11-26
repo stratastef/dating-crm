@@ -7,6 +7,9 @@ import Foundation
     private(set) var items: [QueueItem] = []
     private(set) var loaded = false
     var error: String?
+    /// Counts the times the user's own action took out the last item: Review plays done on each. A load that comes
+    /// back empty is not one, since autopilot or another phone cleared it.
+    private(set) var cleared = 0
 
     private let client: APIClient
     private let undoWindow: Duration
@@ -31,7 +34,9 @@ import Foundation
 
     /// For an item the server no longer holds: sent, declined, taken over or handed back.
     func remove(_ item: QueueItem) {
+        let waiting = !items.isEmpty
         items.removeAll { $0.id == item.id }
+        if waiting && items.isEmpty { cleared += 1 }
     }
 
     /// Takes a draft out of Review now and dismisses it on the server after `undoWindow`, unless `undo` runs first.

@@ -1,0 +1,30 @@
+{
+  "Version": 1.0,
+  "Metadata": {
+    "Project": "Goodhour",
+    "Description": "The hour: six light taps rising from 0.3 to 0.6 over 360 ms as the ring draws, then one soft full tap at 450 ms as the dot lands."
+  },
+  "Pattern": [
+    { "Event": { "Time": 0.0, "EventType": "HapticTransient", "EventParameters": [
+      { "ParameterID": "HapticIntensity", "ParameterValue": 0.3 },
+      { "ParameterID": "HapticSharpness", "ParameterValue": 0.4 } ] } },
+    { "Event": { "Time": 0.072, "EventType": "HapticTransient", "EventParameters": [
+      { "ParameterID": "HapticIntensity", "ParameterValue": 0.36 },
+      { "ParameterID": "HapticSharpness", "ParameterValue": 0.4 } ] } },
+    { "Event": { "Time": 0.144, "EventType": "HapticTransient", "EventParameters": [
+      { "ParameterID": "HapticIntensity", "ParameterValue": 0.42 },
+      { "ParameterID": "HapticSharpness", "ParameterValue": 0.4 } ] } },
+    { "Event": { "Time": 0.216, "EventType": "HapticTransient", "EventParameters": [
+      { "ParameterID": "HapticIntensity", "ParameterValue": 0.48 },
+      { "ParameterID": "HapticSharpness", "ParameterValue": 0.4 } ] } },
+    { "Event": { "Time": 0.288, "EventType": "HapticTransient", "EventParameters": [
+      { "ParameterID": "HapticIntensity", "ParameterValue": 0.54 },
+      { "ParameterID": "HapticSharpness", "ParameterValue": 0.4 } ] } },
+    { "Event": { "Time": 0.36, "EventType": "HapticTransient", "EventParameters": [
+      { "ParameterID": "HapticIntensity", "ParameterValue": 0.6 },
+      { "ParameterID": "HapticSharpness", "ParameterValue": 0.4 } ] } },
+    { "Event": { "Time": 0.45, "EventType": "HapticTransient", "EventParameters": [
+      { "ParameterID": "HapticIntensity", "ParameterValue": 1.0 },
+      { "ParameterID": "HapticSharpness", "ParameterValue": 0.2 } ] } }
+  ]
+}
