@@ -11,6 +11,7 @@ struct SuggestedSendTime: View {
             Text("\(Image(systemName: "clock")) Best sent \(RelativeTime.around(at))\(reason)")
                 .font(.footnote)
                 .foregroundStyle(.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)  // wraps, never truncates, in the height-pressed composer
         }
     }
 }
